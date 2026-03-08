@@ -3,6 +3,8 @@
 ## Goal
 Achieve stable message/folder/category behavior that matches Gmail web behavior as observed in eM Client.
 
+> Active task tracking is centralized in `TODO.md`.
+
 ## Acceptance Criteria
 1. **Mapping parity oracle** exists and is runnable in one command.
 2. For a defined comparison window (default: recent 300 messages), mapping diffs trend to zero or known/accepted exceptions.
@@ -51,7 +53,6 @@ Achieve stable message/folder/category behavior that matches Gmail web behavior 
 - durable unread/category counters
 - search index split (mail/attachments)
 - per-account sync state + checkpoints
-- user option: "Download all messages for offline use" (deferred; not enabled by default)
 
 ## Implementation Phases
 
