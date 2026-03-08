@@ -106,9 +106,13 @@ ImapService::shutdown() {
         m_pendingAnnounce = false;
     }
 
-    // Fast app-exit path: signal cancellation and stop realtime loops without blocking UI/process exit.
-    stopIdleWatcher(false);
-    stopBackgroundWorker(false);
+    // Graceful app-exit path: stop worker threads and wait so QThread objects are
+    // not destroyed while still running.
+    stopIdleWatcher(true);
+    stopBackgroundWorker(true);
+
+    // Allow in-flight async watchers to settle before object teardown.
+    waitForActiveWatchers(2000);
 }
 
 void
