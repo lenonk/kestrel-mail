@@ -33,6 +33,10 @@ signals:
     void loginSessionStartupRequested(const QVariantMap &account, const QString &email, const QString &accessToken);
     void listFoldersRequested(const QVariantMap &account, const QString &email, const QString &accessToken,
                               QStringList *out);
+    void loadFolderStatusSnapshotRequested(const QString &accountEmail, const QString &folder,
+                                           qint64 *uidNext, qint64 *highestModSeq, qint64 *messages, bool *found);
+    void saveFolderStatusSnapshotRequested(const QString &accountEmail, const QString &folder,
+                                           qint64 uidNext, qint64 highestModSeq, qint64 messages);
     void shouldSyncFolderRequested(const QVariantMap &account, const QString &email, const QString &folder,
                                    const QString &accessToken, bool *out);
     void syncHeadersAndFlagsRequested(const QVariantMap &account, const QString &email, const QString &folder,

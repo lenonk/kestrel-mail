@@ -101,6 +101,10 @@ private:
                                const QString &folder, const QString &accessToken);
     void backgroundOnIdleLiveUpdate(const QVariantMap &account, const QString &email);
 
+    QVariantMap loadFolderStatusSnapshot(const QString &accountEmail, const QString &folder) const;
+    void saveFolderStatusSnapshot(const QString &accountEmail, const QString &folder,
+                                  qint64 uidNext, qint64 highestModSeq, qint64 messages);
+
     void registerWatcher(QFutureWatcherBase *watcher);
     void unregisterWatcher(QFutureWatcherBase *watcher);
     void waitForActiveWatchers(int timeoutMs);

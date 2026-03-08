@@ -269,6 +269,25 @@ ImapService::startBackgroundWorker() {
                 if (out) *out = backgroundListFolders(account, email, accessToken);
             }, Qt::BlockingQueuedConnection);
 
+    connect(m_backgroundWorker, &Imap::BackgroundWorker::loadFolderStatusSnapshotRequested,
+            this, [this](const QString &accountEmail, const QString &folder,
+                         qint64 *uidNext, qint64 *highestModSeq, qint64 *messages, bool *found) {
+                const auto row = loadFolderStatusSnapshot(accountEmail, folder);
+                const bool exists = !row.isEmpty();
+                if (found) *found = exists;
+                if (!exists)
+                    return;
+                if (uidNext) *uidNext = row.value("uidNext"_L1).toLongLong();
+                if (highestModSeq) *highestModSeq = row.value("highestModSeq"_L1).toLongLong();
+                if (messages) *messages = row.value("messages"_L1).toLongLong();
+            }, Qt::BlockingQueuedConnection);
+
+    connect(m_backgroundWorker, &Imap::BackgroundWorker::saveFolderStatusSnapshotRequested,
+            this, [this](const QString &accountEmail, const QString &folder,
+                         const qint64 uidNext, const qint64 highestModSeq, const qint64 messages) {
+                saveFolderStatusSnapshot(accountEmail, folder, uidNext, highestModSeq, messages);
+            }, Qt::QueuedConnection);
+
     connect(m_backgroundWorker, &Imap::BackgroundWorker::shouldSyncFolderRequested,
             this, [this](const QVariantMap &account, const QString &email, const QString &folder,
                          const QString &accessToken, bool *out) {
@@ -487,6 +506,39 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &, const Q
 void
 ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &) {
     // Scaffold hook: idle/live update coupling will be wired in a later parity pass.
+}
+
+QVariantMap
+ImapService::loadFolderStatusSnapshot(const QString &accountEmail, const QString &folder) const {
+    if (!m_store)
+        return {};
+
+    if (QThread::currentThread() == thread())
+        return m_store->folderSyncStatus(accountEmail, folder);
+
+    QVariantMap out;
+    QMetaObject::invokeMethod(const_cast<ImapService*>(this), [this, &out, accountEmail, folder]() {
+        if (m_store)
+            out = m_store->folderSyncStatus(accountEmail, folder);
+    }, Qt::BlockingQueuedConnection);
+    return out;
+}
+
+void
+ImapService::saveFolderStatusSnapshot(const QString &accountEmail, const QString &folder,
+                                      const qint64 uidNext, const qint64 highestModSeq, const qint64 messages) {
+    if (!m_store)
+        return;
+
+    auto fn = [this, accountEmail, folder, uidNext, highestModSeq, messages]() {
+        if (m_store)
+            m_store->upsertFolderSyncStatus(accountEmail, folder, uidNext, highestModSeq, messages);
+    };
+
+    if (QThread::currentThread() == thread())
+        fn();
+    else
+        QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
 
 QString

@@ -790,6 +790,20 @@ bool DataStore::init()
     }
 
     if (!q.exec(QStringLiteral(R"(
+        CREATE TABLE IF NOT EXISTS folder_sync_status (
+          account_email TEXT NOT NULL,
+          folder TEXT NOT NULL,
+          uid_next INTEGER,
+          highest_modseq INTEGER,
+          messages INTEGER,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY(account_email, folder)
+        )
+    )"))) {
+        return false;
+    }
+
+    if (!q.exec(QStringLiteral(R"(
         CREATE TABLE IF NOT EXISTS sender_image_permissions (
           domain TEXT PRIMARY KEY,
           granted_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -2120,6 +2134,58 @@ qint64 DataStore::folderMaxUid(const QString &accountEmail, const QString &folde
         if (ok && v > maxUid) maxUid = v;
     }
     return maxUid;
+}
+
+QVariantMap DataStore::folderSyncStatus(const QString &accountEmail, const QString &folder) const
+{
+    QVariantMap out;
+
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return out;
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        SELECT uid_next, highest_modseq, messages
+        FROM folder_sync_status
+        WHERE account_email=:account_email
+          AND lower(folder)=lower(:folder)
+        LIMIT 1
+    )"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"), folder.trimmed());
+    if (!q.exec() || !q.next())
+        return out;
+
+    out.insert(QStringLiteral("uidNext"), q.value(0).toLongLong());
+    out.insert(QStringLiteral("highestModSeq"), q.value(1).toLongLong());
+    out.insert(QStringLiteral("messages"), q.value(2).toLongLong());
+    return out;
+}
+
+void DataStore::upsertFolderSyncStatus(const QString &accountEmail, const QString &folder,
+                                       const qint64 uidNext, const qint64 highestModSeq, const qint64 messages)
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return;
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        INSERT INTO folder_sync_status(account_email, folder, uid_next, highest_modseq, messages, updated_at)
+        VALUES(:account_email, :folder, :uid_next, :highest_modseq, :messages, datetime('now'))
+        ON CONFLICT(account_email, folder) DO UPDATE SET
+          uid_next=excluded.uid_next,
+          highest_modseq=excluded.highest_modseq,
+          messages=excluded.messages,
+          updated_at=datetime('now')
+    )"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"), folder.trimmed());
+    q.bindValue(QStringLiteral(":uid_next"), uidNext);
+    q.bindValue(QStringLiteral(":highest_modseq"), highestModSeq);
+    q.bindValue(QStringLiteral(":messages"), messages);
+    q.exec();
 }
 
 QVariantList DataStore::fetchCandidatesForMessageKey(const QString &accountEmail,

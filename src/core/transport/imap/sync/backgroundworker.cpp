@@ -20,7 +20,7 @@ BackgroundWorker::connectAndAuth() {
 
     const auto [accountOk, accountErr, target] = SyncUtils::selectOAuthAccount(accounts);
     if (!accountOk) {
-        SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
+        SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                  m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
                                  consecutiveFailures, accountErr, 10, &m_running);
         return {false, accountErr};
@@ -31,15 +31,14 @@ BackgroundWorker::connectAndAuth() {
 
     if (accessToken.isEmpty()) {
         constexpr auto err = "Realtime sync: auth refresh failed; retrying."_L1;
-        SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
+        SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                  m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
                                  consecutiveFailures, err, 15, &m_running);
         return {false, err};
     }
 
-    const auto connectResult = m_cxn->connectAndAuth(target.host, target.port, target.email, accessToken);
-    if (!connectResult.success) {
-        SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
+    if (const auto connectResult = m_cxn->connectAndAuth(target.host, target.port, target.email, accessToken); !connectResult.success) {
+        SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                  m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
                                  consecutiveFailures, connectResult.message, 10, &m_running);
         return {false, connectResult.message};
@@ -95,7 +94,7 @@ BackgroundWorker::start() {
     if (m_running.exchange(true))
         return;
 
-    while (m_running.load()) {
+    while (m_running) {
         if (const auto [ok, err] = connectAndAuth(); !ok) {
             emit loopError(err);
             continue;
@@ -114,16 +113,31 @@ BackgroundWorker::start() {
             const auto status = fetchFolderStatus(folder);
             const auto key = folder.trimmed().toLower();
             const bool firstStatusSeen = !m_lastFolderStatus.contains(key);
-            const auto previousStatus = m_lastFolderStatus.value(key);
-            m_lastFolderStatus.insert(key, status);
 
-            const bool statusAvailable = (status.uidNext > 0 || status.highestModSeq > 0 || status.messages >= 0);
-            const bool changedByStatus = !statusAvailable || firstStatusSeen
+            FolderStatus previousStatus = m_lastFolderStatus.value(key);
+            if (firstStatusSeen) {
+                bool found = false;
+                qint64 uidNext = -1;
+                qint64 highestModSeq = -1;
+                qint64 messages = -1;
+                emit loadFolderStatusSnapshotRequested(m_activeEmail, folder, &uidNext, &highestModSeq, &messages, &found);
+                if (found) {
+                    previousStatus.uidNext = uidNext;
+                    previousStatus.highestModSeq = highestModSeq;
+                    previousStatus.messages = messages;
+                }
+            }
+            m_lastFolderStatus.insert(key, status);
+            emit saveFolderStatusSnapshotRequested(m_activeEmail, folder,
+                                                   status.uidNext, status.highestModSeq, status.messages);
+
+            const auto statusAvailable = (status.uidNext > 0 || status.highestModSeq > 0 || status.messages >= 0);
+            const auto changedByStatus = !statusAvailable || firstStatusSeen
                                       || status.uidNext != previousStatus.uidNext
                                       || (status.highestModSeq > 0 && status.highestModSeq != previousStatus.highestModSeq)
                                       || (status.messages >= 0 && status.messages != previousStatus.messages);
 
-            bool shouldSync = changedByStatus;
+            auto shouldSync = changedByStatus;
             emit shouldSyncFolderRequested(m_activeAccount, m_activeEmail, folder, m_activeAccessToken, &shouldSync);
             if (!shouldSync)
                 continue;
@@ -136,7 +150,7 @@ BackgroundWorker::start() {
 
         if (m_realtimeDegradedNotified.load()) {
             m_realtimeDegradedNotified = false;
-            SyncUtils::maybeEmitRealtime([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
+            SyncUtils::maybeEmitRealtime([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                          m_lastRealtimeStatusMs, true, "Realtime sync recovered."_L1, 0);
         }
 
