@@ -339,42 +339,65 @@ ImapService::workerRefreshAccessToken(const QVariantMap &account, const QString 
 QStringList
 ImapService::idleGetFolderUids(const QString &email, const QString &folder) {
     QStringList result;
-    QMetaObject::invokeMethod(this, [this, &result, email, folder]() {
+
+    auto readFn = [this, &result, email, folder]() {
         if (m_store)
             result = m_store->folderUids(email, folder);
-    }, Qt::BlockingQueuedConnection);
+    };
+
+    if (QThread::currentThread() == thread()) {
+        readFn();
+    } else {
+        QMetaObject::invokeMethod(this, readFn, Qt::BlockingQueuedConnection);
+    }
 
     return result;
 }
 
 void
 ImapService::idlePruneFolderToUids(const QString &email, const QString &folder, const QStringList &uids) {
-    QMetaObject::invokeMethod(this, [this, email, folder, uids]() {
+    auto fn = [this, email, folder, uids]() {
         if (m_store)
             m_store->pruneFolderToUids(email, folder, uids);
-    }, Qt::QueuedConnection);
+    };
+
+    if (QThread::currentThread() == thread())
+        fn();
+    else
+        QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
 
 void
 ImapService::idleRemoveUids(const QString &email, const QStringList &uids) {
-    QMetaObject::invokeMethod(this, [this, email, uids]() {
+    auto fn = [this, email, uids]() {
         if (m_store)
             m_store->removeAccountUidsEverywhere(email, uids);
-    }, Qt::QueuedConnection);
+    };
+
+    if (QThread::currentThread() == thread())
+        fn();
+    else
+        QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
 
 void
 ImapService::idleOnInboxChanged() {
-    QMetaObject::invokeMethod(this, [this]() {
-        syncFolder("INBOX"_L1, false);
-    }, Qt::QueuedConnection);
+    auto fn = [this]() { syncFolder("INBOX"_L1, false); };
+
+    if (QThread::currentThread() == thread())
+        fn();
+    else
+        QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
 
 void
 ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
-    QMetaObject::invokeMethod(this, [this, ok, message]() {
-        emit realtimeStatus(ok, message);
-    }, Qt::QueuedConnection);
+    auto fn = [this, ok, message]() { emit realtimeStatus(ok, message); };
+
+    if (QThread::currentThread() == thread())
+        fn();
+    else
+        QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
 
 void
@@ -393,10 +416,8 @@ ImapService::backgroundLoginSessionStartup(const QVariantMap &account, const QSt
 
     for (const QVariant &fv : folders) {
         const QVariantMap folder = fv.toMap();
-        QMetaObject::invokeMethod(this, [this, folder]() {
-            if (m_store)
-                m_store->upsertFolder(folder);
-        }, Qt::BlockingQueuedConnection);
+        if (m_store)
+            m_store->upsertFolder(folder);
     }
 
     const bool ok = !folders.isEmpty();
