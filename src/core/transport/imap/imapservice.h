@@ -80,43 +80,38 @@ private:
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
 
     void startIdleWatcher();
-    void stopIdleWatcher(bool waitForStop = true);
+    void stopIdleWatcher(bool waitForStop = true) const;
     void startBackgroundWorker();
     void stopBackgroundWorker(bool waitForStop = true) const;
-
-    QVariantList workerGetAccounts() const;
-    QString workerRefreshAccessToken(const QVariantMap &account, const QString &email);
-
-    QStringList idleGetFolderUids(const QString &email, const QString &folder);
     void idlePruneFolderToUids(const QString &email, const QString &folder, const QStringList &uids);
     void idleRemoveUids(const QString &email, const QStringList &uids);
     void idleOnInboxChanged();
-
     void workerEmitRealtimeStatus(bool ok, const QString &message);
     void backgroundOnLoopError(const QString &message);
-
     void backgroundLoginSessionStartup(const QVariantMap &account, const QString &email, const QString &accessToken);
-    QStringList backgroundListFolders(const QVariantMap &account, const QString &email, const QString &accessToken);
-    bool backgroundShouldSyncFolder(const QVariantMap &account, const QString &email,
-                                    const QString &folder, const QString &accessToken);
     void backgroundSyncHeadersAndFlags(const QVariantMap &account, const QString &email,
                                        const QString &folder, const QString &accessToken);
     void backgroundFetchBodies(const QVariantMap &account, const QString &email,
                                const QString &folder, const QString &accessToken);
-    void backgroundOnIdleLiveUpdate(const QVariantMap &account, const QString &email);
-
-    QVariantMap loadFolderStatusSnapshot(const QString &accountEmail, const QString &folder) const;
     void saveFolderStatusSnapshot(const QString &accountEmail, const QString &folder,
                                   qint64 uidNext, qint64 highestModSeq, qint64 messages);
-
     void registerWatcher(QFutureWatcherBase *watcher);
     void unregisterWatcher(QFutureWatcherBase *watcher);
     void waitForActiveWatchers(int timeoutMs);
-
     void drainPendingSync();
     void runAsync(std::function<SyncResult()> work, std::function<void(const SyncResult&)> onDone);
 
+    QString workerRefreshAccessToken(const QVariantMap &account, const QString &email);
     QString refreshAccessToken(const QVariantMap &account, const QString &email);
+    QStringList idleGetFolderUids(const QString &email, const QString &folder);
+
+    void backgroundOnIdleLiveUpdate(const QVariantMap &account, const QString &email);
+    QStringList backgroundListFolders(const QVariantMap &account, const QString &email, const QString &accessToken);
+    bool backgroundShouldSyncFolder(const QVariantMap &account, const QString &email,
+                                    const QString &folder, const QString &accessToken);
+
+    [[nodiscard]] QVariantList workerGetAccounts() const;
+    [[nodiscard]] QVariantMap loadFolderStatusSnapshot(const QString &accountEmail, const QString &folder) const;
 
     QVariantList fetchFolderHeaders(const QString &host, int port,
                                    const QString &email, const QString &accessToken,

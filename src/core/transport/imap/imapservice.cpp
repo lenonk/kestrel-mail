@@ -205,7 +205,7 @@ ImapService::startIdleWatcher() {
             this, [this]() { idleOnInboxChanged(); }, Qt::QueuedConnection);
 
     connect(m_idleWatcher, &Imap::IdleWatcher::realtimeStatus,
-            this, [this](bool ok, const QString &message) {
+            this, [this](const bool ok, const QString &message) {
                 workerEmitRealtimeStatus(ok, message);
             }, Qt::QueuedConnection);
 
@@ -222,7 +222,7 @@ ImapService::startIdleWatcher() {
 }
 
 void
-ImapService::stopIdleWatcher(const bool waitForStop) {
+ImapService::stopIdleWatcher(const bool waitForStop) const {
     if (m_syncTimer)
         m_syncTimer->stop();
 
@@ -319,7 +319,7 @@ ImapService::startBackgroundWorker() {
             }, Qt::QueuedConnection);
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::realtimeStatus,
-            this, [this](bool ok, const QString &message) {
+            this, [this](const bool ok, const QString &message) {
                 workerEmitRealtimeStatus(ok, message);
             }, Qt::QueuedConnection);
 
@@ -467,8 +467,7 @@ ImapService::backgroundListFolders(const QVariantMap &account, const QString &em
     QStringList out;
     out.reserve(folders.size());
     for (const QVariant &f : folders) {
-        const QString name = f.toMap().value("name"_L1).toString().trimmed();
-        if (!name.isEmpty())
+        if (const QString name = f.toMap().value("name"_L1).toString().trimmed(); !name.isEmpty())
             out.push_back(name);
     }
 
@@ -523,7 +522,20 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
 
 void
 ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &) {
-    // Scaffold hook: idle/live update coupling will be wired in a later parity pass.
+    auto fn = [this]() {
+        if (m_destroying)
+            return;
+
+        if (!m_idleWatcher || !m_idleWatcher->isRunning()) {
+            startIdleWatcher();
+            emit realtimeStatus(true, QStringLiteral("Idle/live watcher (re)started."));
+        }
+    };
+
+    if (QThread::currentThread() == thread())
+        fn();
+    else
+        QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
 
 QVariantMap
