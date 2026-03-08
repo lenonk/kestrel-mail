@@ -1,0 +1,3 @@
+[submodule "external/mailio"]
+	path = external/mailio
+	url = https://github.com/karastojko/mailio.git

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "gmail",
+    "displayName": "Gmail",
+    "domains": ["gmail.com", "googlemail.com"],
+    "imapHost": "imap.gmail.com",
+    "imapPort": 993,
+    "smtpHost": "smtp.gmail.com",
+    "smtpPort": 587,
+    "supportsOAuth2": true,
+    "oauthAuthUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+    "oauthTokenUrl": "https://oauth2.googleapis.com/token",
+    "oauthScopes": "https://mail.google.com/",
+    "oauthClientId": "",
+    "oauthClientSecret": "",
+    "oauthEnvClientId": "KESTREL_GOOGLE_CLIENT_ID",
+    "oauthEnvClientSecret": "KESTREL_GOOGLE_CLIENT_SECRET"
+  },
+  {
+    "id": "microsoft365",
+    "displayName": "Microsoft 365 / Outlook",
+    "domains": ["outlook.com", "hotmail.com", "live.com", "office365.com"],
+    "imapHost": "outlook.office365.com",
+    "imapPort": 993,
+    "smtpHost": "smtp.office365.com",
+    "smtpPort": 587,
+    "supportsOAuth2": true,
+    "oauthAuthUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    "oauthTokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    "oauthScopes": "offline_access IMAP.AccessAsUser.All SMTP.Send",
+    "oauthEnvClientId": "KESTREL_MS_CLIENT_ID",
+    "oauthEnvClientSecret": "KESTREL_MS_CLIENT_SECRET"
+  }
+]

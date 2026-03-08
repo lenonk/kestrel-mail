@@ -1,0 +1,203 @@
+cmake_minimum_required(VERSION 3.27)
+
+# Prefer clang toolchain by default in this project.
+if(NOT DEFINED ENV{CC})
+    set(ENV{CC} "/usr/bin/clang")
+endif()
+if(NOT DEFINED ENV{CXX})
+    set(ENV{CXX} "/usr/bin/clang++")
+endif()
+if(NOT DEFINED CMAKE_C_COMPILER)
+    set(CMAKE_C_COMPILER "/usr/bin/clang" CACHE FILEPATH "C compiler" FORCE)
+endif()
+if(NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_CXX_COMPILER "/usr/bin/clang++" CACHE FILEPATH "C++ compiler" FORCE)
+endif()
+
+project(kestrel-mail VERSION 0.1.0 LANGUAGES CXX)
+
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+    set(CMAKE_POLICY_DEFAULT_CMP0167 NEW)
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+set(QT_DEFAULT_MAJOR_VERSION 6)
+
+# Default to Release for single-config generators unless explicitly overridden.
+if (NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# Ensure release builds use aggressive optimization.
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3")
+
+find_package(ECM REQUIRED NO_MODULE)
+set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+include(KDEInstallDirs)
+include(KDECMakeSettings)
+include(KDECompilerSettings NO_POLICY_SCOPE)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick Sql Network Concurrent WebEngineQuick Widgets)
+find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n)
+find_package(KF6Kirigami REQUIRED)
+find_package(KF6KirigamiPlatform REQUIRED)
+find_package(Boost CONFIG REQUIRED)
+
+# Work around distro packaging where Kirigami QML plugin targets referenced by
+# Qt's qml import scanner are not exported as CMake targets.
+foreach(_kirigami_qml_plugin_target IN ITEMS
+    KF6Kirigamiplugin
+    KF6KirigamiPrivateplugin
+    KF6KirigamiPolyfillplugin
+    KF6::KirigamiPlatformplugin
+    KF6KirigamiDialogsplugin
+    KF6KirigamiLayoutsplugin
+    KF6KirigamiLayoutsPrivateplugin
+)
+    if(NOT TARGET ${_kirigami_qml_plugin_target})
+        add_library(${_kirigami_qml_plugin_target} INTERFACE IMPORTED)
+    endif()
+endforeach()
+
+set(MAILIO_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+set(MAILIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(MAILIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/mailio)
+if (TARGET mailio)
+    target_compile_options(mailio PRIVATE -fexceptions)
+endif()
+set_source_files_properties(src/core/mime/mailioparser.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
+
+qt_standard_project_setup()
+
+qt_add_executable(kestrel-mail
+    src/main.cpp
+    src/core/accounts/providerprofileservice.cpp
+    src/core/accounts/accountrepository.cpp
+    src/core/accounts/accountsetupcontroller.cpp
+    src/core/auth/filetokenvault.cpp
+    src/core/auth/oauthservice.cpp
+    src/core/store/datastore.cpp
+    src/core/store/messagelistmodel.cpp
+    src/core/transport/imap/imapservice.cpp
+    src/core/transport/imap/imapprotocol.cpp
+    src/core/transport/imap/parser/responseparser.cpp
+    src/core/transport/imap/connection/imapio.cpp
+    src/core/transport/imap/connection/imapcommands.cpp
+    src/core/transport/imap/connection/imapconnection.cpp
+    src/core/transport/imap/sync/syncstrategy.cpp
+    src/core/transport/imap/sync/syncutils.cpp
+    src/core/transport/imap/sync/foldersync.cpp
+    src/core/transport/imap/sync/idlewatcher.cpp
+    src/core/transport/imap/sync/backgroundworker.cpp
+    src/core/transport/imap/message/messagehydrator.cpp
+    src/core/transport/imap/message/snippetutils.cpp
+    src/core/transport/imap/message/avatarresolver.cpp
+    src/core/transport/imap/message/bodyprocessor.cpp
+    src/core/transport/imap/message/addressutils.cpp
+    src/core/mime/mailioparser.cpp
+)
+
+qt_add_resources(kestrel-mail kestrel_mail_qml
+    PREFIX "/"
+    FILES
+        qml/Main.qml
+        qml/components/AccountWizardDialog.qml
+        qml/components/PaneIconButton.qml
+        qml/components/TextToolTip.qml
+        qml/components/MailActionButton.qml
+        qml/components/FolderItemDelegate.qml
+        qml/components/FolderSectionButton.qml
+        qml/components/HeaderUtilityButton.qml
+        qml/components/IconOnlyFlatButton.qml
+        qml/components/PaneDivider.qml
+        qml/components/PaneHeaderBar.qml
+        qml/components/TitleBarIconButton.qml
+        qml/components/PopupMenu.qml
+        qml/components/AvatarBadge.qml
+        qml/components/ContactHoverPopup.qml
+        qml/components/InviteCard.qml
+        qml/components/PaneIconStrip.qml
+        qml/components/CollapsedPaneRail.qml
+        qml/components/MessageListPane.qml
+        qml/components/MessageContentPane.qml
+)
+
+set(KESTREL_PROVIDERS_KEY_FILE "" CACHE FILEPATH "Path to local key file for decrypting data/providers.json.enc")
+set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json")
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json.enc" AND NOT KESTREL_PROVIDERS_KEY_FILE STREQUAL "")
+    set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/providers.json")
+    add_custom_command(
+        OUTPUT "${KESTREL_PROVIDERS_RESOURCE}"
+        COMMAND ${CMAKE_COMMAND}
+            -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json.enc
+            -DOUTPUT=${KESTREL_PROVIDERS_RESOURCE}
+            -DKEY_FILE=${KESTREL_PROVIDERS_KEY_FILE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/decrypt_providers.cmake
+        DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json.enc
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/decrypt_providers.cmake
+        COMMENT "Decrypting providers.json for Qt resource embedding"
+        VERBATIM
+    )
+endif()
+
+set_source_files_properties(${KESTREL_PROVIDERS_RESOURCE}
+    PROPERTIES
+        QT_RESOURCE_ALIAS "providers.json"
+)
+
+qt_add_resources(kestrel-mail kestrel_mail_data
+    PREFIX "/data"
+    FILES
+        ${KESTREL_PROVIDERS_RESOURCE}
+)
+
+target_link_libraries(kestrel-mail
+    PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::Sql
+        Qt6::Network
+        Qt6::Concurrent
+        Qt6::WebEngineQuick
+        Qt6::Widgets
+        KF6::I18n
+        KF6::CoreAddons
+        KF6::Kirigami
+        KF6::KirigamiPlatform
+        mailio
+)
+
+qt_add_executable(kestrel-imap-lab
+    src/imaplab_main.cpp
+    src/tools/imaplabcontroller.cpp
+    src/core/accounts/accountrepository.cpp
+    src/core/auth/filetokenvault.cpp
+)
+
+qt_add_resources(kestrel-imap-lab kestrel_imap_lab_qml
+    PREFIX "/"
+    FILES
+        qml/ImapLab.qml
+)
+
+target_link_libraries(kestrel-imap-lab
+    PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::Network
+)
+
+install(TARGETS kestrel-mail kestrel-imap-lab ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})

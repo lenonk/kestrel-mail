@@ -1,0 +1,8 @@
+/build/
+/cmake-build*/
+/build-test/
+/tmp/
+/tools/__pycache__/
+.idea/
+*.user
+*.swp
