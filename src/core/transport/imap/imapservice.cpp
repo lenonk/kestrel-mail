@@ -498,9 +498,27 @@ ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &,
 }
 
 void
-ImapService::backgroundFetchBodies(const QVariantMap &, const QString &, const QString &,
+ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
                                    const QString &) {
-    // Scaffold hook: body scheduling/fetch queue integration will be wired in a later parity pass.
+    if (!m_store)
+        return;
+
+    bool ok = false;
+    const int configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
+    const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
+
+    QStringList candidates;
+    if (QThread::currentThread() == thread()) {
+        candidates = m_store->bodyFetchCandidates(email, folder, limit);
+    } else {
+        QMetaObject::invokeMethod(this, [this, &candidates, email, folder, limit]() {
+            if (m_store)
+                candidates = m_store->bodyFetchCandidates(email, folder, limit);
+        }, Qt::BlockingQueuedConnection);
+    }
+
+    for (const auto &uid : candidates)
+        hydrateMessageBody(email, folder, uid);
 }
 
 void

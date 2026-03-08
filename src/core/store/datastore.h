@@ -44,6 +44,8 @@ public:
     Q_INVOKABLE QVariantMap folderSyncStatus(const QString &accountEmail, const QString &folder) const;
     Q_INVOKABLE void upsertFolderSyncStatus(const QString &accountEmail, const QString &folder,
                                             qint64 uidNext, qint64 highestModSeq, qint64 messages);
+    Q_INVOKABLE QStringList bodyFetchCandidates(const QString &accountEmail, const QString &folder,
+                                                int limit = 10) const;
     Q_INVOKABLE QVariantList fetchCandidatesForMessageKey(const QString &accountEmail,
                                                            const QString &folder,
                                                            const QString &uid) const;

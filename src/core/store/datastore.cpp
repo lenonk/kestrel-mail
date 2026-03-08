@@ -2188,6 +2188,49 @@ void DataStore::upsertFolderSyncStatus(const QString &accountEmail, const QStrin
     q.exec();
 }
 
+QStringList DataStore::bodyFetchCandidates(const QString &accountEmail, const QString &folder,
+                                           const int limit) const
+{
+    QStringList out;
+
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return out;
+
+    const int boundedLimit = qBound(1, limit, 100);
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        SELECT mfm.uid
+        FROM message_folder_map mfm
+        JOIN messages m ON m.id = mfm.message_id
+        WHERE mfm.account_email=:account_email
+          AND lower(mfm.folder)=lower(:folder)
+          AND (
+              m.body_html IS NULL
+              OR trim(m.body_html) = ''
+              OR lower(m.body_html) LIKE '%ok success [throttled]%'
+              OR lower(m.body_html) LIKE '%authenticationfailed%'
+          )
+        ORDER BY datetime(m.received_at) DESC, m.id DESC
+        LIMIT :limit
+    )"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"), folder.trimmed());
+    q.bindValue(QStringLiteral(":limit"), boundedLimit);
+
+    if (!q.exec())
+        return out;
+
+    while (q.next()) {
+        const QString uid = q.value(0).toString().trimmed();
+        if (!uid.isEmpty())
+            out.push_back(uid);
+    }
+
+    return out;
+}
+
 QVariantList DataStore::fetchCandidatesForMessageKey(const QString &accountEmail,
                                                       const QString &folder,
                                                       const QString &uid) const
