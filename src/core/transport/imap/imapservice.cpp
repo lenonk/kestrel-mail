@@ -842,7 +842,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
                         m_idleWatcher->maxUidWatermark.store(minUid);
                 }
 
-                const bool reconcileDeletes = isInbox && !announce && !hadIdleHint && minUid > 0;
+                const bool reconcileDeletes = !announce && !hadIdleHint && minUid > 0;
                 // Full syncs (minUid=0): newest-first, capped by KESTREL_RECENT_FETCH_COUNT.
                 // Incremental syncs (minUid>0): fetch all new UIDs above watermark, no backfill.
                 const int budget = (minUid == 0) ? Imap::SyncUtils::recentFetchCount() : 0;

@@ -1007,8 +1007,8 @@ FolderSync::execute(SyncContext &ctx) {
     }
 
     // Delete reconciliation: compare remote UID set to local and purge deleted UIDs.
-    // Runs only when explicitly requested (non-announce incremental INBOX syncs).
-    if (ctx.reconcileDeletes && ctx.isInbox() && ctx.getFolderUids && ctx.removeUids) {
+    // Runs only when explicitly requested (non-announce incremental folder syncs).
+    if (ctx.reconcileDeletes && ctx.getFolderUids && ctx.removeUids) {
         const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
         const QStringList remoteUids = parseUidSearchAll(allResp);
 
@@ -1023,7 +1023,11 @@ FolderSync::execute(SyncContext &ctx) {
     // to pick up \Seen changes from other clients (e.g. phone or webmail).
     // We only mark messages read — never unread — so this never overrides local state.
     if (ctx.minUidExclusive > 0 && ctx.onFlagsReconciled) {
-        const qint64 windowStart = qMax(qint64(1), ctx.minUidExclusive - 499);
+        bool envOk = false;
+        const int configuredWindow = qEnvironmentVariableIntValue("KESTREL_FLAG_RECON_WINDOW", &envOk);
+        const qint64 reconWindow = envOk && configuredWindow > 0 ? configuredWindow : 2000;
+        const qint64 windowStart = qMax(qint64(1), ctx.minUidExclusive - reconWindow + 1);
+
         const QString flagResp = ctx.cxn->execute(
             QStringLiteral("UID SEARCH UID %1:%2 SEEN")
                 .arg(windowStart).arg(ctx.minUidExclusive));
