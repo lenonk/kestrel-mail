@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include <QObject>
+#include <QHash>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -57,8 +58,17 @@ private:
     QString m_activeEmail;
     QString m_activeAccessToken;
 
+    struct FolderStatus {
+        qint64 uidNext = -1;
+        qint64 highestModSeq = -1;
+        qint64 messages = -1;
+    };
+
     void doBootstrap();
     std::pair<bool, QString> connectAndAuth();
+    FolderStatus fetchFolderStatus(const QString &folder) const;
+
+    QHash<QString, FolderStatus> m_lastFolderStatus;
 };
 
 } // namespace Imap

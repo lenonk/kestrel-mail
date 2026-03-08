@@ -3,6 +3,8 @@
 #include "syncutils.h"
 #include "src/core/transport/imap/connection/imapconnection.h"
 
+#include <QRegularExpression>
+
 using namespace Qt::Literals::StringLiterals;
 
 namespace Imap {
@@ -51,6 +53,37 @@ BackgroundWorker::connectAndAuth() {
     return {true, {}};
 }
 
+BackgroundWorker::FolderStatus
+BackgroundWorker::fetchFolderStatus(const QString &folder) const {
+    FolderStatus out;
+
+    if (!m_cxn || !m_cxn->isConnected())
+        return out;
+
+    QString mailbox = folder;
+    mailbox.replace("\\"_L1, "\\\\"_L1);
+    mailbox.replace("\""_L1, "\\\""_L1);
+
+    const auto resp = m_cxn->execute(
+        QStringLiteral("STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)").arg(mailbox));
+
+    static const QRegularExpression uidNextRe(QStringLiteral("\\bUIDNEXT\\s+(\\d+)"),
+                                               QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression modSeqRe(QStringLiteral("\\bHIGHESTMODSEQ\\s+(\\d+)"),
+                                              QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression messagesRe(QStringLiteral("\\bMESSAGES\\s+(\\d+)"),
+                                                QRegularExpression::CaseInsensitiveOption);
+
+    if (const auto m = uidNextRe.match(resp); m.hasMatch())
+        out.uidNext = m.captured(1).toLongLong();
+    if (const auto m = modSeqRe.match(resp); m.hasMatch())
+        out.highestModSeq = m.captured(1).toLongLong();
+    if (const auto m = messagesRe.match(resp); m.hasMatch())
+        out.messages = m.captured(1).toLongLong();
+
+    return out;
+}
+
 void
 BackgroundWorker::doBootstrap() {
     emit loginSessionStartupRequested(m_activeAccount, m_activeEmail, m_activeAccessToken);
@@ -78,7 +111,19 @@ BackgroundWorker::start() {
             if (!m_running.load())
                 break;
 
-            bool shouldSync = true;
+            const auto status = fetchFolderStatus(folder);
+            const auto key = folder.trimmed().toLower();
+            const bool firstStatusSeen = !m_lastFolderStatus.contains(key);
+            const auto previousStatus = m_lastFolderStatus.value(key);
+            m_lastFolderStatus.insert(key, status);
+
+            const bool statusAvailable = (status.uidNext > 0 || status.highestModSeq > 0 || status.messages >= 0);
+            const bool changedByStatus = !statusAvailable || firstStatusSeen
+                                      || status.uidNext != previousStatus.uidNext
+                                      || (status.highestModSeq > 0 && status.highestModSeq != previousStatus.highestModSeq)
+                                      || (status.messages >= 0 && status.messages != previousStatus.messages);
+
+            bool shouldSync = changedByStatus;
             emit shouldSyncFolderRequested(m_activeAccount, m_activeEmail, folder, m_activeAccessToken, &shouldSync);
             if (!shouldSync)
                 continue;

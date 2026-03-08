@@ -272,7 +272,9 @@ ImapService::startBackgroundWorker() {
     connect(m_backgroundWorker, &Imap::BackgroundWorker::shouldSyncFolderRequested,
             this, [this](const QVariantMap &account, const QString &email, const QString &folder,
                          const QString &accessToken, bool *out) {
-                if (out) *out = backgroundShouldSyncFolder(account, email, folder, accessToken);
+                if (!out)
+                    return;
+                *out = (*out) && backgroundShouldSyncFolder(account, email, folder, accessToken);
             }, Qt::BlockingQueuedConnection);
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::syncHeadersAndFlagsRequested,
@@ -457,7 +459,14 @@ ImapService::backgroundListFolders(const QVariantMap &account, const QString &em
 bool
 ImapService::backgroundShouldSyncFolder(const QVariantMap &, const QString &, const QString &folder,
                                         const QString &) {
-    Q_UNUSED(folder);
+    const auto name = folder.trimmed();
+    if (name.isEmpty())
+        return false;
+
+    // Skip synthetic/container folders that are not message-bearing.
+    if (name.startsWith('[') && name.endsWith(']'))
+        return false;
+
     return true;
 }
 
