@@ -1620,50 +1620,9 @@ QVariantList DataStore::folders() const
 
 QStringList DataStore::inboxCategoryTabs() const
 {
-    QStringList tabs;
-    tabs << QStringLiteral("Primary");
-
-    auto database = db();
-    if (!database.isValid() || !database.isOpen()) {
-        return tabs;
-    }
-
-    auto hasCategoryEvidence = [&](const QString &needle) -> bool {
-        QSqlQuery q(database);
-        q.prepare(QStringLiteral(R"(
-            SELECT 1
-            FROM message_labels ml
-            JOIN message_folder_map mfm ON mfm.account_email = ml.account_email AND mfm.message_id = ml.message_id
-            WHERE lower(ml.label) LIKE :needle
-              AND (lower(mfm.folder) = 'inbox' OR lower(mfm.folder) LIKE '%/inbox')
-            LIMIT 1
-        )"));
-        q.bindValue(QStringLiteral(":needle"), QStringLiteral("%%") + needle + QStringLiteral("%%"));
-        return q.exec() && q.next();
-    };
-
-    if (hasCategoryEvidence(QStringLiteral("/categories/promotion")) || hasCategoryEvidence(QStringLiteral("/categories/promotions"))) {
-        tabs << QStringLiteral("Promotions");
-    }
-    if (hasCategoryEvidence(QStringLiteral("/categories/social"))) {
-        tabs << QStringLiteral("Social");
-    }
-    // Purchases and Updates explicitly hidden per user preference
-    // if (hasCategoryEvidence(QStringLiteral("/categories/purchase")) || hasCategoryEvidence(QStringLiteral("/categories/purchases"))) {
-    //     tabs << QStringLiteral("Purchases");
-    // }
-    // if (hasCategoryEvidence(QStringLiteral("/categories/update")) || hasCategoryEvidence(QStringLiteral("/categories/updates"))) {
-    //     tabs << QStringLiteral("Updates");
-    // }
-    if (hasCategoryEvidence(QStringLiteral("/categories/forum")) || hasCategoryEvidence(QStringLiteral("/categories/forums"))) {
-        tabs << QStringLiteral("Forums");
-    }
-
-    if (tabs.isEmpty()) {
-        tabs << QStringLiteral("Primary");
-    }
-
-    return tabs;
+    // Product policy for now: hard-limit visible Gmail category tabs to these three,
+    // regardless of evidence in labels/message presence.
+    return { QStringLiteral("Primary"), QStringLiteral("Promotions"), QStringLiteral("Social") };
 }
 
 QVariantList DataStore::tagItems() const

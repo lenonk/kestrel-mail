@@ -135,7 +135,7 @@ Kirigami.ApplicationWindow {
     ]
 
     readonly property var defaultAccountFolderItems: [
-        { key: "account:inbox", name: i18n("Inbox"), icon: "mail-folder-inbox", categories: [i18n("Primary"), i18n("Promotions"), i18n("Social"), i18n("Purchases"), i18n("Updates"), i18n("Forums")] },
+        { key: "account:inbox", name: i18n("Inbox"), icon: "mail-folder-inbox", categories: [i18n("Primary"), i18n("Promotions"), i18n("Social")] },
         { key: "account:sent", name: i18n("Sent"), icon: "mail-folder-sent", categories: [] },
         { key: "account:trash", name: i18n("Trash"), icon: "user-trash", categories: [] },
         { key: "account:drafts", name: i18n("Drafts"), icon: "document-edit", categories: [] },
@@ -266,9 +266,6 @@ Kirigami.ApplicationWindow {
                     if (key === "primary") cats.push(i18n("Primary"))
                     else if (key === "promotions") cats.push(i18n("Promotions"))
                     else if (key === "social") cats.push(i18n("Social"))
-                    else if (key === "purchases") cats.push(i18n("Purchases"))
-                    else if (key === "updates") cats.push(i18n("Updates"))
-                    else if (key === "forums") cats.push(i18n("Forums"))
                 }
                 if (cats.length === 0) cats.push(i18n("Primary"))
                 ordered[j].categories = cats
