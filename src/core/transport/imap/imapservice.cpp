@@ -965,23 +965,41 @@ bodyAlreadyFetched(const DataStore *store, const QString& accountEmail, const QS
 
 void
 ImapService::hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    if (m_destroying || !m_accounts || !m_store || accountEmail.trimmed().isEmpty() || uid.trimmed().isEmpty())
+    const auto emailNorm = accountEmail.trimmed();
+    const auto folderNorm = folderName.trimmed();
+    const auto uidNorm = uid.trimmed();
+
+    if (m_destroying || !m_accounts || !m_store || emailNorm.isEmpty() || uidNorm.isEmpty())
         return;
 
-    if (bodyAlreadyFetched(m_store, accountEmail, folderName, uid)) {
+    const QString inFlightKey = (emailNorm + "|"_L1 + folderNorm.toLower() + "|"_L1 + uidNorm);
+    {
+        QMutexLocker locker(&m_inFlightBodyHydrationsMutex);
+        if (m_inFlightBodyHydrations.contains(inFlightKey))
+            return;
+        m_inFlightBodyHydrations.insert(inFlightKey);
+    }
+
+    if (bodyAlreadyFetched(m_store, emailNorm, folderNorm, uidNorm)) {
+        QMutexLocker locker(&m_inFlightBodyHydrationsMutex);
+        m_inFlightBodyHydrations.remove(inFlightKey);
         return;
     }
 
     const auto accountList = m_accounts->accounts();
     QVariantMap account;
     for (const auto &a : accountList) {
-        if (account = a.toMap(); account.value("email"_L1).toString() == accountEmail) {
+        if (account = a.toMap(); account.value("email"_L1).toString() == emailNorm) {
             break;
         }
     }
 
     if (account.isEmpty()) {
-        qWarning().noquote() << "[hydrate] no matching account for" << accountEmail;
+        {
+            QMutexLocker locker(&m_inFlightBodyHydrationsMutex);
+            m_inFlightBodyHydrations.remove(inFlightKey);
+        }
+        qWarning().noquote() << "[hydrate] no matching account for" << emailNorm;
         emit hydrateStatus(false, "Message body fetch failed: account not found.");
         return;
     }
@@ -989,10 +1007,15 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
     auto *watcher = new QFutureWatcher<QString>(this);
     registerWatcher(watcher);
 
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, accountEmail, folderName, uid]() {
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, emailNorm, folderNorm, uidNorm, inFlightKey]() {
         const auto bodyHtml = watcher->result().trimmed();
         unregisterWatcher(watcher);
         watcher->deleteLater();
+
+        {
+            QMutexLocker locker(&m_inFlightBodyHydrationsMutex);
+            m_inFlightBodyHydrations.remove(inFlightKey);
+        }
 
         if (m_destroying)
             return;
@@ -1002,10 +1025,10 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
             return;
         }
 
-        m_store->updateBodyForKey(accountEmail, folderName, uid, bodyHtml);
+        m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, bodyHtml);
     });
 
-    watcher->setFuture(QtConcurrent::run([this, account, folderName, uid]() -> QString {
+    watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm]() -> QString {
         if (m_destroying)
             return {};
 
@@ -1032,11 +1055,11 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
 
         Imap::MessageHydrator::Request r;
         r.host = host; r.port = port; r.email = email; r.accessToken = accessToken;
-        r.folderName = folderName; r.uid = uid;
+        r.folderName = folderNorm; r.uid = uidNorm;
 
         QVariantList mappedCandidates;
-        QMetaObject::invokeMethod(this, [this, &mappedCandidates, email, folderName, uid]() {
-                if (m_store) mappedCandidates = m_store->fetchCandidatesForMessageKey(email, folderName, uid);
+        QMetaObject::invokeMethod(this, [this, &mappedCandidates, email, folderNorm, uidNorm]() {
+                if (m_store) mappedCandidates = m_store->fetchCandidatesForMessageKey(email, folderNorm, uidNorm);
             },
         Qt::BlockingQueuedConnection);
 

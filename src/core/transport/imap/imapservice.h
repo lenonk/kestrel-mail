@@ -5,6 +5,7 @@
 #include <QFuture>
 #include <QSet>
 #include <QVariantList>
+#include <QHash>
 
 #include "sync/idlewatcher.h"
 #include "sync/backgroundworker.h"
@@ -71,6 +72,9 @@ private:
 
     QSet<QFutureWatcherBase*> m_activeWatchers;
     QMutex                    m_activeWatchersMutex;
+
+    QSet<QString>             m_inFlightBodyHydrations;
+    QMutex                    m_inFlightBodyHydrationsMutex;
 
     struct AccountInfo { QString email, host, accessToken; int port = 0; };
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
