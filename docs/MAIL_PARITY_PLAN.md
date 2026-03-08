@@ -51,6 +51,7 @@ Achieve stable message/folder/category behavior that matches Gmail web behavior 
 - durable unread/category counters
 - search index split (mail/attachments)
 - per-account sync state + checkpoints
+- user option: "Download all messages for offline use" (deferred; not enabled by default)
 
 ## Implementation Phases
 

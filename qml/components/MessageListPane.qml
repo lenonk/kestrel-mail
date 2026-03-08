@@ -90,6 +90,53 @@ Rectangle {
             clip: true
             spacing: 0
 
+            property real preservedContentY: 0
+            property bool restorePending: false
+
+            function queueRestoreScroll() {
+                if (!restorePending)
+                    return
+                Qt.callLater(function() {
+                    const maxY = Math.max(0, groupedMessageList.contentHeight - groupedMessageList.height)
+                    groupedMessageList.contentY = Math.max(0, Math.min(maxY, groupedMessageList.preservedContentY))
+                    groupedMessageList.restorePending = false
+                })
+            }
+
+            Connections {
+                target: root.appRoot.messageListModelObj
+                ignoreUnknownSignals: true
+
+                function onModelAboutToBeReset() {
+                    groupedMessageList.preservedContentY = groupedMessageList.contentY
+                    groupedMessageList.restorePending = true
+                }
+
+                function onModelReset() {
+                    groupedMessageList.queueRestoreScroll()
+                }
+
+                function onRowsAboutToBeInserted() {
+                    groupedMessageList.preservedContentY = groupedMessageList.contentY
+                    groupedMessageList.restorePending = true
+                }
+
+                function onRowsAboutToBeRemoved() {
+                    groupedMessageList.preservedContentY = groupedMessageList.contentY
+                    groupedMessageList.restorePending = true
+                }
+
+                function onRowsInserted() {
+                    groupedMessageList.queueRestoreScroll()
+                }
+
+                function onRowsRemoved() {
+                    groupedMessageList.queueRestoreScroll()
+                }
+            }
+
+            onContentHeightChanged: queueRestoreScroll()
+
             Rectangle {
                 anchors.fill: parent
                 z: -1
