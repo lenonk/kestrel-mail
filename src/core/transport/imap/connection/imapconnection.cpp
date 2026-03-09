@@ -272,7 +272,9 @@ Connection::fetchMimePartWithProgress(const QString &uid,
 
         if (haveLiteral && literalLen > 0 && onProgress) {
             const int percent = qBound(0, static_cast<int>((literalRead * 100) / literalLen), 100);
-            if (percent == 100 || lastPercent < 0 || percent - lastPercent >= step) {
+            const bool crossedStep = (lastPercent < 0) || (percent - lastPercent >= step);
+            const bool reachedEnd = (percent == 100) && (lastPercent < 100);
+            if (percent > lastPercent && (crossedStep || reachedEnd)) {
                 lastPercent = percent;
                 onProgress(percent, literalRead);
             }
