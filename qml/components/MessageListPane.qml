@@ -533,14 +533,28 @@ Rectangle {
                                     }
                                 }
 
-                                QQC2.Label {
-                                    text: (subject || i18n("(No subject)"))
-                                    elide: Text.ElideRight
-                                    wrapMode: Text.NoWrap
-                                    font.bold: !!unread
-                                    font.pixelSize: 13
-                                    color: Kirigami.Theme.textColor
+                                RowLayout {
                                     Layout.fillWidth: true
+                                    spacing: 6
+
+                                    QQC2.Label {
+                                        text: (subject || i18n("(No subject)"))
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        font.bold: !!unread
+                                        font.pixelSize: 13
+                                        color: Kirigami.Theme.textColor
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Kirigami.Icon {
+                                        source: "mail-attachment"
+                                        Layout.preferredWidth: 14
+                                        Layout.preferredHeight: 14
+                                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                        opacity: 0.75
+                                        visible: !!hasAttachments
+                                    }
                                 }
 
                                 QQC2.Label { text: snippet || ""; opacity: 0.72; font.pixelSize: 12; color: Kirigami.Theme.textColor; visible: text.length > 0; elide: Text.ElideRight; wrapMode: Text.NoWrap; Layout.fillWidth: true }

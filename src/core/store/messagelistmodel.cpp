@@ -107,6 +107,7 @@ QVariant MessageListModel::data(const QModelIndex &index, int role) const
     case AvatarUrlRole: return row.message.value(QStringLiteral("avatarUrl"));
     case AvatarSourceRole: return row.message.value(QStringLiteral("avatarSource"));
     case UnreadRole: return row.message.value(QStringLiteral("unread"));
+    case HasAttachmentsRole: return row.message.value(QStringLiteral("hasAttachments"));
     default: return {};
     }
 }
@@ -132,7 +133,8 @@ QHash<int, QByteArray> MessageListModel::roleNames() const
         { AvatarDomainRole, QByteArrayLiteral("avatarDomain") },
         { AvatarUrlRole, QByteArrayLiteral("avatarUrl") },
         { AvatarSourceRole, QByteArrayLiteral("avatarSource") },
-        { UnreadRole, QByteArrayLiteral("unread") }
+        { UnreadRole, QByteArrayLiteral("unread") },
+        { HasAttachmentsRole, QByteArrayLiteral("hasAttachments") }
     };
 }
 

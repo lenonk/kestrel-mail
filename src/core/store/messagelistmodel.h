@@ -47,7 +47,8 @@ public:
         AvatarDomainRole,
         AvatarUrlRole,
         AvatarSourceRole,
-        UnreadRole
+        UnreadRole,
+        HasAttachmentsRole
     };
 
     explicit MessageListModel(QObject *parent = nullptr);

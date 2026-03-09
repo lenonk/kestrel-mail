@@ -2518,11 +2518,51 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         return out;
     };
 
+    auto annotateHasAttachments = [&](QVariantList &list) {
+        if (!database.isValid() || !database.isOpen() || list.isEmpty())
+            return;
+
+        QStringList messageIds;
+        messageIds.reserve(list.size());
+        for (const QVariant &v : list) {
+            const QString mid = v.toMap().value(QStringLiteral("messageId")).toString();
+            if (!mid.isEmpty())
+                messageIds.push_back(mid);
+        }
+        if (messageIds.isEmpty())
+            return;
+
+        QStringList placeholders;
+        placeholders.reserve(messageIds.size());
+        for (int i = 0; i < messageIds.size(); ++i)
+            placeholders << QStringLiteral(":m%1").arg(i);
+
+        QSet<QString> withAttachments;
+        QSqlQuery q(database);
+        q.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_attachments WHERE message_id IN (%1)").arg(placeholders.join(',')));
+        for (int i = 0; i < messageIds.size(); ++i)
+            q.bindValue(QStringLiteral(":m%1").arg(i), messageIds.at(i));
+
+        if (q.exec()) {
+            while (q.next())
+                withAttachments.insert(q.value(0).toString());
+        }
+
+        for (int i = 0; i < list.size(); ++i) {
+            QVariantMap row = list.at(i).toMap();
+            const QString mid = row.value(QStringLiteral("messageId")).toString();
+            row.insert(QStringLiteral("hasAttachments"), withAttachments.contains(mid));
+            list[i] = row;
+        }
+    };
+
     auto pageRows = [&](const QVariantList &in) {
         const int safeOffset = qMax(0, offset);
         if (limit <= 0) {
             if (hasMore) *hasMore = false;
-            return in;
+            QVariantList out = in;
+            annotateHasAttachments(out);
+            return out;
         }
         const int total = in.size();
         if (safeOffset >= total) {
@@ -2534,6 +2574,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         out.reserve(end - safeOffset);
         for (int i = safeOffset; i < end; ++i) out.push_back(in.at(i));
         if (hasMore) *hasMore = (end < total);
+        annotateHasAttachments(out);
         return out;
     };
 
@@ -2703,6 +2744,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             if (hasMore) *hasMore = true;
             filtered = filtered.mid(0, limit);
         }
+        annotateHasAttachments(filtered);
         return filtered;
     }
 
