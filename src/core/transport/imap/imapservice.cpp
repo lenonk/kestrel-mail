@@ -57,6 +57,7 @@ struct PooledConnSlot {
 QMutex g_poolMutex;
 QWaitCondition g_poolWait;
 QVector<PooledConnSlot> g_poolSlots;
+std::atomic_bool g_poolPrewarmed{false};
 constexpr int kOperationalPoolMax = 3; // Separate from IDLE connection.
 }
 
@@ -114,14 +115,13 @@ bool ImapService::getConnection(const QString &host, const int port,
     auto &slot = g_poolSlots[slotIndex];
     auto &cxn = *slot.conn;
 
-    const bool needsConnect = !cxn.isConnected()
+    const auto needsConnect = !cxn.isConnected()
                            || slot.host.compare(host, Qt::CaseInsensitive) != 0
                            || slot.port != port
                            || slot.email.compare(email, Qt::CaseInsensitive) != 0;
 
     if (needsConnect) {
-        const auto res = cxn.connectAndAuth(host, port, email, accessToken);
-        if (!res.success) {
+        if (const auto res = cxn.connectAndAuth(host, port, email, accessToken); !res.success) {
             release();
             return false;
         }
@@ -131,8 +131,7 @@ bool ImapService::getConnection(const QString &host, const int port,
     }
 
     if (!folderName.isEmpty() && cxn.selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-        const auto [ok, _] = cxn.select(folderName);
-        if (!ok) {
+        if (const auto [ok, _] = cxn.select(folderName); !ok) {
             release();
             return false;
         }
@@ -787,6 +786,19 @@ ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const
 
 void
 ImapService::initialize() {
+    if (!g_poolPrewarmed.exchange(true)) {
+        runBackgroundTask([]() {
+            QMutexLocker lock(&g_poolMutex);
+            while (g_poolSlots.size() < kOperationalPoolMax) {
+                PooledConnSlot s;
+                s.conn = std::make_unique<Imap::Connection>();
+                s.busy = false;
+                g_poolSlots.push_back(std::move(s));
+            }
+            g_poolWait.wakeAll();
+        });
+    }
+
     startBackgroundWorker();
     startIdleWatcher();
 }
