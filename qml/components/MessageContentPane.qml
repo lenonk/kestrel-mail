@@ -392,6 +392,20 @@ Rectangle {
         return Qt.darker(c, 2.0).toString();
     }
 
+    function fileUrlFromLocalPath(localPath) {
+        let p = (localPath || "").toString();
+        if (!p.length)
+            return "";
+        p = p.replace(/\\/g, "/");
+        const parts = p.split("/");
+        for (let i = 0; i < parts.length; ++i) {
+            if (!parts[i].length)
+                continue;
+            parts[i] = encodeURIComponent(parts[i]);
+        }
+        return "file://" + parts.join("/");
+    }
+
     function inlineImageAttachmentsHtml() {
         // TODO: gate inline rendering behind a user setting.
         if (!root.attachmentItems || root.attachmentItems.length === 0)
@@ -411,7 +425,7 @@ Rectangle {
             if (!localPath || !localPath.length)
                 continue;
 
-            const src = "file://" + encodeURI(localPath);
+            const src = fileUrlFromLocalPath(localPath);
             const alt = (name || i18n("Image attachment")).replace(/"/g, "&quot;");
             images.push("<img src=\"" + src + "\" alt=\"" + alt + "\" style=\"display:block;max-width:100%;height:auto;margin:8px auto 0 auto;\" />");
         }
