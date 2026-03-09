@@ -458,20 +458,29 @@ ImapService::backgroundListFolders(const QVariantMap &account, const QString &em
     const int port = account.value("imapPort"_L1).toInt();
     const QVariantList folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &status);
 
+    QSet<QString> parentContainers;
+    for (const QVariant &f : folders) {
+        const QString name = f.toMap().value("name"_L1).toString().trimmed();
+        const int slash = name.indexOf('/');
+        if (slash > 0)
+            parentContainers.insert(name.left(slash).toLower());
+    }
+
     QStringList out;
     out.reserve(folders.size());
     for (const QVariant &f : folders) {
         const auto row = f.toMap();
         const QString name = row.value("name"_L1).toString().trimmed();
         const QString flags = row.value("flags"_L1).toString().toLower();
+        const QString lowerName = name.toLower();
 
         const bool isNoSelect = flags.contains("\\noselect"_L1);
         const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
         const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
-                                  || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0
-                                  || name.compare("Mailspring"_L1, Qt::CaseInsensitive) == 0;
+                                  || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0;
+        const bool isParentContainer = parentContainers.contains(lowerName);
 
-        if (name.isEmpty() || isNoSelect || isCategory || isContainerRoot)
+        if (name.isEmpty() || isNoSelect || isCategory || isContainerRoot || isParentContainer)
             continue;
 
         out.push_back(name);
@@ -489,8 +498,6 @@ ImapService::backgroundShouldSyncFolder(const QVariantMap &, const QString &, co
 
     // Skip synthetic/container folders that are not message-bearing.
     if (name.startsWith('[') && name.endsWith(']'))
-        return false;
-    if (name.compare("Mailspring"_L1, Qt::CaseInsensitive) == 0)
         return false;
 
     return true;
@@ -1335,21 +1342,31 @@ ImapService::syncAll(bool announce) {
                 QStringList targets = { "INBOX"_L1 };
                 QSet<QString> seen  = { "inbox"_L1 };
 
+                QSet<QString> parentContainers;
+                for (const auto &fv : folders) {
+                    const auto name = fv.toMap().value("name"_L1).toString().trimmed();
+                    const int slash = name.indexOf('/');
+                    if (slash > 0)
+                        parentContainers.insert(name.left(slash).toLower());
+                }
+
                 for (const auto &fv : folders) {
                     const auto row = fv.toMap();
                     const auto name = row.value("name"_L1).toString().trimmed();
                     const auto flags = row.value("flags"_L1).toString().toLower();
+                    const auto lowerName = name.toLower();
 
                     const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
                     const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
                                               || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0;
                     const bool isNoSelect = flags.contains("\\noselect"_L1);
+                    const bool isParentContainer = parentContainers.contains(lowerName);
 
-                    if (name.isEmpty() || isCategory || isContainerRoot || isNoSelect)
+                    if (name.isEmpty() || isCategory || isContainerRoot || isNoSelect || isParentContainer)
                         continue;
 
-                    if (const QString key = name.toLower(); !seen.contains(key)) {
-                        seen.insert(key); targets << name;
+                    if (!seen.contains(lowerName)) {
+                        seen.insert(lowerName); targets << name;
                     }
                 }
 
