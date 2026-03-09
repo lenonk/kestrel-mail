@@ -244,10 +244,13 @@ Item {
                 }
             }
 
+            Item {
+                Layout.fillWidth: true
+            }
+
             ColumnLayout {
                 spacing: 8
-                Layout.alignment: Qt.AlignTop
-                Layout.leftMargin: 6
+                Layout.alignment: Qt.AlignTop | Qt.AlignRight
 
                 QQC2.Button {
                     id: openBtn
