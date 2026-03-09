@@ -325,34 +325,21 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
 
 static QByteArray
 fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid, const QString &partId, const QString &encoding,
-                        const std::function<void(int, qint64)> &onProgress = {}) {
-    const QByteArray raw = cxn.executeRaw("UID FETCH %1 (BODY.PEEK[%2])"_L1.arg(uid, partId));
+                        const std::function<void(int, qint64)> &onProgress) {
+    QString status;
+    QByteArray literal = cxn.fetchMimePartWithProgress(uid, partId, 5, onProgress, &status);
+    if (literal.isEmpty())
+        return {};
 
-    // Extract the IMAP literal: find {N}\r\n and return the N bytes following it.
-    for (int i = 0; i < raw.size(); ++i) {
-        if (raw[i] != '{') continue;
-        int j = i + 1;
-        while (j < raw.size() && raw[j] >= '0' && raw[j] <= '9') ++j;
-        if (j <= i + 1 || j + 2 >= raw.size() || raw[j] != '}' || raw[j+1] != '\r' || raw[j+2] != '\n')
-            continue;
-        bool ok = false;
-        int len = raw.mid(i + 1, j - i - 1).toInt(&ok);
-        if (!ok || len <= 0) continue;
-        const int start = j + 3;
-        if (start >= raw.size()) break;
-        QByteArray literal = raw.mid(start, qMin(len, raw.size() - start));
-
-        const QString enc = encoding.trimmed().toLower();
-        if (enc == "base64"_L1) {
-            literal.replace("\r", "");
-            literal.replace("\n", "");
-            return QByteArray::fromBase64(literal);
-        }
-        if (enc == "quoted-printable"_L1)
-            return Imap::BodyProcessor::decodeQuotedPrintable(literal);
-        return literal;
+    const QString enc = encoding.trimmed().toLower();
+    if (enc == "base64"_L1) {
+        literal.replace("\r", "");
+        literal.replace("\n", "");
+        return QByteArray::fromBase64(literal);
     }
-    return {};
+    if (enc == "quoted-printable"_L1)
+        return Imap::BodyProcessor::decodeQuotedPrintable(literal);
+    return literal;
 }
 
 void

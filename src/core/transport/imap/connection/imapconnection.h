@@ -65,6 +65,13 @@ public:
     // where the literal payload may contain non-UTF-8 binary data.
     [[nodiscard]] QByteArray executeRaw(const QString &command);
 
+    // Fetch a MIME part and report progress while reading the IMAP literal payload.
+    [[nodiscard]] QByteArray fetchMimePartWithProgress(const QString &uid,
+                                                       const QString &partSpecifier,
+                                                       int progressStepPercent,
+                                                       const std::function<void(int, qint64)> &onProgress,
+                                                       QString *statusOut = nullptr);
+
     // List server folders. Uses XLIST for Gmail, LIST otherwise.
     // Returns QVariantList of rows: { name, flags, specialUse }.
     [[nodiscard]] QVariantList list();
