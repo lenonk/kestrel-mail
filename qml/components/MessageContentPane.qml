@@ -1012,6 +1012,21 @@ Rectangle {
             color: "transparent"
 
             property real flickVelocityY: 0
+            property string lastLoadedHtmlKey: ""
+
+            function loadHtmlIfChanged(reason) {
+                if (!root.renderedHtml.length)
+                    return
+
+                const key = (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml
+                if (key === lastLoadedHtmlKey)
+                    return
+
+                lastLoadedHtmlKey = key
+                if (root.perfLogEnabled)
+                    console.log("[perf-content] loadHtml reason=" + reason + " chars=" + root.renderedHtml.length)
+                htmlView.loadHtml(root.renderedHtml, "http://kestrel.local/")
+            }
 
             function scrollHtmlBy(deltaY) {
                 if (!root.hasUsableBodyHtml) return
@@ -1058,23 +1073,27 @@ Rectangle {
                         Qt.openUrlExternally(url)
                 }
 
-                Component.onCompleted: {
-                    if (root.renderedHtml.length) {
-                        htmlView.loadHtml(root.renderedHtml, "http://kestrel.local/")
-                    }
+                onLoadingChanged: function(req) {
+                    if (!root.perfLogEnabled)
+                        return
+                    const st = req.status
+                    if (st === WebEngineLoadingInfo.LoadStartedStatus)
+                        console.log("[perf-content] webview load started")
+                    else if (st === WebEngineLoadingInfo.LoadSucceededStatus)
+                        console.log("[perf-content] webview load succeeded")
+                    else if (st === WebEngineLoadingInfo.LoadFailedStatus)
+                        console.log("[perf-content] webview load failed code=" + req.errorCode)
                 }
+
+                Component.onCompleted: htmlContainer.loadHtmlIfChanged("component")
 
                 Connections {
                     target: root
                     function onRenderedHtmlChanged() {
-                        if (root.renderedHtml.length) {
-                            htmlView.loadHtml(root.renderedHtml, "http://kestrel.local/")
-                        }
+                        htmlContainer.loadHtmlIfChanged("renderedHtml")
                     }
                     function onImagesAllowedChanged() {
-                        if (root.renderedHtml.length) {
-                            htmlView.loadHtml(root.renderedHtml, "http://kestrel.local/")
-                        }
+                        htmlContainer.loadHtmlIfChanged("imagesAllowed")
                     }
                 }
             }
