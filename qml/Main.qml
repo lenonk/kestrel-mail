@@ -909,6 +909,7 @@ Kirigami.ApplicationWindow {
                                  || lower.indexOf("ggpht.com") >= 0
 
         const isGoogleS2Favicon = lower.indexOf("google.com/s2/favicons") >= 0
+                                   && (senderDomainValue === "gmail.com" || senderDomainValue === "googlemail.com")
 
         // Guardrails:
         // - suppress google profile/default avatar surfaces that may resolve to placeholders
