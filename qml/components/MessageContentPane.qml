@@ -46,6 +46,13 @@ Rectangle {
         // Neutralize tracking pixels unless the user has explicitly allowed them.
         // Reading root.trackingAllowed here makes this binding reactive to that property.
         if (!root.trackingAllowed) sanitized = root.neutralizeTrackingPixels(sanitized)
+        // Inject a baseline background so plain-text and unstyled messages use the
+        // theme background. No !important — emails with their own explicit backgrounds
+        // will still override this. Reading the property here keeps the binding reactive.
+        const bgColor = Kirigami.Theme.backgroundColor.toString()
+        const bgStyle = "<style data-kestrel-bg='baseline'>html,body{background-color:" + bgColor + ";}</style>"
+        if (sanitized.indexOf("<head>") >= 0)
+            sanitized = sanitized.replace("<head>", "<head>" + bgStyle)
         return root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized
     }
     readonly property var activeTags: {
@@ -427,16 +434,21 @@ Rectangle {
     }
 
     function darkenHtml(html) {
+        const darkBg      = Kirigami.Theme.backgroundColor.toString()
+        const surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString()
+        const lightText   = Kirigami.Theme.textColor.toString()
+        const borderColor = Kirigami.Theme.disabledTextColor.toString()
+
         const style = "<style data-dark-mode='baseline'>"
-                    + "html, body { background-color:#1e1e1e !important; color:#e0e0e0 !important; }"
-                    + "[color] { color:#e0e0e0 !important; }"
-                    + "td[style*='border'], div[style*='border'], table[style*='border'] { border-color:#888888 !important; }"
-                    + "hr { border-color:#888888 !important; }"
+                    + "html, body { background-color:" + darkBg + " !important; color:" + lightText + " !important; }"
+                    + "[color] { color:" + lightText + " !important; }"
+                    + "td[style*='border'], div[style*='border'], table[style*='border'] { border-color:" + borderColor + " !important; }"
+                    + "hr { border-color:" + borderColor + " !important; }"
                     + "img, svg, canvas, video, picture, iframe { filter:none !important; mix-blend-mode:normal !important; opacity:1 !important; }"
                     + "</style>";
 
         const script = "<script>(function(){"
-                    + "var DARK_BG='#1e1e1e',SURFACE_BG='#2d2d2d',LIGHT_TEXT='#e0e0e0',BORDER_COLOR='#888888';"
+                    + "var DARK_BG='" + darkBg + "',SURFACE_BG='" + surfaceBg + "',LIGHT_TEXT='" + lightText + "',BORDER_COLOR='" + borderColor + "';"
                     + "var MEDIA={IMG:1,SVG:1,CANVAS:1,VIDEO:1,PICTURE:1,IFRAME:1};"
                     + "function parseRGB(c){if(!c)return null;var m=c.match(/rgba?\\(\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)/);return m?[+m[1],+m[2],+m[3]]:null;}"
                     + "function lum(r,g,b){var a=[r/255,g/255,b/255];for(var i=0;i<3;i++){a[i]=a[i]<=0.03928?a[i]/12.92:Math.pow((a[i]+0.055)/1.055,2.4);}return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2];}"
@@ -670,6 +682,7 @@ Rectangle {
                     anchors.centerIn: parent
                     size: Kirigami.Units.iconSizes.large + 8
                     displayName: root.senderName
+                    fallbackText: root.senderText
                     avatarSources: avatarWrap.avatarSources
                 }
             }

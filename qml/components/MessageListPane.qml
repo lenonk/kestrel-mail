@@ -153,6 +153,7 @@ Rectangle {
 
             TextToolTip {
                 id: debugHoverPopup
+                parent: QQC2.Overlay.overlay
                 delay: 0
                 clampToOverlay: true
 
@@ -184,7 +185,9 @@ Rectangle {
                         id: debugPopupHover
                         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                         onHoveredChanged: {
-                            if (!hovered)
+                            if (hovered)
+                                debugPopupHideTimer.stop()
+                            else
                                 debugPopupHideTimer.start()
                         }
                     }
@@ -339,7 +342,7 @@ Rectangle {
                                                   + "sender=" + (sender || "") + "\n"
                                                   + "subject=" + (subject || "")
                                     const overlay = QQC2.Overlay.overlay
-                                    const p = messageCard.mapToItem(overlay, point.position.x, point.position.y)
+                                    const p = messageCard.mapToItem(overlay, messageMouseArea.mouseX, messageMouseArea.mouseY)
                                     groupedMessageList.showDebugHoverPopup(payload, p.x, p.y)
                                 } else {
                                     debugPopupHideTimer.start()
@@ -351,6 +354,15 @@ Rectangle {
                             id: messageMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
+
+                            onPositionChanged: function(mouse) {
+                                if (debugHoverPopup.visible && !debugPopupHover.hovered) {
+                                    const overlay = QQC2.Overlay.overlay
+                                    const p = messageCard.mapToItem(overlay, mouse.x, mouse.y)
+                                    debugHoverPopup.preferredX = p.x + 4
+                                    debugHoverPopup.preferredY = p.y + 4
+                                }
+                            }
 
                             onClicked: function(mouse) {
                                 if (mouse.modifiers & Qt.ShiftModifier
@@ -448,6 +460,7 @@ Rectangle {
                                     displayName: messageCard.showRecipient
                                                  ? root.appRoot.displayRecipientNames(recipient, accountEmail)
                                                  : root.appRoot.displaySenderName(sender, accountEmail)
+                                    fallbackText: messageCard.mailboxForAvatar
                                     avatarSources: avatarWrap.avatarSources
                                 }
                             }

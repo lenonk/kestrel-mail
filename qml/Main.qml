@@ -892,9 +892,19 @@ Kirigami.ApplicationWindow {
         if (!isUrlLike)
             return []
 
-        // Guardrail: Google profile avatar URLs have produced default/placeholder images
-        // in some cases. Prefer deterministic initials fallback over incorrect avatars.
-        if (lower.indexOf("googleusercontent.com") >= 0 || lower.indexOf("people.googleapis.com") >= 0)
+        const senderDomainValue = email.indexOf("@") >= 0 ? email.split("@")[1].toLowerCase() : ""
+        const isGoogleProfileish = lower.indexOf("googleusercontent.com") >= 0
+                                 || lower.indexOf("people.googleapis.com") >= 0
+                                 || lower.indexOf("gstatic.com") >= 0
+                                 || lower.indexOf("ggpht.com") >= 0
+
+        const isGmailFavicon = lower.indexOf("google.com/s2/favicons") >= 0
+                            && (senderDomainValue === "gmail.com" || senderDomainValue === "googlemail.com")
+
+        // Guardrails:
+        // - suppress google profile/default avatar surfaces that may resolve to placeholders
+        // - suppress gmail favicon for consumer senders (prefer initials fallback)
+        if (isGoogleProfileish || isGmailFavicon)
             return []
 
         return [normalized]
