@@ -484,13 +484,23 @@ Rectangle {
         if (root.attachmentItems.length > 0) {
             // Pre-populate local paths from the 60-min prefetch cache (instant on revisit).
             const paths = {};
+            const progress = {};
+            const downloading = {};
             for (let i = 0; i < root.attachmentItems.length; i++) {
                 const a = root.attachmentItems[i];
                 const lp = appRoot.imapServiceObj.cachedAttachmentPath(account, uid, a.partId);
-                if (lp.length > 0)
+                if (lp.length > 0) {
                     paths[a.partId] = lp;
+                    progress[a.partId] = 100;
+                    downloading[a.partId] = false;
+                } else {
+                    progress[a.partId] = 0;
+                    downloading[a.partId] = true;
+                }
             }
             root.attachmentLocalPaths = paths;
+            root.attachmentProgress = progress;
+            root.attachmentDownloading = downloading;
 
             // Kick off background download for any not-yet-cached parts.
             appRoot.imapServiceObj.prefetchAttachments(account, folder, uid);
