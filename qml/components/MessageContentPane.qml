@@ -554,7 +554,7 @@ Rectangle {
         const uid = (root.messageData.uid || "").toString();
         if (!account.length || !folder.length || !uid.length)
             return;
-        appRoot.imapServiceObj.prefetchAttachments(account, folder, uid);
+        appRoot.imapServiceObj.prefetchImageAttachments(account, folder, uid);
     }
     function removeTagByName(name) {
         const tags = activeTags.filter(function (t) {

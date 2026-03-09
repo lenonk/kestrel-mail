@@ -293,6 +293,19 @@ static QByteArray fetchAttachmentPartById(Imap::Connection &cxn, const QString &
                                           const QString &partId, const QString &encoding,
                                           const std::function<void(int, qint64)> &onProgress = {});
 
+static bool isImageAttachment(const QVariantMap &am) {
+    const QString mime = am.value("mimeType"_L1).toString().trimmed().toLower();
+    const QString name = am.value("name"_L1).toString().trimmed().toLower();
+    return mime.startsWith("image/"_L1)
+        || name.endsWith(".png"_L1)
+        || name.endsWith(".jpg"_L1)
+        || name.endsWith(".jpeg"_L1)
+        || name.endsWith(".webp"_L1)
+        || name.endsWith(".gif"_L1)
+        || name.endsWith(".bmp"_L1)
+        || name.endsWith(".svg"_L1);
+}
+
 void
 ImapService::prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
     if (!m_store || !m_accounts)
@@ -383,6 +396,123 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             }
 
             // Use a per-part subdirectory so the file has a clean user-visible name.
+            const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
+            const QString partDir    = cacheBase + "/"_L1 + safePartId;
+            QDir().mkpath(partDir);
+
+            const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
+            const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
+
+            QSaveFile f(localPath);
+            if (!f.open(QIODevice::WriteOnly)) {
+                clearInFlight();
+                continue;
+            }
+            f.write(data);
+            if (!f.commit()) {
+                clearInFlight();
+                continue;
+            }
+
+            attachmentCacheInsert(key, localPath);
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
+            emit attachmentReady(accountEmail, uid, partId, localPath);
+            clearInFlight();
+        }
+    });
+}
+
+void
+ImapService::prefetchImageAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
+    if (!m_store || !m_accounts)
+        return;
+
+    const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
+    if (attachments.isEmpty())
+        return;
+
+    // Resolve account on the main thread before going async.
+    QVariantMap account;
+    for (const auto &a : m_accounts->accounts()) {
+        const auto row = a.toMap();
+        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
+            account = row;
+            break;
+        }
+    }
+    if (account.isEmpty())
+        return;
+
+    // Filter to image attachments and skip already-cached entries.
+    QVariantList toFetch;
+    for (const auto &a : attachments) {
+        const auto am = a.toMap();
+        if (!isImageAttachment(am))
+            continue;
+        if (cachedAttachmentPath(accountEmail, uid, am.value("partId"_L1).toString()).isEmpty())
+            toFetch.push_back(a);
+    }
+    if (toFetch.isEmpty())
+        return;
+
+    const QString host = account.value("imapHost"_L1).toString();
+    const int     port = account.value("imapPort"_L1).toInt();
+
+    runBackgroundTask([this, host, port, accountEmail, folderName, uid, account, toFetch]() {
+        const QString token = workerRefreshAccessToken(account, accountEmail);
+        if (token.isEmpty())
+            return;
+
+        Imap::Connection cxn;
+        if (!cxn.connectAndAuth(host, port, accountEmail, token).success)
+            return;
+        const auto [selectOk, _] = cxn.select(folderName);
+        if (!selectOk)
+            return;
+
+        const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                                + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
+
+        for (const auto &a : toFetch) {
+            if (m_destroying.load())
+                break;
+
+            const auto    am       = a.toMap();
+            const QString partId   = am.value("partId"_L1).toString();
+            const QString encoding = am.value("encoding"_L1).toString();
+            const QString name     = am.value("name"_L1).toString();
+
+            const QString key = attachmentCacheKey(accountEmail, uid, partId);
+
+            {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                if (m_inFlightAttachmentDownloads.contains(key))
+                    continue;
+                m_inFlightAttachmentDownloads.insert(key);
+            }
+
+            const auto clearInFlight = [this, key]() {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                m_inFlightAttachmentDownloads.remove(key);
+            };
+
+            if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
+                clearInFlight();
+                continue;
+            }
+
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+            const QByteArray data = fetchAttachmentPartById(cxn, uid, partId, encoding,
+                [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
+                    emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
+                });
+            if (data.isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+                clearInFlight();
+                continue;
+            }
+
             const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
             const QString partDir    = cacheBase + "/"_L1 + safePartId;
             QDir().mkpath(partDir);
