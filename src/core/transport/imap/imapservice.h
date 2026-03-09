@@ -92,6 +92,9 @@ private:
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;
     mutable QMutex                               m_attachmentFileCacheMutex;
 
+    QSet<QString>                                m_inFlightAttachmentDownloads;
+    mutable QMutex                               m_inFlightAttachmentDownloadsMutex;
+
     struct AccountInfo { QString email, host, accessToken; int port = 0; };
     struct SyncFolderOptions {
         bool announce = true;

@@ -287,17 +287,33 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             const QString name     = am.value("name"_L1).toString();
 
             const QString key = attachmentCacheKey(accountEmail, uid, partId);
+
+            {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                if (m_inFlightAttachmentDownloads.contains(key))
+                    continue;
+                m_inFlightAttachmentDownloads.insert(key);
+            }
+
+            const auto clearInFlight = [this, key]() {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                m_inFlightAttachmentDownloads.remove(key);
+            };
+
             if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
                 emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
+                clearInFlight();
                 continue; // already cached by a concurrent call
             }
 
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
             const QByteArray data = fetchAttachmentPartById(cxn, uid, partId, encoding,
                 [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
                     emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
                 });
             if (data.isEmpty()) {
                 emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+                clearInFlight();
                 continue;
             }
 
@@ -310,15 +326,20 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
 
             QSaveFile f(localPath);
-            if (!f.open(QIODevice::WriteOnly))
+            if (!f.open(QIODevice::WriteOnly)) {
+                clearInFlight();
                 continue;
+            }
             f.write(data);
-            if (!f.commit())
+            if (!f.commit()) {
+                clearInFlight();
                 continue;
+            }
 
             attachmentCacheInsert(key, localPath);
             emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
             emit attachmentReady(accountEmail, uid, partId, localPath);
+            clearInFlight();
         }
     });
 }
@@ -327,7 +348,7 @@ static QByteArray
 fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid, const QString &partId, const QString &encoding,
                         const std::function<void(int, qint64)> &onProgress) {
     QString status;
-    QByteArray literal = cxn.fetchMimePartWithProgress(uid, partId, 5, onProgress, &status);
+    QByteArray literal = cxn.fetchMimePartWithProgress(uid, partId, 1, onProgress, &status);
     if (literal.isEmpty())
         return {};
 
