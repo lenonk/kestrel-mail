@@ -11,7 +11,7 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] On folder switch (new folder selection), auto-scroll message list to top.
 - [ ] Tags section should auto-refresh on startup: ensure tag data appears without manual collapse/expand, and default Tags group expanded state remains correct.
 - [ ] Window close via X no longer exits app reliably (regression after shutdown/crash fix) — restore normal close behavior without reintroducing thread-destroy crash.
-- [ ] Investigate startup UI responsiveness regression: for several seconds after launch, window dragging/moving is delayed.
+- [ ] Investigate startup UI responsiveness regression: for several seconds after launch, window dragging/moving is delayed (observed: window is not movable until initial folder fetch completes).
 - [ ] Investigate message-list hitching during sync idle/refresh cycles (UI stutters even when no rows are inserted).
 - [ ] Audit and move non-trivial work off the UI thread (QML/GUI): identify blocking operations during startup and sync tick paths.
 - [ ] Prevent content pane reflow/reload jump when inline images become available: no fade-out/fade-in, preserve current scroll position, and avoid resetting to top.
