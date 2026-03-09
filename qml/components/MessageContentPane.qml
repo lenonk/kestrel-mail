@@ -753,9 +753,11 @@ Rectangle {
             root.attachmentProgress = ({});
             root.attachmentDownloading = ({});
             root.reloadAttachmentsForCurrentMessage();
+            root.startAttachmentPrefetchForCurrentMessage();
         } else if (root.attachmentItems.length === 0) {
             // Same message, attachments not yet loaded — retry (race with DB hydration).
             root.reloadAttachmentsForCurrentMessage();
+            root.startAttachmentPrefetchForCurrentMessage();
         }
         // Same message with attachments already loaded: leave all state untouched.
 
@@ -1519,7 +1521,7 @@ Rectangle {
                 onTriggered: {
                     if (!htmlContainer.pendingHtml.length)
                         return;
-                    htmlView.loadHtml(htmlContainer.pendingHtml, "http://kestrel.local/");
+                    htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }
             WebEngineView {
@@ -1530,6 +1532,7 @@ Rectangle {
                 settings.autoLoadImages: root.imagesAllowed
                 settings.errorPageEnabled: true
                 settings.localContentCanAccessRemoteUrls: true
+                settings.localContentCanAccessFileUrls: true
                 visible: root.hasUsableBodyHtml
 
                 Component.onCompleted: htmlContainer.loadHtmlIfChanged("component")
