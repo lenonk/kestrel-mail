@@ -121,27 +121,32 @@ Rectangle {
         const src = (html || "").toString()
         if (!src.length) return out
 
-        const re = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
-        let m
         const seen = {}
-        while ((m = re.exec(src)) !== null) {
-            const href = (m[1] || "").trim()
-            if (!/^https?:\/\//i.test(href))
-                continue
-            if (seen[href])
-                continue
-            seen[href] = true
 
-            let label = (m[2] || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
-            if (!label.length)
-                label = root._fileNameFromUrl(href)
+        function maybeAdd(url, labelHint) {
+            const href = (url || "").trim()
+            if (!/^https?:\/\//i.test(href))
+                return
+            if (seen[href])
+                return
 
             const lower = href.toLowerCase()
-            const isLikelyAttachment = /\.(pdf|png|jpe?g|gif|webp|heic|docx?|xlsx?|pptx?|zip|rar|7z|txt|csv)($|\?)/i.test(lower)
-                                     || /download|attachment|document|file/i.test(label)
+            const hasFileExt = /\.(pdf|png|jpe?g|gif|webp|heic|docx?|xlsx?|pptx?|zip|rar|7z|txt|csv)($|\?)/i.test(lower)
+            const dotloopDoc = /dotloop\.com\/.+\/document\?/i.test(lower) || /[?&]documentid=/i.test(lower)
+            const genericAttachment = /download|attachment|file=/i.test(lower)
 
-            if (!isLikelyAttachment)
-                continue
+            if (!(hasFileExt || dotloopDoc || genericAttachment))
+                return
+
+            seen[href] = true
+
+            let label = (labelHint || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+            if (!label.length || /^https?:\/\//i.test(label)) {
+                if (dotloopDoc)
+                    label = i18n("Document")
+                else
+                    label = root._fileNameFromUrl(href)
+            }
 
             out.push({
                 name: label,
@@ -149,6 +154,18 @@ Rectangle {
                 canPreview: /\.(png|jpe?g|gif|webp)($|\?)/i.test(lower)
             })
         }
+
+        // 1) Rich anchor links
+        const anchorRe = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+        let m
+        while ((m = anchorRe.exec(src)) !== null)
+            maybeAdd(m[1], m[2])
+
+        // 2) Generic href-bearing tags (some templates put navigable targets on non-<a> tags)
+        const hrefRe = /\bhref\s*=\s*["']([^"']+)["']/gi
+        while ((m = hrefRe.exec(src)) !== null)
+            maybeAdd(m[1], "")
+
         return out
     }
 
