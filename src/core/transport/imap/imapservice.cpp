@@ -714,12 +714,9 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
 }
 
 QVariantList
-ImapService::syncFolderForAccount(const QString &email,
-                                  const QString &host,
-                                  const QString &accessToken,
-                                  const int port,
+ImapService::syncFolderInternal(const AccountInfo &account,
                                   const QString &target,
-                                  const bool announce,
+                                  const SyncFolderOptions &options,
                                   int &seqNum,
                                   int &inboxInserted,
                                   QVariantList &pendingHeaders,
@@ -727,6 +724,11 @@ ImapService::syncFolderForAccount(const QString &email,
                                   QElapsedTimer &flushTimer,
                                   const std::function<void()> &flush) {
     const bool isInbox = (target.compare("INBOX"_L1, Qt::CaseInsensitive) == 0);
+    const QString &email = account.email;
+    const QString &host = account.host;
+    const QString &accessToken = account.accessToken;
+    const int port = account.port;
+    const bool announce = options.announce;
 
     qint64 dbMaxUid = 0;
     QMetaObject::invokeMethod(this, [this, &dbMaxUid, email = email, &target]() {
@@ -856,121 +858,6 @@ ImapService::refreshFolderList(bool announce) {
     );
 }
 
-void
-ImapService::syncFolder(const QString &folderName, bool announce) {
-    if (m_destroying)
-        return;
-
-    const auto target = folderName.trimmed().isEmpty() ? "INBOX"_L1 : folderName.trimmed();
-
-    if (target.contains("/Categories/"_L1, Qt::CaseInsensitive)) {
-        if (announce)
-            emit syncFinished(true, "Category folders are managed via labels.");
-        return;
-    }
-
-    if (m_syncInProgress) {
-        // Announced (user-initiated) requests cancel the active run; background ones queue silently.
-        if (announce)
-            m_cancelRequested.store(true);
-
-        {
-            QMutexLocker l(&m_pendingSyncMutex);
-            // Don't let a background single-folder request replace a pending full sync —
-            // the full sync will cover this folder anyway.
-            if (!m_pendingFullSync || announce) {
-                m_pendingFullSync   = false;
-                m_pendingFolderSync = target;
-                m_pendingAnnounce   = announce;
-            }
-        }
-
-        return;
-    }
-
-    if (!m_accounts || !m_store) {
-        if (announce)
-            emit syncFinished(false, "Sync dependencies not initialized.");
-        return;
-    }
-
-    const auto accounts = m_accounts->accounts();
-    if (accounts.isEmpty()) {
-        if (announce)
-            emit syncFinished(false, "No accounts configured yet.");
-        return;
-    }
-
-    runAsync(
-        [this, accounts, target, announce]() -> SyncResult {
-            SyncResult result;
-            int inboxInserted = 0;
-            int seqNum = 0;
-            QVariantList pendingHeaders;
-            QElapsedTimer flushTimer;
-            flushTimer.start();
-
-            auto flush = [&]() {
-                if (pendingHeaders.isEmpty())
-                    return;
-
-                const QVariantList batch = pendingHeaders; pendingHeaders.clear();
-                QMetaObject::invokeMethod(this, [this, batch]() { m_store->upsertHeaders(batch); },
-                                         Qt::QueuedConnection);
-                flushTimer.restart();
-            };
-
-            for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
-                if (m_cancelRequested.load()) {
-                    SyncResult r;
-                    r.message = "Aborted fetch for %1."_L1.arg(target);
-                    return r;
-                }
-
-                (void)syncFolderForAccount(email, host, accessToken, port, target, announce,
-                                           seqNum, inboxInserted, pendingHeaders, result.headers,
-                                           flushTimer, flush);
-            }
-
-            flush();
-            result.ok      = true;
-            result.inserted = inboxInserted;
-            result.message  = QStringLiteral("%1 sync complete.").arg(target);
-
-            return result;
-        },
-        [this, announce, target](const SyncResult &r) {
-            QString folderLabel = target;
-            if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
-                folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
-            if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
-                folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
-            if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
-                folderLabel = "Inbox"_L1;
-
-            const int syncedCount = r.headers.size();
-            if (announce) {
-                if (!r.ok)
-                    emit syncFinished(false, r.message);
-                else if (syncedCount > 0)
-                    emit syncFinished(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
-                return;
-            }
-
-            if (!r.ok) {
-                emit realtimeStatus(false, r.message);
-            } else if (syncedCount > 0) {
-                emit realtimeStatus(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
-            }
-
-            if (r.ok && r.inserted > 0) {
-                emit realtimeStatus(true, QStringLiteral("%1 new message%2 received.")
-                                         .arg(r.inserted)
-                                         .arg(r.inserted == 1 ? QString() : "s"));
-            }
-        }
-    );
-}
 
 bool
 bodyAlreadyFetched(const DataStore *store, const QString& accountEmail, const QString &folderName, const QString &uid) {
@@ -1231,6 +1118,122 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
 }
 
 void
+ImapService::syncFolder(const QString &folderName, bool announce) {
+    if (m_destroying)
+        return;
+
+    const auto target = folderName.trimmed().isEmpty() ? "INBOX"_L1 : folderName.trimmed();
+
+    if (target.contains("/Categories/"_L1, Qt::CaseInsensitive)) {
+        if (announce)
+            emit syncFinished(true, "Category folders are managed via labels.");
+        return;
+    }
+
+    if (m_syncInProgress) {
+        // Announced (user-initiated) requests cancel the active run; background ones queue silently.
+        if (announce)
+            m_cancelRequested.store(true);
+
+        {
+            QMutexLocker l(&m_pendingSyncMutex);
+            // Don't let a background single-folder request replace a pending full sync —
+            // the full sync will cover this folder anyway.
+            if (!m_pendingFullSync || announce) {
+                m_pendingFullSync   = false;
+                m_pendingFolderSync = target;
+                m_pendingAnnounce   = announce;
+            }
+        }
+
+        return;
+    }
+
+    if (!m_accounts || !m_store) {
+        if (announce)
+            emit syncFinished(false, "Sync dependencies not initialized.");
+        return;
+    }
+
+    const auto accounts = m_accounts->accounts();
+    if (accounts.isEmpty()) {
+        if (announce)
+            emit syncFinished(false, "No accounts configured yet.");
+        return;
+    }
+
+    runAsync(
+        [this, accounts, target, announce]() -> SyncResult {
+            SyncResult result;
+            int inboxInserted = 0;
+            int seqNum = 0;
+            QVariantList pendingHeaders;
+            QElapsedTimer flushTimer;
+            flushTimer.start();
+
+            auto flush = [&]() {
+                if (pendingHeaders.isEmpty())
+                    return;
+
+                const QVariantList batch = pendingHeaders; pendingHeaders.clear();
+                QMetaObject::invokeMethod(this, [this, batch]() { m_store->upsertHeaders(batch); },
+                                         Qt::QueuedConnection);
+                flushTimer.restart();
+            };
+
+            for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
+                if (m_cancelRequested.load()) {
+                    SyncResult r;
+                    r.message = "Aborted fetch for %1."_L1.arg(target);
+                    return r;
+                }
+
+                (void)syncFolderInternal(AccountInfo{email, host, accessToken, port}, target, SyncFolderOptions{announce},
+                                           seqNum, inboxInserted, pendingHeaders, result.headers,
+                                           flushTimer, flush);
+            }
+
+            flush();
+            result.ok      = true;
+            result.inserted = inboxInserted;
+            result.message  = QStringLiteral("%1 sync complete.").arg(target);
+
+            return result;
+        },
+        [this, announce, target](const SyncResult &r) {
+            QString folderLabel = target;
+            if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
+                folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
+            if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
+                folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
+            if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
+                folderLabel = "Inbox"_L1;
+
+            const int syncedCount = r.headers.size();
+            if (announce) {
+                if (!r.ok)
+                    emit syncFinished(false, r.message);
+                else if (syncedCount > 0)
+                    emit syncFinished(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
+                return;
+            }
+
+            if (!r.ok) {
+                emit realtimeStatus(false, r.message);
+            } else if (syncedCount > 0) {
+                emit realtimeStatus(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
+            }
+
+            if (r.ok && r.inserted > 0) {
+                emit realtimeStatus(true, QStringLiteral("%1 new message%2 received.")
+                                         .arg(r.inserted)
+                                         .arg(r.inserted == 1 ? QString() : "s"));
+            }
+        }
+    );
+}
+
+void
 ImapService::syncAll(bool announce) {
     if (m_destroying)
         return;
@@ -1351,8 +1354,8 @@ ImapService::syncAll(bool announce) {
                             emit realtimeStatus(true, syncingToast);
                     }, Qt::QueuedConnection);
 
-                    const auto folderHeaders = syncFolderForAccount(email, host, accessToken, port,
-                        folderTarget, announce, seqNum, inboxInserted,
+                    const auto folderHeaders = syncFolderInternal(AccountInfo{email, host, accessToken, port},
+                        folderTarget, SyncFolderOptions{announce}, seqNum, inboxInserted,
                         pendingHeaders, result.headers, flushTimer, flush);
 
                     QSet<QString> uniqueUids;

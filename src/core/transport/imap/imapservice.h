@@ -78,6 +78,9 @@ private:
     QMutex                    m_inFlightBodyHydrationsMutex;
 
     struct AccountInfo { QString email, host, accessToken; int port = 0; };
+    struct SyncFolderOptions {
+        bool announce = true;
+    };
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
 
     void startIdleWatcher();
@@ -123,16 +126,13 @@ private:
                                    bool reconcileDeletes = false,
                                    int fetchBudget = -1);
 
-    QVariantList syncFolderForAccount(const QString &email,
-                                      const QString &host,
-                                      const QString &accessToken,
-                                      int port,
-                                      const QString &target,
-                                      bool announce,
-                                      int &seqNum,
-                                      int &inboxInserted,
-                                      QVariantList &pendingHeaders,
-                                      QVariantList &resultHeaders,
-                                      QElapsedTimer &flushTimer,
-                                      const std::function<void()> &flush);
+    QVariantList syncFolderInternal(const AccountInfo &account,
+                                    const QString &folder,
+                                    const SyncFolderOptions &options,
+                                    int &seqNum,
+                                    int &inboxInserted,
+                                    QVariantList &pendingHeaders,
+                                    QVariantList &resultHeaders,
+                                    QElapsedTimer &flushTimer,
+                                    const std::function<void()> &flush);
 };
