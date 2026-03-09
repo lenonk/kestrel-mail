@@ -29,7 +29,7 @@ public:
      * Connect to the IMAP server, authenticate, and fetch the full RFC-822
      * body for the requested message.
      *
-     * @return HTML body string, or empty string on failure.
+     * @return HTML body string, empty on failure.
      */
     [[nodiscard]] static QString execute(const Request &req);
 };

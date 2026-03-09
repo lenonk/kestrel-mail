@@ -38,6 +38,13 @@ QStringList preferredSnippetPartIds(const QString &bodyStructureResponse);
 BodyPart preferredSnippetPart(const QString &bodyStructureResponse);
 
 /**
+ * Parse IMAP BODYSTRUCTURE response and return attachment parts.
+ * Returns parts that have a filename or whose type is not TEXT/MULTIPART
+ * (images, application/pdf, audio, video, etc.).
+ */
+QList<BodyPart> parseAttachmentParts(const QString &bodyStructureResponse);
+
+/**
  * Decode transfer-encoded content (base64, quoted-printable, etc.)
  * Auto-detects encoding from Content-Transfer-Encoding header.
  */

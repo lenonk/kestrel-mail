@@ -58,6 +58,7 @@ using Imap::AvatarResolver::fetchAvatarBlob;
 
 // Body processor
 using Imap::BodyProcessor::extractBodySnippetFromFetch;
+using Imap::BodyProcessor::parseAttachmentParts;
 
 namespace Imap {
 
@@ -475,6 +476,25 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
                           << "snippet=" << h.value("snippet"_L1).toString().left(120);
     }
 
+    // Attachment metadata from BODYSTRUCTURE — stored in DB so the UI needs no IMAP round-trip.
+    {
+        const QList<Imap::BodyProcessor::BodyPart> attParts = parseAttachmentParts(fetchResp);
+        if (!attParts.isEmpty()) {
+            QVariantList attachments;
+            attachments.reserve(attParts.size());
+            for (const auto &p : attParts) {
+                QVariantMap row;
+                row.insert("partId"_L1,       p.partId);
+                row.insert("name"_L1,         p.filename.isEmpty() ? QStringLiteral("Attachment") : p.filename);
+                row.insert("mimeType"_L1,     p.type.toLower() + "/"_L1 + p.subtype.toLower());
+                row.insert("encodedBytes"_L1, p.bytes);
+                row.insert("encoding"_L1,     p.encoding);
+                attachments.push_back(row);
+            }
+            h.insert("attachments"_L1, attachments);
+        }
+    }
+
     // commitRow: deduplicate and append to output
     auto commitRow = [&](const QVariantMap &row, const QString &rowFolder) {
         const QString dedupeKey = rowFolder
@@ -542,7 +562,7 @@ fetchUidBatch(SyncContext &ctx,
     }
 
     const QString fetchCmd = QStringLiteral(
-        "UID FETCH %1 (UID FLAGS INTERNALDATE X-GM-LABELS X-GM-MSGID "
+        "UID FETCH %1 (UID FLAGS INTERNALDATE X-GM-LABELS X-GM-MSGID BODYSTRUCTURE "
         "BODY.PEEK[HEADER.FIELDS (FROM TO SENDER REPLY-TO RETURN-PATH SUBJECT DATE MESSAGE-ID "
         "AUTHENTICATION-RESULTS X-MAILER IN-REPLY-TO REFERENCES RECEIVED "
         "X-MAILGUN-SID X-SG-EID X-SMTPAPI X-MC-USER X-KLAVIYO-MESSAGE-ID X-PM-MESSAGE-ID X-SES-OUTGOING "

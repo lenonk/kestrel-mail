@@ -812,6 +812,23 @@ bool DataStore::init()
         return false;
     }
 
+    if (!q.exec(QStringLiteral(R"(
+        CREATE TABLE IF NOT EXISTS message_attachments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id INTEGER NOT NULL,
+          account_email TEXT NOT NULL,
+          part_id TEXT NOT NULL,
+          name TEXT NOT NULL DEFAULT '',
+          mime_type TEXT NOT NULL DEFAULT '',
+          encoded_bytes INTEGER NOT NULL DEFAULT 0,
+          encoding TEXT NOT NULL DEFAULT '',
+          UNIQUE(account_email, message_id, part_id),
+          FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
+        )
+    )"))) {
+        return false;
+    }
+
     // Paging/list performance indexes.
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_received_at_id ON messages(received_at DESC, id DESC)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_folder_message ON message_folder_map(folder, message_id)"));
@@ -1578,6 +1595,13 @@ void DataStore::upsertHeader(const QVariantMap &header)
         qTagMap.exec();
     }
 
+
+    // Attachment metadata from BODYSTRUCTURE — stored on first sync pass.
+    {
+        const QVariantList attachments = header.value(QStringLiteral("attachments")).toList();
+        if (!attachments.isEmpty())
+            upsertAttachments(messageId, accountEmail, attachments);
+    }
 
     // Server truth model: when a message is observed in Trash, remove stale membership
     // from non-trash folders for this account/message. It can be re-added later only if
@@ -3311,4 +3335,83 @@ void DataStore::reloadFolders()
     }
 
     emit foldersChanged();
+}
+
+void DataStore::upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments)
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return;
+
+    for (const QVariant &v : attachments) {
+        const QVariantMap a = v.toMap();
+        const QString partId   = a.value(QStringLiteral("partId")).toString().trimmed();
+        const QString name     = a.value(QStringLiteral("name")).toString().trimmed();
+        const QString mimeType = a.value(QStringLiteral("mimeType")).toString().trimmed();
+        const int encodedBytes = a.value(QStringLiteral("encodedBytes")).toInt();
+        const QString encoding = a.value(QStringLiteral("encoding")).toString().trimmed();
+
+        if (partId.isEmpty()) continue;
+
+        QSqlQuery q(database);
+        q.prepare(QStringLiteral(R"(
+            INSERT INTO message_attachments (message_id, account_email, part_id, name, mime_type, encoded_bytes, encoding)
+            VALUES (:message_id, :account_email, :part_id, :name, :mime_type, :encoded_bytes, :encoding)
+            ON CONFLICT(account_email, message_id, part_id) DO UPDATE SET
+              name=excluded.name,
+              mime_type=excluded.mime_type,
+              encoded_bytes=excluded.encoded_bytes,
+              encoding=excluded.encoding
+        )"));
+        q.bindValue(QStringLiteral(":message_id"),    messageId);
+        q.bindValue(QStringLiteral(":account_email"), accountEmail);
+        q.bindValue(QStringLiteral(":part_id"),       partId);
+        q.bindValue(QStringLiteral(":name"),          name.isEmpty() ? QStringLiteral("Attachment") : name);
+        q.bindValue(QStringLiteral(":mime_type"),     mimeType);
+        q.bindValue(QStringLiteral(":encoded_bytes"), encodedBytes);
+        q.bindValue(QStringLiteral(":encoding"),      encoding);
+        q.exec();
+    }
+}
+
+QVariantList DataStore::attachmentsForMessage(const QString &accountEmail, const QString &folder, const QString &uid) const
+{
+    QVariantList out;
+    const auto database = db();
+    if (!database.isValid() || !database.isOpen()) return out;
+
+    // Resolve message_id via the folder edge, then fetch all attachment rows.
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        SELECT ma.part_id, ma.name, ma.mime_type, ma.encoded_bytes, ma.encoding
+        FROM message_attachments ma
+        JOIN message_folder_map mfm ON mfm.message_id = ma.message_id
+                                   AND mfm.account_email = ma.account_email
+        WHERE ma.account_email = :account_email
+          AND lower(mfm.folder) = lower(:folder)
+          AND mfm.uid = :uid
+        ORDER BY ma.part_id
+    )"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"),        folder.trimmed());
+    q.bindValue(QStringLiteral(":uid"),           uid.trimmed());
+
+    if (!q.exec()) return out;
+
+    while (q.next()) {
+        const QString encoding = q.value(4).toString();
+        // Report decoded size: base64 encodes 3 bytes as 4 chars → multiply by 3/4.
+        const int encodedBytes = q.value(3).toInt();
+        const int displayBytes = (encoding.compare(QStringLiteral("base64"), Qt::CaseInsensitive) == 0)
+                                 ? static_cast<int>(encodedBytes * 3 / 4)
+                                 : encodedBytes;
+
+        QVariantMap row;
+        row.insert(QStringLiteral("partId"),   q.value(0).toString());
+        row.insert(QStringLiteral("name"),     q.value(1).toString());
+        row.insert(QStringLiteral("mimeType"), q.value(2).toString());
+        row.insert(QStringLiteral("bytes"),    displayBytes);
+        row.insert(QStringLiteral("encoding"), encoding);
+        out.push_back(row);
+    }
+    return out;
 }

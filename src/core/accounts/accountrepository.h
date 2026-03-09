@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QObject>
 #include <QVariantList>
 
 class AccountRepository : public QObject
@@ -10,10 +9,10 @@ class AccountRepository : public QObject
 public:
     explicit AccountRepository(QObject *parent = nullptr);
 
-    QVariantList accounts() const;
-
     Q_INVOKABLE void addOrUpdateAccount(const QVariantMap &account);
     Q_INVOKABLE bool removeAccount(const QString &email);
+
+    [[nodiscard]] QVariantList accounts() const;
 
 signals:
     void accountsChanged();

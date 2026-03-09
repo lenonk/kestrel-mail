@@ -144,40 +144,67 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
     const auto type = parseAtomOrQuoted().toUpper();
     const auto subtype = parseAtomOrQuoted().toUpper();
 
-    // params, id, desc, encoding, size, ...
-    QString charset;
-    QString filename;
-    skipWs();
+    // BODYSTRUCTURE param format: ("KEY" "VALUE" "KEY2" "VALUE2" ...)
+    // Both key and value are quoted atoms separated by whitespace.
+    static const QRegularExpression charsetRe(QStringLiteral("\"charset\"\\s+\"([a-z0-9._-]+)\""));
+    static const QRegularExpression nameRe(QStringLiteral("\"(?:name|filename)\"\\s+\"([^\"]+)\""));
 
-    if (m_i < m_text.size() && m_text[m_i] == '(') {
+    // Helper: extract paren-delimited block at current position, return lowercased.
+    auto readParenBlock = [&]() -> QString {
+        skipWs();
+        if (m_i >= m_text.size() || m_text[m_i] != '(') return {};
         const auto start = m_i;
         qint32 depth = 0;
-
         do {
             if (m_text[m_i] == '(') ++depth;
             else if (m_text[m_i] == ')') --depth;
             ++m_i;
         } while (m_i < m_text.size() && depth > 0);
+        return m_text.mid(start, m_i - start).toLower();
+    };
 
-        const auto paramsRaw = m_text.mid(start, m_i - start).toLower();
+    QString charset;
+    QString filename;
+    skipWs();
 
-        static const QRegularExpression re(QStringLiteral("charset\\s*\\\"?\\s*([a-z0-9._-]+)"));
-        static const QRegularExpression filenameRe(QStringLiteral("(?:name|filename)\\s*\\\"?\\s*([^\\\"\\)]+)"));
-
-        if (const auto mm = re.match(paramsRaw); mm.hasMatch())
+    if (m_i < m_text.size() && m_text[m_i] == '(') {
+        const QString paramsRaw = readParenBlock();
+        if (const auto mm = charsetRe.match(paramsRaw); mm.hasMatch())
             charset = mm.captured(1).trimmed();
-        if (const auto fm = filenameRe.match(paramsRaw); fm.hasMatch())
+        if (const auto fm = nameRe.match(paramsRaw); fm.hasMatch())
             filename = fm.captured(1).trimmed();
-    }
-    else {
-        skipAny();
+    } else {
+        skipAny(); // NIL
     }
 
-    skipAny();
-    skipAny();
+    skipAny(); // body-id
+    skipAny(); // body-description
 
     const auto encoding = parseAtomOrQuoted().toLower();
     const auto sizeToken = parseAtomOrQuoted();
+
+    // TEXT parts have an extra 'lines' field after size.
+    if (type == QStringLiteral("TEXT"))
+        skipAny();
+
+    // Optional md5: atom or quoted string (never a list).
+    // If the next non-ws token is '(' it must be disposition — don't consume it as md5.
+    skipWs();
+    if (m_i < m_text.size() && m_text[m_i] != '(' && m_text[m_i] != ')')
+        skipAny();
+
+    // Content-Disposition: may carry the filename when content-type params don't.
+    if (filename.isEmpty()) {
+        const QString dispRaw = readParenBlock();
+        if (!dispRaw.isEmpty()) {
+            if (const auto fm = nameRe.match(dispRaw); fm.hasMatch())
+                filename = fm.captured(1).trimmed();
+        }
+    } else {
+        skipWs();
+        if (m_i < m_text.size() && m_text[m_i] == '(')
+            readParenBlock(); // advance past disposition we don't need
+    }
 
     {
         const auto pid = partPrefix.isEmpty() ? QStringLiteral("1") : partPrefix;
@@ -260,6 +287,21 @@ preferredSnippetPartIds(const QString &bodyStructureResponse) {
     for (const auto parts = parsePreferredTextParts(bodyStructureResponse); const BodyPart &p : parts) {
         if (!p.partId.isEmpty() && !out.contains(p.partId)) {
             out.push_back(p.partId);
+        }
+    }
+    return out;
+}
+
+QList<BodyPart>
+parseAttachmentParts(const QString &bodyStructureResponse) {
+    QList<BodyPart> all = parsePreferredTextParts(bodyStructureResponse);
+    QList<BodyPart> out;
+    for (const BodyPart &p : all) {
+        if (p.isAttachment
+                || (p.type != QStringLiteral("TEXT")
+                    && p.type != QStringLiteral("MULTIPART")
+                    && !p.type.isEmpty())) {
+            out.push_back(p);
         }
     }
     return out;

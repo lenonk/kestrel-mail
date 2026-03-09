@@ -39,8 +39,6 @@ QString MessageHydrator::execute(const Request &req) {
     }
 
     // ── Try each candidate in order ───────────────────────────────────────────
-    QString html;
-
     for (const auto &[folder, uid] : candidates) {
         const auto [selectOk, _] = cxn->select(folder);
 
@@ -54,14 +52,13 @@ QString MessageHydrator::execute(const Request &req) {
             continue;
         }
 
-        html = extractBodyHtmlFromFetch(raw).trimmed();
-        if (!html.isEmpty()) break;
+        const QString html = extractBodyHtmlFromFetch(raw).trimmed();
+        if (!html.isEmpty())
+            return html;
     }
 
-    if (html.isEmpty())
-        qWarning().noquote() << "[hydrate] no-html-extracted" << "uid=" << req.uid;
-
-    return html;
+    qWarning().noquote() << "[hydrate] no-html-extracted" << "uid=" << req.uid;
+    return {};
 }
 
 } // namespace Imap

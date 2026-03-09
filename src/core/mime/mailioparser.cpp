@@ -266,10 +266,13 @@ QVariantList extractAttachmentsWithMailio(const QByteArray &fetchRespRaw)
             const int sizeBytes = static_cast<int>(body.size());
 
             const bool hasFileName = !fileName.isEmpty();
+            const bool isMultipart = mediaType == mailio::mime::media_type_t::MULTIPART;
             const bool nonTextLeaf = mediaType != mailio::mime::media_type_t::TEXT;
-            if (hasFileName || nonTextLeaf) {
+            if (!isMultipart && (hasFileName || nonTextLeaf)) {
+                const int rowIndex = index++;
                 QVariantMap row;
-                row.insert("index", index++);
+                row.insert("index", rowIndex);
+                row.insert("partId", QString::number(rowIndex));
                 row.insert("name", hasFileName ? fileName : QStringLiteral("Attachment"));
                 QString mediaName = "application";
                 switch (mediaType) {

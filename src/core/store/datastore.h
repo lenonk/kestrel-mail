@@ -81,6 +81,8 @@ public:
     Q_INVOKABLE bool avatarShouldRefresh(const QString &email, int ttlSeconds = 3600, int maxFailures = 3) const;
     Q_INVOKABLE bool isSenderTrusted(const QString &domain) const;
     Q_INVOKABLE void setTrustedSenderDomain(const QString &domain);
+    Q_INVOKABLE QVariantList attachmentsForMessage(const QString &accountEmail, const QString &folder, const QString &uid) const;
+    void upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments);
 
 signals:
     void inboxChanged();

@@ -9,10 +9,10 @@
 #include "message/messagehydrator.h"
 #include "message/bodyprocessor.h"
 #include "parser/responseparser.h"
-#include "../../mime/mailioparser.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QDir>
 #include <QDateTime>
 #include <QDebug>
 #include <QDesktopServices>
@@ -170,19 +170,73 @@ ImapService::saveAttachmentUrl(const QString &url, const QString &suggestedFileN
 
 QVariantList
 ImapService::attachmentsForMessage(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    QVariantList out;
-    const QString cacheKey = accountEmail.trimmed().toLower() + "|"_L1
-                           + folderName.trimmed().toLower() + "|"_L1
-                           + uid.trimmed();
-    {
-        QMutexLocker lock(&m_attachmentCacheMutex);
-        if (m_attachmentCache.contains(cacheKey))
-            return m_attachmentCache.value(cacheKey);
+    if (!m_store) return {};
+    return m_store->attachmentsForMessage(accountEmail, folderName, uid);
+}
+
+static constexpr qint64 kAttachmentCacheTtlMs = 60LL * 60 * 1000; // 60 minutes
+
+static QString attachmentCacheKey(const QString &email, const QString &uid, const QString &partId) {
+    return email + "|"_L1 + uid + "|"_L1 + partId;
+}
+
+QString
+ImapService::cachedAttachmentPath(const QString &accountEmail, const QString &uid, const QString &partId) const {
+    QMutexLocker locker(&m_attachmentFileCacheMutex);
+    auto it = m_attachmentFileCache.find(attachmentCacheKey(accountEmail, uid, partId));
+    if (it == m_attachmentFileCache.end())
+        return {};
+    if (QDateTime::currentMSecsSinceEpoch() > it->expiresAt) {
+        QFile::remove(it->localPath);
+        m_attachmentFileCache.erase(it);
+        return {};
     }
+    return it->localPath;
+}
 
-    if (!m_accounts)
-        return out;
+void
+ImapService::attachmentCacheInsert(const QString &key, const QString &localPath) {
+    QMutexLocker locker(&m_attachmentFileCacheMutex);
+    if (m_attachmentFileCache.contains(key))
+        return;
+    // Evict expired entries before inserting.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (auto it = m_attachmentFileCache.begin(); it != m_attachmentFileCache.end(); ) {
+        if (now > it->expiresAt) {
+            QFile::remove(it->localPath);
+            it = m_attachmentFileCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    m_attachmentFileCache.insert(key, { localPath, now + kAttachmentCacheTtlMs });
+}
 
+void
+ImapService::runBackgroundTask(std::function<void()> task) {
+    auto *watcher = new QFutureWatcher<void>(this);
+    registerWatcher(watcher);
+    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher]() {
+        unregisterWatcher(watcher);
+        watcher->deleteLater();
+    });
+    watcher->setFuture(QtConcurrent::run(std::move(task)));
+}
+
+// Forward declaration — defined later in this file.
+static QByteArray fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid,
+                                          const QString &partId, const QString &encoding);
+
+void
+ImapService::prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
+    if (!m_store || !m_accounts)
+        return;
+
+    const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
+    if (attachments.isEmpty())
+        return;
+
+    // Resolve account on the main thread before going async.
     QVariantMap account;
     for (const auto &a : m_accounts->accounts()) {
         const auto row = a.toMap();
@@ -192,58 +246,115 @@ ImapService::attachmentsForMessage(const QString &accountEmail, const QString &f
         }
     }
     if (account.isEmpty())
-        return out;
+        return;
+
+    // Filter out already-cached (and not-yet-expired) attachments.
+    QVariantList toFetch;
+    for (const auto &a : attachments) {
+        const auto am = a.toMap();
+        if (cachedAttachmentPath(accountEmail, uid, am.value("partId"_L1).toString()).isEmpty())
+            toFetch.push_back(a);
+    }
+    if (toFetch.isEmpty())
+        return;
 
     const QString host = account.value("imapHost"_L1).toString();
-    const int port = account.value("imapPort"_L1).toInt();
-    const QString token = refreshAccessToken(account, accountEmail);
-    if (host.isEmpty() || port <= 0 || token.isEmpty())
-        return out;
+    const int     port = account.value("imapPort"_L1).toInt();
 
-    auto cxn = std::make_shared<Imap::Connection>();
-    if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
-        return out;
-    const auto selectResult = cxn->select(folderName);
-    if (!std::get<0>(selectResult))
-        return out;
+    runBackgroundTask([this, host, port, accountEmail, folderName, uid, account, toFetch]() {
+        const QString token = workerRefreshAccessToken(account, accountEmail);
+        if (token.isEmpty())
+            return;
 
-    const QString resp = cxn->execute(QStringLiteral("UID FETCH %1 (BODY.PEEK[])").arg(uid));
-    out = Mime::extractAttachmentsWithMailio(resp.toUtf8());
+        Imap::Connection cxn;
+        if (!cxn.connectAndAuth(host, port, accountEmail, token).success)
+            return;
+        const auto [selectOk, _] = cxn.select(folderName);
+        if (!selectOk)
+            return;
 
-    // Ensure display names are unique per message for UI clarity.
-    {
-        QHash<QString, int> seenNames;
-        for (int i = 0; i < out.size(); ++i) {
-            auto row = out[i].toMap();
-            const QString base = row.value("name"_L1).toString().trimmed().isEmpty()
-                ? QStringLiteral("Attachment")
-                : row.value("name"_L1).toString().trimmed();
-            const int count = seenNames.value(base, 0) + 1;
-            seenNames.insert(base, count);
-            if (count > 1)
-                row.insert("name"_L1, QStringLiteral("%1 (%2)").arg(base).arg(count));
-            else
-                row.insert("name"_L1, base);
-            out[i] = row;
+        const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                                + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
+
+        for (const auto &a : toFetch) {
+            if (m_destroying.load())
+                break;
+
+            const auto    am       = a.toMap();
+            const QString partId   = am.value("partId"_L1).toString();
+            const QString encoding = am.value("encoding"_L1).toString();
+            const QString name     = am.value("name"_L1).toString();
+
+            const QString key = attachmentCacheKey(accountEmail, uid, partId);
+            if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty())
+                continue; // already cached by a concurrent call
+
+            const QByteArray data = fetchAttachmentPartById(cxn, uid, partId, encoding);
+            if (data.isEmpty())
+                continue;
+
+            // Use a per-part subdirectory so the file has a clean user-visible name.
+            const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
+            const QString partDir    = cacheBase + "/"_L1 + safePartId;
+            QDir().mkpath(partDir);
+
+            const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
+            const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
+
+            QSaveFile f(localPath);
+            if (!f.open(QIODevice::WriteOnly))
+                continue;
+            f.write(data);
+            if (!f.commit())
+                continue;
+
+            attachmentCacheInsert(key, localPath);
+            emit attachmentReady(accountEmail, uid, partId, localPath);
         }
-    }
-
-    {
-        QMutexLocker lock(&m_attachmentCacheMutex);
-        m_attachmentCache.insert(cacheKey, out);
-    }
-    return out;
+    });
 }
 
 static QByteArray
-fetchAttachmentBytesByIndex(Imap::Connection &cxn, const QString &uid, const int index) {
-    const QString resp = cxn.execute(QStringLiteral("UID FETCH %1 (BODY.PEEK[])").arg(uid));
-    return Mime::extractAttachmentDataWithMailio(resp.toUtf8(), index);
+fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid, const QString &partId, const QString &encoding) {
+    const QByteArray raw = cxn.executeRaw("UID FETCH %1 (BODY.PEEK[%2])"_L1.arg(uid, partId));
+
+    // Extract the IMAP literal: find {N}\r\n and return the N bytes following it.
+    for (int i = 0; i < raw.size(); ++i) {
+        if (raw[i] != '{') continue;
+        int j = i + 1;
+        while (j < raw.size() && raw[j] >= '0' && raw[j] <= '9') ++j;
+        if (j <= i + 1 || j + 2 >= raw.size() || raw[j] != '}' || raw[j+1] != '\r' || raw[j+2] != '\n')
+            continue;
+        bool ok = false;
+        int len = raw.mid(i + 1, j - i - 1).toInt(&ok);
+        if (!ok || len <= 0) continue;
+        const int start = j + 3;
+        if (start >= raw.size()) break;
+        QByteArray literal = raw.mid(start, qMin(len, raw.size() - start));
+
+        const QString enc = encoding.trimmed().toLower();
+        if (enc == "base64"_L1) {
+            literal.replace("\r", "");
+            literal.replace("\n", "");
+            return QByteArray::fromBase64(literal);
+        }
+        if (enc == "quoted-printable"_L1)
+            return Imap::BodyProcessor::decodeQuotedPrintable(literal);
+        return literal;
+    }
+    return {};
 }
 
 void
 ImapService::openAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
-                            const QString &partId, const QString &fileName, const QString &) {
+                            const QString &partId, const QString &fileName, const QString &encoding) {
+    // Fast path: use prefetched cache file if available.
+    const QString cached = cachedAttachmentPath(accountEmail, uid, partId);
+    if (!cached.isEmpty() && QFile::exists(cached)) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(cached));
+        return;
+    }
+
     if (!m_accounts)
         return;
 
@@ -271,15 +382,14 @@ ImapService::openAttachment(const QString &accountEmail, const QString &folderNa
     if (!std::get<0>(selectResult))
         return;
 
-    const int index = partId.toInt();
-    const QByteArray data = fetchAttachmentBytesByIndex(*cxn, uid, index);
+    const QByteArray data = fetchAttachmentPartById(*cxn, uid, partId, encoding);
     if (data.isEmpty())
         return;
 
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     QDir().mkpath(dir);
-    const QString path = dir + "/kestrel-" + QString::number(QDateTime::currentMSecsSinceEpoch())
-                       + "-" + (fileName.isEmpty() ? QStringLiteral("attachment") : fileName);
+    const QString path = dir + "/kestrel-"_L1 + QString::number(QDateTime::currentMSecsSinceEpoch())
+                       + "-"_L1 + (fileName.isEmpty() ? QStringLiteral("attachment") : fileName);
 
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly))
@@ -293,36 +403,47 @@ ImapService::openAttachment(const QString &accountEmail, const QString &folderNa
 
 bool
 ImapService::saveAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
-                            const QString &partId, const QString &fileName, const QString &) {
-    if (!m_accounts)
-        return false;
-
-    QVariantMap account;
-    for (const auto &a : m_accounts->accounts()) {
-        const auto row = a.toMap();
-        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
-            account = row;
-            break;
-        }
+                            const QString &partId, const QString &fileName, const QString &encoding) {
+    // Acquire data — from cache if available, otherwise via IMAP.
+    QByteArray data;
+    const QString cached = cachedAttachmentPath(accountEmail, uid, partId);
+    if (!cached.isEmpty() && QFile::exists(cached)) {
+        QFile f(cached);
+        if (f.open(QIODevice::ReadOnly))
+            data = f.readAll();
     }
-    if (account.isEmpty())
-        return false;
 
-    const QString host = account.value("imapHost"_L1).toString();
-    const int port = account.value("imapPort"_L1).toInt();
-    const QString token = refreshAccessToken(account, accountEmail);
-    if (host.isEmpty() || port <= 0 || token.isEmpty())
-        return false;
+    if (data.isEmpty()) {
+        if (!m_accounts)
+            return false;
 
-    auto cxn = std::make_shared<Imap::Connection>();
-    if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
-        return false;
-    const auto selectResult = cxn->select(folderName);
-    if (!std::get<0>(selectResult))
-        return false;
+        QVariantMap account;
+        for (const auto &a : m_accounts->accounts()) {
+            const auto row = a.toMap();
+            if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
+                account = row;
+                break;
+            }
+        }
+        if (account.isEmpty())
+            return false;
 
-    const int index = partId.toInt();
-    const QByteArray data = fetchAttachmentBytesByIndex(*cxn, uid, index);
+        const QString host = account.value("imapHost"_L1).toString();
+        const int port = account.value("imapPort"_L1).toInt();
+        const QString token = refreshAccessToken(account, accountEmail);
+        if (host.isEmpty() || port <= 0 || token.isEmpty())
+            return false;
+
+        auto cxn = std::make_shared<Imap::Connection>();
+        if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
+            return false;
+        const auto selectResult = cxn->select(folderName);
+        if (!std::get<0>(selectResult))
+            return false;
+
+        data = fetchAttachmentPartById(*cxn, uid, partId, encoding);
+    }
+
     if (data.isEmpty())
         return false;
 
@@ -1196,7 +1317,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
     registerWatcher(watcher);
 
     connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, emailNorm, folderNorm, uidNorm, inFlightKey, userInitiated]() {
-        const auto bodyHtml = watcher->result().trimmed();
+        const QString html = watcher->result();
         unregisterWatcher(watcher);
         watcher->deleteLater();
 
@@ -1208,7 +1329,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         if (m_destroying)
             return;
 
-        if (bodyHtml.isEmpty()) {
+        if (html.isEmpty()) {
             qWarning().noquote() << "[hydrate-fail] reason=empty-body-html"
                                  << "account=" << emailNorm
                                  << "folder=" << folderNorm
@@ -1218,7 +1339,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return;
         }
 
-        m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, bodyHtml);
+        m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, html);
     });
 
     watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm]() -> QString {

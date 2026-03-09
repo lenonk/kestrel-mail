@@ -12,6 +12,8 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] Tags section should auto-refresh on startup: ensure tag data appears without manual collapse/expand, and default Tags group expanded state remains correct.
 - [ ] Window close via X no longer exits app reliably (regression after shutdown/crash fix) — restore normal close behavior without reintroducing thread-destroy crash.
 - [ ] Move MessageContentPane heavy processing from QML to C++ backend (first targets: sanitizeRenderHtml, tracking pixel/link normalization, darkenHtml injection pipeline).
+- [ ] Implement conversation/threaded message view (high priority; start soon).
+- [ ] Replace hardcoded Gmail category handling with DB-discovered categories (discover from message labels, persist category set, and read categories from DB everywhere UI/logic iterates them).
 
 ## Sync / Parity / Correctness
 

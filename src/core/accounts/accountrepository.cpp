@@ -7,36 +7,37 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 
+using namespace Qt::Literals::StringLiterals;
+
 AccountRepository::AccountRepository(QObject *parent)
-    : QObject(parent)
-{
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
-            + QStringLiteral("/kestrel-mail");
-    QDir().mkpath(base);
-    m_path = base + QStringLiteral("/accounts.json");
+    : QObject(parent) {
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/kestrel-mail"_L1;
+    // QDir().mkpath(base);
+    m_path = base + "/accounts.json"_L1;
     load();
 }
 
-QVariantList AccountRepository::accounts() const
-{
+QVariantList
+AccountRepository::accounts() const {
     return m_accounts;
 }
 
-void AccountRepository::addOrUpdateAccount(const QVariantMap &account)
-{
-    const QString email = account.value("email").toString().trimmed().toLower();
+void
+AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
+    const auto email = account.value("email").toString().trimmed().toLower();
+
     if (email.isEmpty()) {
         return;
     }
 
-    bool updated = false;
-    for (int i = 0; i < m_accounts.size(); ++i) {
-        QVariantMap existing = m_accounts[i].toMap();
-        if (existing.value("email").toString().trimmed().toLower() == email) {
+    auto updated = false;
+    for (auto & m_account : m_accounts) {
+        if (auto existing = m_account.toMap(); existing.value("email").toString().trimmed().toLower() == email) {
             for (auto it = account.constBegin(); it != account.constEnd(); ++it) {
                 existing.insert(it.key(), it.value());
             }
-            m_accounts[i] = existing;
+
+            m_account = existing;
             updated = true;
             break;
         }
@@ -50,15 +51,15 @@ void AccountRepository::addOrUpdateAccount(const QVariantMap &account)
     emit accountsChanged();
 }
 
-bool AccountRepository::removeAccount(const QString &email)
-{
-    const QString normalized = email.trimmed().toLower();
+bool
+AccountRepository::removeAccount(const QString &email) {
+    const auto normalized = email.trimmed().toLower();
     if (normalized.isEmpty()) {
         return false;
     }
 
     for (int i = 0; i < m_accounts.size(); ++i) {
-        const QVariantMap existing = m_accounts[i].toMap();
+        const auto existing = m_accounts[i].toMap();
         if (existing.value("email").toString().trimmed().toLower() == normalized) {
             m_accounts.removeAt(i);
             save();
@@ -66,30 +67,32 @@ bool AccountRepository::removeAccount(const QString &email)
             return true;
         }
     }
+
     return false;
 }
 
-void AccountRepository::load()
-{
+void
+AccountRepository::load() {
     QFile f(m_path);
+
     if (!f.open(QIODevice::ReadOnly)) {
         return;
     }
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-    const QJsonArray arr = doc.array();
+
+    const auto doc = QJsonDocument::fromJson(f.readAll());
+    const auto arr = doc.array();
     m_accounts.clear();
 
-    bool migrated = false;
+    auto migrated = false;
     for (const auto &v : arr) {
-        QVariantMap account = v.toObject().toVariantMap();
-        const QString providerId = account.value("providerId").toString();
-        if (providerId == QStringLiteral("gmail")) {
+        auto account = v.toObject().toVariantMap();
+        if (const auto providerId = account.value("providerId").toString(); providerId == QStringLiteral("gmail")) {
             if (account.value("oauthClientId").toString().trimmed().isEmpty()) {
-                account.insert("oauthClientId", QStringLiteral(""));
+                account.insert("oauthClientId", ""_L1);
                 migrated = true;
             }
             if (account.value("oauthClientSecret").toString().isEmpty()) {
-                account.insert("oauthClientSecret", QStringLiteral(""));
+                account.insert("oauthClientSecret", ""_L1);
                 migrated = true;
             }
         }
@@ -101,15 +104,19 @@ void AccountRepository::load()
     }
 }
 
-void AccountRepository::save() const
-{
+void
+AccountRepository::save() const {
     QJsonArray arr;
+
     for (const auto &entry : m_accounts) {
         arr.push_back(QJsonObject::fromVariantMap(entry.toMap()));
     }
+
     QFile f(m_path);
+
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         return;
     }
+
     f.write(QJsonDocument(arr).toJson(QJsonDocument::Indented));
 }

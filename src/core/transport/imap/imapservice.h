@@ -3,9 +3,9 @@
 #include <functional>
 #include <atomic>
 #include <QFuture>
+#include <QHash>
 #include <QSet>
 #include <QVariantList>
-#include <QHash>
 
 #include "sync/idlewatcher.h"
 #include "sync/backgroundworker.h"
@@ -43,12 +43,15 @@ public:
                                     const QString &partId, const QString &fileName, const QString &encoding);
     Q_INVOKABLE bool saveAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
                                     const QString &partId, const QString &fileName, const QString &encoding);
+    Q_INVOKABLE void prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid);
+    Q_INVOKABLE QString cachedAttachmentPath(const QString &accountEmail, const QString &uid, const QString &partId) const;
 
 signals:
     void syncFinished(bool ok, const QString &message);
     void syncActivityChanged(bool active);
     void hydrateStatus(bool ok, const QString &message);
     void realtimeStatus(bool ok, const QString &message);
+    void attachmentReady(const QString &accountEmail, const QString &uid, const QString &partId, const QString &localPath);
 
 private:
     // Internal result type for async sync work lambdas.
@@ -84,6 +87,10 @@ private:
     QSet<QString>             m_inFlightBodyHydrations;
     QMutex                    m_inFlightBodyHydrationsMutex;
 
+    struct AttachmentCacheEntry { QString localPath; qint64 expiresAt = 0; };
+    mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;
+    mutable QMutex                               m_attachmentFileCacheMutex;
+
     struct AccountInfo { QString email, host, accessToken; int port = 0; };
     struct SyncFolderOptions {
         bool announce = true;
@@ -111,6 +118,8 @@ private:
     void waitForActiveWatchers(int timeoutMs);
     void drainPendingSync();
     void runAsync(std::function<SyncResult()> work, std::function<void(const SyncResult&)> onDone);
+    void runBackgroundTask(std::function<void()> task);
+    void attachmentCacheInsert(const QString &key, const QString &localPath);
 
     QString workerRefreshAccessToken(const QVariantMap &account, const QString &email);
     QString refreshAccessToken(const QVariantMap &account, const QString &email);
@@ -147,7 +156,4 @@ private:
                                     const QString &folderName,
                                     const QString &uid,
                                     bool userInitiated);
-
-    mutable QMutex m_attachmentCacheMutex;
-    mutable QHash<QString, QVariantList> m_attachmentCache;
 };
