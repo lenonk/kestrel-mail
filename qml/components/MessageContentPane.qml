@@ -121,15 +121,24 @@ Rectangle {
     readonly property string renderedHtml: {
         if (!root.hasUsableBodyHtml)
             return "";
+        const t0 = Date.now();
         const base = root.htmlForMessage();
+        const t1 = Date.now();
+
         let sanitized = root.sanitizeRenderHtml(base);
+        const t2 = Date.now();
+
         // Neutralize tracking pixels unless the user has explicitly allowed them.
         // Reading root.trackingAllowed here makes this binding reactive to that property.
         if (!root.trackingAllowed)
             sanitized = root.neutralizeTrackingPixels(sanitized);
+        const t3 = Date.now();
+
         // Keep inline local images renderable while external images remain blocked.
         if (!root.imagesAllowed)
             sanitized = root.neutralizeExternalImages(sanitized);
+        const t4 = Date.now();
+
         // Inject a baseline background so plain-text and unstyled messages use the
         // theme background. No !important — emails with their own explicit backgrounds
         // will still override this. Reading the property here keeps the binding reactive.
@@ -137,7 +146,11 @@ Rectangle {
         const bgStyle = "<style data-kestrel-bg='baseline'>html,body{background-color:" + bgColor + ";}</style>";
         if (sanitized.indexOf("<head>") >= 0)
             sanitized = sanitized.replace("<head>", "<head>" + bgStyle);
-        return root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized;
+
+        const out = root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized;
+        const t5 = Date.now();
+        console.log("[perf-html] htmlFor=", (t1 - t0), "sanitize=", (t2 - t1), "track=", (t3 - t2), "external=", (t4 - t3), "finalize=", (t5 - t4), "total=", (t5 - t0), "len=", out.length);
+        return out;
     }
     property string selectedAttachmentKey: ""
 
@@ -505,8 +518,6 @@ Rectangle {
         const cidNames = bodyCidImageNames(baseHtml);
         const dataHashes = bodyDataImageHashes(baseHtml);
 
-        console.log("[cid-compare]", cidNames);
-
         const images = [];
         for (let i = 0; i < root.attachmentItems.length; i++) {
             const a = root.attachmentItems[i] || {};
@@ -519,7 +530,6 @@ Rectangle {
             const lowerName = name.toLowerCase();
             const encodedName = encodeURIComponent(name).toLowerCase();
             const alreadyByCid = cidNames.some(function (c) {
-                console.log("[cid-compare] Comparing:", c, "to:", lowerName, "and:", encodedName);
                 return c.indexOf(lowerName) >= 0 || c.indexOf(encodedName) >= 0;
             });
             if (alreadyByCid) {
@@ -1689,8 +1699,11 @@ Rectangle {
             property string lastLoadedHtmlKey: ""
             property string pendingHtml: ""
             property string pendingLoadReason: ""
+            property double pendingLoadQueuedAtMs: 0
+            property double pendingLoadStartedAtMs: 0
 
             function loadHtmlIfChanged(reason) {
+                const t0 = Date.now();
                 if (!root.renderedHtml.length)
                     return;
                 const key = (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml;
@@ -1699,7 +1712,9 @@ Rectangle {
                 lastLoadedHtmlKey = key;
                 pendingHtml = root.renderedHtml;
                 pendingLoadReason = reason;
+                pendingLoadQueuedAtMs = t0;
                 bodyOpacity = 0.0;
+                console.log("[perf-html] queue-load reason=", reason, "len=", pendingHtml.length);
                 fadeOutLoadTimer.restart();
             }
             function scrollHtmlBy(deltaY) {
@@ -1732,6 +1747,9 @@ Rectangle {
                 onTriggered: {
                     if (!htmlContainer.pendingHtml.length)
                         return;
+                    htmlContainer.pendingLoadStartedAtMs = Date.now();
+                    console.log("[perf-html] start-load reason=", htmlContainer.pendingLoadReason,
+                                "queueDelay=", (htmlContainer.pendingLoadStartedAtMs - htmlContainer.pendingLoadQueuedAtMs));
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }
@@ -1750,13 +1768,20 @@ Rectangle {
                 onLoadingChanged: function (req) {
                     const st = req.status;
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
-                        console.log("[html-load] status=", st, "errorCode=", req.errorCode, "errorDomain=", req.errorDomain, "errorString=", req.errorString || "");
+                        const tDone = Date.now();
+                        const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
+                        const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
+                        console.log("[html-load] status=", st, "errorCode=", req.errorCode, "errorDomain=", req.errorDomain, "errorString=", req.errorString || "",
+                                    "reason=", htmlContainer.pendingLoadReason, "loadMs=", loadMs, "totalMs=", totalMs);
 
                         htmlView.runJavaScript("(function(){try{var out=[];var root=document.querySelector('[data-kestrel-inline-attachments]');if(!root)return JSON.stringify({count:0,imgs:[]});var imgs=root.querySelectorAll('img');for(var i=0;i<imgs.length;i++){var im=imgs[i];out.push({src:im.currentSrc||im.src,complete:!!im.complete,naturalWidth:im.naturalWidth||0,naturalHeight:im.naturalHeight||0});}return JSON.stringify({count:imgs.length,imgs:out});}catch(e){return JSON.stringify({error:String(e)});}})();", function(result) {
                             console.log("[inline-image] dom-inspect", result || "");
                         });
 
                         htmlContainer.pendingHtml = "";
+                        htmlContainer.pendingLoadReason = "";
+                        htmlContainer.pendingLoadQueuedAtMs = 0;
+                        htmlContainer.pendingLoadStartedAtMs = 0;
                         htmlContainer.bodyOpacity = 1.0;
                     }
                 }
