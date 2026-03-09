@@ -936,7 +936,8 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
                              << "account=" << emailNorm
                              << "folder=" << folderNorm
                              << "uid=" << uidNorm;
-        emit hydrateStatus(false, "Message body fetch failed: account not found.");
+        // Background/body-hydration failures are logged with structured context,
+        // but should not surface user-facing error toasts.
         return;
     }
 
@@ -961,7 +962,7 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
                                  << "account=" << emailNorm
                                  << "folder=" << folderNorm
                                  << "uid=" << uidNorm;
-            emit hydrateStatus(false, "Message body fetch failed: parser returned empty HTML.");
+            // Logged above as [hydrate-fail]; suppress user-facing toast noise.
             return;
         }
 
