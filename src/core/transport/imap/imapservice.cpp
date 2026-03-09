@@ -917,7 +917,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             flush();
             result.ok      = true;
             result.inserted = inboxInserted;
-            result.message  = QStringLiteral("%1 synced %2 messages.").arg(target).arg(result.headers.size());
+            result.message  = QStringLiteral("%1 sync complete.").arg(target);
 
             return result;
         },
