@@ -92,6 +92,10 @@ Rectangle {
 
             property real preservedContentY: 0
             property bool restorePending: false
+            property var folderScrollByKey: ({})
+            property string lastFolderKey: (root.appRoot && root.appRoot.selectedFolderKey)
+                                           ? root.appRoot.selectedFolderKey.toString()
+                                           : ""
 
             property bool debugHoverPopupEnabled: false
             property string debugHoverPayload: ""
@@ -125,9 +129,23 @@ Rectangle {
                 ignoreUnknownSignals: true
 
                 function onSelectedFolderKeyChanged() {
+                    const oldKey = groupedMessageList.lastFolderKey
+                    if (oldKey && oldKey.length)
+                        groupedMessageList.folderScrollByKey[oldKey] = groupedMessageList.contentY
+
+                    const newKey = (root.appRoot.selectedFolderKey || "").toString()
+                    groupedMessageList.lastFolderKey = newKey
+
                     groupedMessageList.restorePending = false
                     groupedMessageList.preservedContentY = 0
-                    Qt.callLater(function() { groupedMessageList.contentY = 0 })
+
+                    const saved = groupedMessageList.folderScrollByKey[newKey]
+                    const targetY = (saved === undefined || saved === null) ? 0 : Number(saved)
+
+                    Qt.callLater(function() {
+                        const maxY = Math.max(0, groupedMessageList.contentHeight - groupedMessageList.height)
+                        groupedMessageList.contentY = Math.max(0, Math.min(maxY, isFinite(targetY) ? targetY : 0))
+                    })
                 }
             }
 
