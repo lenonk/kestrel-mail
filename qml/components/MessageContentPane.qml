@@ -64,8 +64,6 @@ Rectangle {
 
     property bool imagesAllowed: false
     property bool trackingAllowed: false
-    // Temporary perf instrumentation flag for content pane optimization pass.
-    property bool perfLogEnabled: true
 
     // Read domain directly from messageData.sender to avoid transient binding lag
     // through senderText/senderEmail during selection updates.
@@ -291,7 +289,6 @@ Rectangle {
     // criteria as _trackerInfo (including first-party skip). The original src is preserved in
     // data-tracking-src for later restore.
     function neutralizeTrackingPixels(html) {
-        const t0 = Date.now()
         const blank = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
         const senderDom = root.senderDomain || ""
         let count = 0
@@ -312,8 +309,6 @@ Rectangle {
         })
         if (count === 0)
             console.log("[tracking] neutralizeTrackingPixels called but no 1×1 pixels found")
-        if (root.perfLogEnabled)
-            console.log("[perf-content] neutralizeTrackingPixels ms=" + (Date.now() - t0) + " pixels=" + count)
         return result
     }
 
@@ -355,17 +350,8 @@ Rectangle {
     }
 
     function sanitizeRenderHtml(rawHtml) {
-        const t0 = Date.now()
-        function done(result, mode) {
-            if (root.perfLogEnabled)
-                console.log("[perf-content] sanitizeRenderHtml ms=" + (Date.now() - t0)
-                            + " inChars=" + ((rawHtml || "").toString().length)
-                            + " outChars=" + (result ? result.length : 0)
-                            + " mode=" + mode)
-            return result
-        }
         let html = (rawHtml || "").toString()
-        if (!html.length) return done("<html><body></body></html>", "empty")
+        if (!html.length) return "<html><body></body></html>"
 
         html = html.replace(/\r\n/g, "\n")
 
@@ -386,7 +372,7 @@ Rectangle {
         // If we already have a full HTML document, avoid destructive rewrites.
         const trimmed = html.trim()
         if (/<html\b/i.test(trimmed) && /<\/html>\s*$/i.test(trimmed)) {
-            return done(trimmed, "full-html")
+            return trimmed
         }
 
         // If we got MIME-ish payload, cut to content after first header break.
@@ -440,7 +426,7 @@ Rectangle {
 
         if (!hasHtmlish) {
             const escaped = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-            return done("<!doctype html><html><head><meta charset='utf-8'></head><body><pre style='white-space:pre-wrap;font-family:sans-serif;'>" + escaped + "</pre></body></html>", "plain-text")
+            return "<!doctype html><html><head><meta charset='utf-8'></head><body><pre style='white-space:pre-wrap;font-family:sans-serif;'>" + escaped + "</pre></body></html>"
         }
 
         if (hasHtmlTag) {
@@ -452,18 +438,17 @@ Rectangle {
             if (!hasBodyTag) {
                 html = html.replace(/<\/html>\s*$/i, "<body></body></html>")
             }
-            return done(html, "has-html-tag")
+            return html
         }
 
         if (hasBodyTag) {
-            return done("<!doctype html><html><head><meta charset='utf-8'></head>" + html + "</html>", "has-body-tag")
+            return "<!doctype html><html><head><meta charset='utf-8'></head>" + html + "</html>"
         }
 
-        return done("<!doctype html><html><head><meta charset='utf-8'></head><body>" + html + "</body></html>", "wrapped-body")
+        return "<!doctype html><html><head><meta charset='utf-8'></head><body>" + html + "</body></html>"
     }
 
     function darkenHtml(html) {
-        const t0 = Date.now()
         const darkBg      = Kirigami.Theme.backgroundColor.toString()
         const surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString()
         const lightText   = Kirigami.Theme.textColor.toString()
@@ -530,16 +515,13 @@ Rectangle {
         const inject = style + script;
         if (html.indexOf("<head>") >= 0) {
             const out = html.replace("<head>", "<head>" + inject)
-            if (root.perfLogEnabled) console.log("[perf-content] darkenHtml ms=" + (Date.now() - t0) + " mode=head")
             return out
         }
         if (html.indexOf("<html") >= 0) {
             const out = html.replace(/<html[^>]*>/i, function(m) { return m + "<head>" + inject + "</head>" })
-            if (root.perfLogEnabled) console.log("[perf-content] darkenHtml ms=" + (Date.now() - t0) + " mode=html")
             return out
         }
         const out = "<html><head>" + inject + "</head><body>" + html + "</body></html>"
-        if (root.perfLogEnabled) console.log("[perf-content] darkenHtml ms=" + (Date.now() - t0) + " mode=wrap")
         return out
     }
 
@@ -1065,9 +1047,6 @@ Rectangle {
                 onTriggered: {
                     if (!htmlContainer.pendingHtml.length)
                         return
-                    if (root.perfLogEnabled)
-                        console.log("[perf-content] loadHtml reason=" + htmlContainer.pendingLoadReason
-                                    + " chars=" + htmlContainer.pendingHtml.length)
                     htmlView.loadHtml(htmlContainer.pendingHtml, "http://kestrel.local/")
                 }
             }
@@ -1118,15 +1097,6 @@ Rectangle {
                         htmlContainer.bodyOpacity = 1.0
                     }
 
-                    if (!root.perfLogEnabled)
-                        return
-
-                    if (st === WebEngineLoadingInfo.LoadStartedStatus)
-                        console.log("[perf-content] webview load started")
-                    else if (st === WebEngineLoadingInfo.LoadSucceededStatus)
-                        console.log("[perf-content] webview load succeeded")
-                    else if (st === WebEngineLoadingInfo.LoadFailedStatus)
-                        console.log("[perf-content] webview load failed code=" + req.errorCode)
                 }
 
                 Component.onCompleted: htmlContainer.loadHtmlIfChanged("component")
