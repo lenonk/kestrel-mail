@@ -1704,13 +1704,13 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
             if (email != accountEmail) continue;
 
-            auto cxn = std::make_shared<Imap::Connection>();
-            if (!cxn->connectAndAuth(host, port, email, accessToken).success) return;
-            if (const auto [ok, _] = cxn->select(folder); !ok) return;
-
-            // UID MOVE (RFC 6851) — atomic copy+expunge in one round-trip.
-            const QString resp = cxn->execute(
-                "UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
+            QString resp;
+            const bool pooledOk = ImapService::withPooledConnection(host, port, email, accessToken, folder, 3500,
+                [&](Imap::Connection &cxn) {
+                    // UID MOVE (RFC 6851) — atomic copy+expunge in one round-trip.
+                    resp = cxn.execute("UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
+                });
+            if (!pooledOk) return;
 
             qInfo().noquote() << "[move-message]"
                               << "uid=" << uid << "from=" << folder
@@ -1763,11 +1763,12 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
         for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
             if (email != accountEmail) continue;
 
-            auto cxn = std::make_shared<Imap::Connection>();
-            if (!cxn->connectAndAuth(host, port, email, accessToken).success) return;
-            if (const auto [ok, _] = cxn->select(folder); !ok) return;
-
-            const auto result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
+            QString result;
+            const bool pooledOk = ImapService::withPooledConnection(host, port, email, accessToken, folder, 3500,
+                [&](Imap::Connection &cxn) {
+                    result = cxn.execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
+                });
+            if (!pooledOk) return;
 
             qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
             return;
