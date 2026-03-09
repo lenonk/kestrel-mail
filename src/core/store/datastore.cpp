@@ -2550,8 +2550,9 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
 
         static const QRegularExpression imgTagRe(QStringLiteral("<img\\b[^>]*>"), QRegularExpression::CaseInsensitiveOption);
         static const QRegularExpression srcRe(QStringLiteral("\\bsrc\\s*=\\s*[\"'](https?://[^\"']+)[\"']"), QRegularExpression::CaseInsensitiveOption);
-        static const QRegularExpression widthRe(QStringLiteral("\\bwidth\\s*=\\s*[\"']?\\s*1\\s*[\"']?"), QRegularExpression::CaseInsensitiveOption);
-        static const QRegularExpression heightRe(QStringLiteral("\\bheight\\s*=\\s*[\"']?\\s*1\\s*[\"']?"), QRegularExpression::CaseInsensitiveOption);
+        // Match MessageContentPane tracker criteria more strictly: quoted width/height="1".
+        static const QRegularExpression widthRe(QStringLiteral("\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"']"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression heightRe(QStringLiteral("\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"']"), QRegularExpression::CaseInsensitiveOption);
         static const QRegularExpression hostRe(QStringLiteral("^https?://([^/?#]+)"), QRegularExpression::CaseInsensitiveOption);
 
         auto sldFromHost = [](const QString &hostRaw) {

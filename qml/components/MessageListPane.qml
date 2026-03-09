@@ -553,16 +553,16 @@ Rectangle {
 
                                         Kirigami.Icon {
                                             source: "crosshairs"
-                                            Layout.preferredWidth: 16
-                                            Layout.preferredHeight: 16
+                                            Layout.preferredWidth: 18
+                                            Layout.preferredHeight: 18
                                             opacity: 0.78
                                             visible: !!hasTrackingPixel
                                         }
 
                                         Kirigami.Icon {
                                             source: "mail-attachment"
-                                            Layout.preferredWidth: 16
-                                            Layout.preferredHeight: 16
+                                            Layout.preferredWidth: 18
+                                            Layout.preferredHeight: 18
                                             opacity: 0.75
                                             visible: !!hasAttachments
                                         }
