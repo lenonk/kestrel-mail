@@ -92,6 +92,7 @@ Rectangle {
 
             property real preservedContentY: 0
             property bool restorePending: false
+            property bool restoreTargetLocked: false
             property var folderScrollByKey: ({})
             property string lastFolderKey: (root.appRoot && root.appRoot.selectedFolderKey)
                                            ? root.appRoot.selectedFolderKey.toString()
@@ -121,6 +122,7 @@ Rectangle {
                     const maxY = Math.max(0, groupedMessageList.contentHeight - groupedMessageList.height)
                     groupedMessageList.contentY = Math.max(0, Math.min(maxY, groupedMessageList.preservedContentY))
                     groupedMessageList.restorePending = false
+                    groupedMessageList.restoreTargetLocked = false
                 })
             }
 
@@ -140,6 +142,7 @@ Rectangle {
                     const targetY = (saved === undefined || saved === null) ? 0 : Number(saved)
 
                     groupedMessageList.preservedContentY = isFinite(targetY) ? targetY : 0
+                    groupedMessageList.restoreTargetLocked = true
                     groupedMessageList.restorePending = true
                     groupedMessageList.queueRestoreScroll()
                 }
@@ -150,7 +153,8 @@ Rectangle {
                 ignoreUnknownSignals: true
 
                 function onModelAboutToBeReset() {
-                    groupedMessageList.preservedContentY = groupedMessageList.contentY
+                    if (!groupedMessageList.restoreTargetLocked)
+                        groupedMessageList.preservedContentY = groupedMessageList.contentY
                     groupedMessageList.restorePending = true
                 }
 
@@ -159,12 +163,14 @@ Rectangle {
                 }
 
                 function onRowsAboutToBeInserted() {
-                    groupedMessageList.preservedContentY = groupedMessageList.contentY
+                    if (!groupedMessageList.restoreTargetLocked)
+                        groupedMessageList.preservedContentY = groupedMessageList.contentY
                     groupedMessageList.restorePending = true
                 }
 
                 function onRowsAboutToBeRemoved() {
-                    groupedMessageList.preservedContentY = groupedMessageList.contentY
+                    if (!groupedMessageList.restoreTargetLocked)
+                        groupedMessageList.preservedContentY = groupedMessageList.contentY
                     groupedMessageList.restorePending = true
                 }
 
