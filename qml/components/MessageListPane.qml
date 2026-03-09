@@ -136,16 +136,12 @@ Rectangle {
                     const newKey = (root.appRoot.selectedFolderKey || "").toString()
                     groupedMessageList.lastFolderKey = newKey
 
-                    groupedMessageList.restorePending = false
-                    groupedMessageList.preservedContentY = 0
-
                     const saved = groupedMessageList.folderScrollByKey[newKey]
                     const targetY = (saved === undefined || saved === null) ? 0 : Number(saved)
 
-                    Qt.callLater(function() {
-                        const maxY = Math.max(0, groupedMessageList.contentHeight - groupedMessageList.height)
-                        groupedMessageList.contentY = Math.max(0, Math.min(maxY, isFinite(targetY) ? targetY : 0))
-                    })
+                    groupedMessageList.preservedContentY = isFinite(targetY) ? targetY : 0
+                    groupedMessageList.restorePending = true
+                    groupedMessageList.queueRestoreScroll()
                 }
             }
 
