@@ -14,7 +14,7 @@ namespace Imap {
  * SELECT is performed internally by execute(), including [Gmail]/[Google Mail] alias
  * fallback. The caller does not need to SELECT before calling execute().
  */
-class FolderSync : public SyncStrategy {
+class SyncEngine : public SyncStrategy {
 public:
     /**
      * Fetch the folder list for an account.

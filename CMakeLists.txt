@@ -93,7 +93,7 @@ qt_add_executable(kestrel-mail
     src/core/transport/imap/connection/imapconnection.cpp
     src/core/transport/imap/sync/syncstrategy.cpp
     src/core/transport/imap/sync/syncutils.cpp
-    src/core/transport/imap/sync/foldersync.cpp
+    src/core/transport/imap/sync/syncengine.cpp
     src/core/transport/imap/sync/idlewatcher.cpp
     src/core/transport/imap/sync/backgroundworker.cpp
     src/core/transport/imap/message/messagehydrator.cpp

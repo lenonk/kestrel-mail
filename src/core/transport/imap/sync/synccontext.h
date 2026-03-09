@@ -14,7 +14,7 @@ namespace Imap {
  * Encapsulates all inputs needed by sync strategies.
  *
  * The Connection object (ctx.cxn) must already be authenticated via
- * connectAndAuth() before execute() is called. FolderSync::execute()
+ * connectAndAuth() before execute() is called. SyncEngine::execute()
  * handles SELECT internally.
  */
 struct SyncContext {
@@ -44,7 +44,7 @@ struct SyncContext {
     std::function<bool(const QString &email, int ttlSecs, int maxFailures)> avatarShouldRefresh;
 
     // Returns UIDs already stored locally for a given account+folder.
-    // Called on whichever thread FolderSync runs on via BlockingQueuedConnection.
+    // Called on whichever thread SyncEngine runs on via BlockingQueuedConnection.
     std::function<QStringList(const QString &email, const QString &folder)> getFolderUids;
 
     // Remove UIDs from every folder for the given account (delete reconciliation).

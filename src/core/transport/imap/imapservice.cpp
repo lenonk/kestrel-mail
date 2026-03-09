@@ -5,7 +5,7 @@
 #include "../../store/datastore.h"
 #include "connection/imapconnection.h"
 #include "sync/syncutils.h"
-#include "sync/foldersync.h"
+#include "sync/syncengine.h"
 #include "sync/synccontext.h"
 #include "message/messagehydrator.h"
 
@@ -437,7 +437,7 @@ ImapService::backgroundLoginSessionStartup(const QVariantMap &account, const QSt
     const int port = account.value("imapPort"_L1).toInt();
 
     QString status;
-    const QVariantList folders = Imap::FolderSync::fetchFolders(host, port, email, accessToken, &status);
+    const QVariantList folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &status);
 
     for (const QVariant &fv : folders) {
         const QVariantMap folder = fv.toMap();
@@ -457,7 +457,7 @@ ImapService::backgroundListFolders(const QVariantMap &account, const QString &em
     QString status;
     const QString host = account.value("imapHost"_L1).toString();
     const int port = account.value("imapPort"_L1).toInt();
-    const QVariantList folders = Imap::FolderSync::fetchFolders(host, port, email, accessToken, &status);
+    const QVariantList folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &status);
 
     QStringList out;
     out.reserve(folders.size());
@@ -665,7 +665,7 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
         return {};
     }
 
-    // ── Build context and delegate to FolderSync ─────────────────────────────
+    // ── Build context and delegate to SyncEngine ─────────────────────────────
     Imap::SyncContext ctx;
     ctx.cxn                     = cxn;
     ctx.folderName              = folderName;
@@ -704,8 +704,8 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
         }, Qt::QueuedConnection);
     };
 
-    // FolderSync::execute() handles SELECT internally.
-    const Imap::SyncResult syncResult = Imap::FolderSync{}.execute(ctx);
+    // SyncEngine::execute() handles SELECT internally.
+    const Imap::SyncResult syncResult = Imap::SyncEngine{}.execute(ctx);
 
     if (statusOut)
         *statusOut = syncResult.statusMessage;
@@ -832,7 +832,7 @@ ImapService::refreshFolderList(bool announce) {
                 }
 
                 QString status;
-                const auto folders = Imap::FolderSync::fetchFolders(host, port, email, accessToken, &status);
+                const auto folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &status);
                 total += folders.size();
 
                 for (const QVariant &fv : folders) {
@@ -1296,7 +1296,7 @@ ImapService::syncAll(bool announce) {
 
                 // Fetch and store folder list
                 QString folderStatus;
-                const auto folders = Imap::FolderSync::fetchFolders(host, port, email, accessToken, &folderStatus);
+                const auto folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &folderStatus);
                 for (const auto &fv : folders) {
                     const auto f = fv.toMap();
                     QMetaObject::invokeMethod(this, [this, f]() { m_store->upsertFolder(f); },

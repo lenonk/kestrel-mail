@@ -1,4 +1,4 @@
-#include "foldersync.h"
+#include "syncengine.h"
 #include "syncutils.h"
 #include "kestreltimer.h"
 #include "../parser/responseparser.h"
@@ -930,11 +930,11 @@ executeFull(SyncContext &ctx) {
 } // anonymous namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FolderSync public API
+// SyncEngine public API
 // ─────────────────────────────────────────────────────────────────────────────
 
 QVariantList
-FolderSync::fetchFolders(const QString &host, const qint32 port,
+SyncEngine::fetchFolders(const QString &host, const qint32 port,
                          const QString &email, const QString &accessToken,
                          QString *statusOut) {
     if (accessToken.isEmpty()) {
@@ -966,7 +966,7 @@ FolderSync::fetchFolders(const QString &host, const qint32 port,
 }
 
 SyncResult
-FolderSync::execute(SyncContext &ctx) {
+SyncEngine::execute(SyncContext &ctx) {
     KestrelTimer flagsReconcileTimer;
 
     if (!ctx.cxn) {
