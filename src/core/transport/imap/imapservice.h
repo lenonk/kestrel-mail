@@ -29,7 +29,7 @@ public:
     ~ImapService() override;
 
     Q_INVOKABLE void syncAll(bool announce = true);
-    std::shared_ptr<Imap::Connection> getPooledConnection();
+    static std::shared_ptr<Imap::Connection> getPooledConnection(const QString &email = {});
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true);
     Q_INVOKABLE void refreshFolderList(bool announce = true);
     Q_INVOKABLE void hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid);
@@ -118,8 +118,6 @@ private:
     void idleRemoveUids(const QString &email, const QStringList &uids);
     void idleOnInboxChanged();
     void workerEmitRealtimeStatus(bool ok, const QString &message);
-    void backgroundOnLoopError(const QString &message);
-    void backgroundLoginSessionStartup(const QVariantMap &account, const QString &email, const QString &accessToken);
     void backgroundSyncHeadersAndFlags(const QVariantMap &account, const QString &email,
                                        const QString &folder, const QString &accessToken);
     void backgroundFetchBodies(const QVariantMap &account, const QString &email,
@@ -139,15 +137,11 @@ private:
     QStringList idleGetFolderUids(const QString &email, const QString &folder);
 
     void backgroundOnIdleLiveUpdate(const QVariantMap &account, const QString &email);
-    QStringList backgroundListFolders(const QVariantMap &account, const QString &email, const QString &accessToken);
-    bool backgroundShouldSyncFolder(const QVariantMap &account, const QString &email,
-                                    const QString &folder, const QString &accessToken);
 
     [[nodiscard]] QVariantList workerGetAccounts() const;
     [[nodiscard]] QVariantMap loadFolderStatusSnapshot(const QString &accountEmail, const QString &folder) const;
 
-    QVariantList fetchFolderHeaders(const QString &host, int port,
-                                   const QString &email, const QString &accessToken,
+    QVariantList fetchFolderHeaders(const QString &email,
                                    QString *statusOut,
                                    const QString &folderName = QStringLiteral("INBOX"),
                                    const std::function<void(const QVariantMap &)> &onHeader = {},

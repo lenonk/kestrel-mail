@@ -9,8 +9,6 @@
 #include <QVariantList>
 #include <QVariantMap>
 
-#include "src/core/transport/imap/connection/imapconnection.h"
-
 namespace Imap {
 class Connection;
 
@@ -30,15 +28,11 @@ signals:
     void requestAccounts(QVariantList *out);
     void requestRefreshAccessToken(const QVariantMap &account, const QString &email, QString *out);
 
-    void loginSessionStartupRequested(const QVariantMap &account, const QString &email, const QString &accessToken);
-    void listFoldersRequested(const QVariantMap &account, const QString &email, const QString &accessToken,
-                              QStringList *out);
+    void upsertFoldersRequested(const QVariantList &folders);
     void loadFolderStatusSnapshotRequested(const QString &accountEmail, const QString &folder,
                                            qint64 *uidNext, qint64 *highestModSeq, qint64 *messages, bool *found);
     void saveFolderStatusSnapshotRequested(const QString &accountEmail, const QString &folder,
                                            qint64 uidNext, qint64 highestModSeq, qint64 messages);
-    void shouldSyncFolderRequested(const QVariantMap &account, const QString &email, const QString &folder,
-                                   const QString &accessToken, bool *out);
     void syncHeadersAndFlagsRequested(const QVariantMap &account, const QString &email, const QString &folder,
                                       const QString &accessToken);
     void fetchBodiesRequested(const QVariantMap &account, const QString &email, const QString &folder,
@@ -56,8 +50,6 @@ private:
 
     int m_intervalSeconds = 120;
 
-    std::unique_ptr<Connection> m_cxn { nullptr };
-
     QVariantMap m_activeAccount;
     QString m_activeEmail;
     QString m_activeAccessToken;
@@ -69,7 +61,7 @@ private:
     };
 
     void doBootstrap();
-    std::pair<bool, QString> connectAndAuth();
+    std::pair<bool, QString> resolveAccount();
     FolderStatus fetchFolderStatus(const QString &folder) const;
 
     QHash<QString, FolderStatus> m_lastFolderStatus;

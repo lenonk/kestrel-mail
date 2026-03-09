@@ -1,8 +1,10 @@
 #include "backgroundworker.h"
 
 #include "syncutils.h"
-#include "src/core/transport/imap/connection/imapconnection.h"
+#include "syncengine.h"
+#include "../imapservice.h"
 
+#include <QSet>
 #include <QRegularExpression>
 
 using namespace Qt::Literals::StringLiterals;
@@ -10,10 +12,8 @@ using namespace Qt::Literals::StringLiterals;
 namespace Imap {
 
 std::pair<bool, QString>
-BackgroundWorker::connectAndAuth() {
+BackgroundWorker::resolveAccount() {
     static int consecutiveFailures = 0;
-
-    m_cxn = std::make_unique<Connection>();
 
     QVariantList accounts;
     emit requestAccounts(&accounts);
@@ -37,13 +37,6 @@ BackgroundWorker::connectAndAuth() {
         return {false, err};
     }
 
-    if (const auto connectResult = m_cxn->connectAndAuth(target.host, target.port, target.email, accessToken); !connectResult.success) {
-        SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
-                                 m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                 consecutiveFailures, connectResult.message, 10, &m_running);
-        return {false, connectResult.message};
-    }
-
     m_activeAccount = target.account;
     m_activeEmail = target.email;
     m_activeAccessToken = accessToken;
@@ -56,14 +49,15 @@ BackgroundWorker::FolderStatus
 BackgroundWorker::fetchFolderStatus(const QString &folder) const {
     FolderStatus out;
 
-    if (!m_cxn || !m_cxn->isConnected())
+    auto cxn = ImapService::getPooledConnection(m_activeEmail);
+    if (!cxn)
         return out;
 
     QString mailbox = folder;
     mailbox.replace("\\"_L1, "\\\\"_L1);
     mailbox.replace("\""_L1, "\\\""_L1);
 
-    const auto resp = m_cxn->execute(
+    const auto resp = cxn->execute(
         QStringLiteral("STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)").arg(mailbox));
 
     static const QRegularExpression uidNextRe(QStringLiteral("\\bUIDNEXT\\s+(\\d+)"),
@@ -85,7 +79,6 @@ BackgroundWorker::fetchFolderStatus(const QString &folder) const {
 
 void
 BackgroundWorker::doBootstrap() {
-    emit loginSessionStartupRequested(m_activeAccount, m_activeEmail, m_activeAccessToken);
     m_bootstrapped = true;
 }
 
@@ -95,7 +88,7 @@ BackgroundWorker::start() {
         return;
 
     while (m_running) {
-        if (const auto [ok, err] = connectAndAuth(); !ok) {
+        if (const auto [ok, err] = resolveAccount(); !ok) {
             emit loopError(err);
             continue;
         }
@@ -103,8 +96,43 @@ BackgroundWorker::start() {
         if (!m_bootstrapped.load())
             doBootstrap();
 
+        auto pooled = ImapService::getPooledConnection(m_activeEmail);
+        if (!pooled) {
+            emit loopError("Background sync: pooled connection unavailable."_L1);
+            SyncUtils::sleepInterruptible(m_running, 2);
+            continue;
+        }
+
+        QString folderStatus;
+        const QVariantList folderRows = SyncEngine::fetchFolders(pooled, &folderStatus);
+        emit upsertFoldersRequested(folderRows);
+
+        QSet<QString> parentContainers;
+        for (const QVariant &f : folderRows) {
+            const QString name = f.toMap().value("name"_L1).toString().trimmed();
+            const int slash = name.indexOf('/');
+            if (slash > 0)
+                parentContainers.insert(name.left(slash).toLower());
+        }
+
         QStringList folders;
-        emit listFoldersRequested(m_activeAccount, m_activeEmail, m_activeAccessToken, &folders);
+        folders.reserve(folderRows.size());
+        for (const QVariant &f : folderRows) {
+            const auto row = f.toMap();
+            const QString name = row.value("name"_L1).toString().trimmed();
+            const QString flags = row.value("flags"_L1).toString().toLower();
+            const QString lowerName = name.toLower();
+
+            const bool isNoSelect = flags.contains("\\noselect"_L1);
+            const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
+            const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
+                                      || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0;
+            const bool isParentContainer = parentContainers.contains(lowerName);
+
+            if (name.isEmpty() || isNoSelect || isCategory || isContainerRoot || isParentContainer)
+                continue;
+            folders.push_back(name);
+        }
 
         for (const auto &folder : folders) {
             if (!m_running.load())
@@ -137,9 +165,7 @@ BackgroundWorker::start() {
                                       || (status.highestModSeq > 0 && status.highestModSeq != previousStatus.highestModSeq)
                                       || (status.messages >= 0 && status.messages != previousStatus.messages);
 
-            auto shouldSync = changedByStatus;
-            emit shouldSyncFolderRequested(m_activeAccount, m_activeEmail, folder, m_activeAccessToken, &shouldSync);
-            if (!shouldSync)
+            if (!changedByStatus)
                 continue;
 
             emit syncHeadersAndFlagsRequested(m_activeAccount, m_activeEmail, folder, m_activeAccessToken);
@@ -157,10 +183,6 @@ BackgroundWorker::start() {
         SyncUtils::sleepInterruptible(m_running, m_intervalSeconds);
     }
 
-    if (m_cxn)
-        m_cxn->disconnect();
-
-    m_cxn.reset();
     m_running = false;
 }
 

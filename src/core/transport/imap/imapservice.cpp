@@ -32,7 +32,6 @@
 #include <QThread>
 #include <QTimer>
 #include <QUrlQuery>
-#include <QVector>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -49,31 +48,34 @@ namespace {
 struct PooledConnSlot {
     std::unique_ptr<Imap::Connection> conn;
     bool busy = false;
+    QString email;
     QString host;
     int port = 0;
-    QString email;
 };
 
 QMutex g_poolMutex;
 QWaitCondition g_poolWait;
-QVector<PooledConnSlot> g_poolSlots;
-std::atomic_bool g_poolPrewarmed{false};
-constexpr int kOperationalPoolMax = 3; // Separate from IDLE connection.
+std::vector<PooledConnSlot> g_poolSlots;
+std::atomic_bool g_poolInitialized{false};
+std::function<QString(const QString &email)> g_poolTokenRefresher;
+constexpr int kOperationalPoolMax = 5;
 constexpr int kPoolAcquireTimeoutMs = 3500;
 }
 
-std::shared_ptr<Imap::Connection> ImapService::getPooledConnection() {
+std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString &email) {
     int slotIndex = -1;
     const auto deadline = QDateTime::currentMSecsSinceEpoch() + kPoolAcquireTimeoutMs;
 
     QMutexLocker lock(&g_poolMutex);
     while (true) {
-        for (int i = 0; i < g_poolSlots.size(); ++i) {
-            if (!g_poolSlots[i].busy) {
-                g_poolSlots[i].busy = true;
-                slotIndex = i;
-                break;
-            }
+        for (int i = 0; i < static_cast<int>(g_poolSlots.size()); ++i) {
+            if (g_poolSlots[i].busy)
+                continue;
+            if (!email.isEmpty() && g_poolSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
+                continue;
+            g_poolSlots[i].busy = true;
+            slotIndex = i;
+            break;
         }
 
         if (slotIndex >= 0)
@@ -87,13 +89,35 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection() {
     }
 
     Imap::Connection *raw = g_poolSlots[slotIndex].conn.get();
-    return std::shared_ptr<Imap::Connection>(raw, [slotIndex](Imap::Connection *) {
-        QMutexLocker rel(&g_poolMutex);
-        if (slotIndex >= 0 && slotIndex < g_poolSlots.size()) {
+    const QString slotEmail = g_poolSlots[slotIndex].email;
+    const QString slotHost  = g_poolSlots[slotIndex].host;
+    const int     slotPort  = g_poolSlots[slotIndex].port;
+    lock.unlock();
+
+    if (!raw->isConnected()) {
+        std::function<QString(const QString &)> refresher;
+        {
+            QMutexLocker rl(&g_poolMutex);
+            refresher = g_poolTokenRefresher;
+        }
+        const QString token = refresher ? refresher(slotEmail) : QString{};
+        if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token).success) {
+            QMutexLocker rl(&g_poolMutex);
             g_poolSlots[slotIndex].busy = false;
             g_poolWait.wakeOne();
+            return {};
         }
-    });
+    }
+
+    qInfo().noquote() << "[conn-pool] connection: " << slotIndex << " leased";
+    return {raw, [slotIndex](Imap::Connection *) {
+        QMutexLocker rel(&g_poolMutex);
+        if (slotIndex >= 0 && slotIndex < static_cast<int>(g_poolSlots.size())) {
+            g_poolSlots[slotIndex].busy = false;
+            g_poolWait.wakeOne();
+            qInfo().noquote() << "[conn-pool] connection: " << slotIndex << " returned";
+        }
+    }};
 }
 
 ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
@@ -103,6 +127,45 @@ ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVau
     , m_vault(vault) { }
 
 ImapService::~ImapService() { shutdown(); }
+
+void
+ImapService::initialize() {
+    {
+        QMutexLocker lock(&g_poolMutex);
+        g_poolTokenRefresher = [this](const QString &email) -> QString {
+            if (!m_accounts) return {};
+            for (const auto &a : m_accounts->accounts()) {
+                const auto acc = a.toMap();
+                if (acc.value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0)
+                    return refreshAccessToken(acc, email);
+            }
+            return {};
+        };
+    }
+
+    if (!g_poolInitialized.exchange(true)) {
+        runBackgroundTask([this]() {
+            if (!m_accounts) return;
+            const auto accounts = resolveAccounts(m_accounts->accounts());
+            for (const auto &[email, host, accessToken, port] : accounts) {
+                for (int i = 0; i < kOperationalPoolMax; ++i) {
+                    if (m_destroying.load()) return;
+                    auto conn = std::make_unique<Imap::Connection>();
+                    conn->connectAndAuth(host, port, email, accessToken);
+                    PooledConnSlot s;
+                    s.email = email; s.host = host; s.port = port;
+                    s.conn = std::move(conn); s.busy = false;
+                    QMutexLocker lock(&g_poolMutex);
+                    g_poolSlots.push_back(std::move(s));
+                    g_poolWait.wakeOne();
+                }
+            }
+        });
+    }
+
+    startBackgroundWorker();
+    startIdleWatcher();
+}
 
 void
 ImapService::registerWatcher(QFutureWatcherBase *watcher) {
@@ -167,6 +230,11 @@ ImapService::shutdown() {
         m_pendingFullSync = false;
         m_pendingFolderSync.clear();
         m_pendingAnnounce = false;
+    }
+
+    {
+        QMutexLocker lock(&g_poolMutex);
+        g_poolTokenRefresher = nullptr;
     }
 
     // Graceful app-exit path: stop worker threads and wait so QThread objects are
@@ -405,22 +473,11 @@ static bool isImageAttachment(const QVariantMap &am) {
 
 void
 ImapService::prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    if (!m_store || !m_accounts)
+    if (!m_store)
         return;
 
     const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
     if (attachments.isEmpty())
-        return;
-
-    QVariantMap account;
-    for (const auto &a : m_accounts->accounts()) {
-        const auto row = a.toMap();
-        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
-            account = row;
-            break;
-        }
-    }
-    if (account.isEmpty())
         return;
 
     QVariantList toFetch;
@@ -432,23 +489,10 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
     if (toFetch.isEmpty())
         return;
 
-    const QString host = account.value("imapHost"_L1).toString();
-    const int     port = account.value("imapPort"_L1).toInt();
-
-    runBackgroundTask([this, host, port, accountEmail, folderName, uid, account, toFetch]() {
-        const QString token = workerRefreshAccessToken(account, accountEmail);
-        if (token.isEmpty())
-            return;
-
-        auto cxn = getPooledConnection();
+    runBackgroundTask([this, accountEmail, folderName, uid, toFetch]() {
+        auto cxn = getPooledConnection(accountEmail);
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
-            return;
-        }
-        const bool needsConnect = !cxn->isConnected()
-                               || cxn->host().compare(host, Qt::CaseInsensitive) != 0
-                               || cxn->email().compare(accountEmail, Qt::CaseInsensitive) != 0;
-        if (needsConnect && !cxn->connectAndAuth(host, port, accountEmail, token).success) {
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
@@ -529,22 +573,11 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
 
 void
 ImapService::prefetchImageAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    if (!m_store || !m_accounts)
+    if (!m_store)
         return;
 
     const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
     if (attachments.isEmpty())
-        return;
-
-    QVariantMap account;
-    for (const auto &a : m_accounts->accounts()) {
-        const auto row = a.toMap();
-        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
-            account = row;
-            break;
-        }
-    }
-    if (account.isEmpty())
         return;
 
     QVariantList toFetch;
@@ -558,23 +591,10 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
     if (toFetch.isEmpty())
         return;
 
-    const QString host = account.value("imapHost"_L1).toString();
-    const int     port = account.value("imapPort"_L1).toInt();
-
-    runBackgroundTask([this, host, port, accountEmail, folderName, uid, account, toFetch]() {
-        const QString token = workerRefreshAccessToken(account, accountEmail);
-        if (token.isEmpty())
-            return;
-
-        auto cxn = getPooledConnection();
+    runBackgroundTask([this, accountEmail, folderName, uid, toFetch]() {
+        auto cxn = getPooledConnection(accountEmail);
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
-            return;
-        }
-        const bool needsConnect = !cxn->isConnected()
-                               || cxn->host().compare(host, Qt::CaseInsensitive) != 0
-                               || cxn->email().compare(accountEmail, Qt::CaseInsensitive) != 0;
-        if (needsConnect && !cxn->connectAndAuth(host, port, accountEmail, token).success) {
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
@@ -763,25 +783,6 @@ ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const
 }
 
 void
-ImapService::initialize() {
-    if (!g_poolPrewarmed.exchange(true)) {
-        runBackgroundTask([]() {
-            QMutexLocker lock(&g_poolMutex);
-            while (g_poolSlots.size() < kOperationalPoolMax) {
-                PooledConnSlot s;
-                s.conn = std::make_unique<Imap::Connection>();
-                s.busy = false;
-                g_poolSlots.push_back(std::move(s));
-            }
-            g_poolWait.wakeAll();
-        });
-    }
-
-    startBackgroundWorker();
-    startIdleWatcher();
-}
-
-void
 ImapService::startIdleWatcher() {
     if (m_destroying || m_idleWatcher)
         return;
@@ -875,15 +876,14 @@ ImapService::startBackgroundWorker() {
                 if (out) *out = workerRefreshAccessToken(account, email);
             }, Qt::BlockingQueuedConnection);
 
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::loginSessionStartupRequested,
-            this, [this](const QVariantMap &account, const QString &email, const QString &accessToken) {
-                backgroundLoginSessionStartup(account, email, accessToken);
-            }, Qt::BlockingQueuedConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::listFoldersRequested,
-            this, [this](const QVariantMap &account, const QString &email, const QString &accessToken, QStringList *out) {
-                if (out) *out = backgroundListFolders(account, email, accessToken);
-            }, Qt::BlockingQueuedConnection);
+    connect(m_backgroundWorker, &Imap::BackgroundWorker::upsertFoldersRequested,
+            this, [this](const QVariantList &folders) {
+                for (const QVariant &fv : folders) {
+                    const QVariantMap folder = fv.toMap();
+                    if (m_store)
+                        m_store->upsertFolder(folder);
+                }
+            }, Qt::QueuedConnection);
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::loadFolderStatusSnapshotRequested,
             this, [this](const QString &accountEmail, const QString &folder,
@@ -904,13 +904,6 @@ ImapService::startBackgroundWorker() {
                 saveFolderStatusSnapshot(accountEmail, folder, uidNext, highestModSeq, messages);
             }, Qt::QueuedConnection);
 
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::shouldSyncFolderRequested,
-            this, [this](const QVariantMap &account, const QString &email, const QString &folder,
-                         const QString &accessToken, bool *out) {
-                if (!out)
-                    return;
-                *out = (*out) && backgroundShouldSyncFolder(account, email, folder, accessToken);
-            }, Qt::BlockingQueuedConnection);
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::syncHeadersAndFlagsRequested,
             this, [this](const QVariantMap &account, const QString &email, const QString &folder,
@@ -931,7 +924,7 @@ ImapService::startBackgroundWorker() {
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::loopError,
             this, [this](const QString &message) {
-                backgroundOnLoopError(message);
+                workerEmitRealtimeStatus(false, message);
             }, Qt::QueuedConnection);
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::realtimeStatus,
@@ -1037,84 +1030,6 @@ ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
         QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
 
-void
-ImapService::backgroundOnLoopError(const QString &message) {
-    workerEmitRealtimeStatus(false, message);
-}
-
-void
-ImapService::backgroundLoginSessionStartup(const QVariantMap &account, const QString &email,
-                                           const QString &accessToken) {
-    const QString host = account.value("imapHost"_L1).toString();
-    const int port = account.value("imapPort"_L1).toInt();
-
-    QString status;
-    const QVariantList folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &status);
-
-    for (const QVariant &fv : folders) {
-        const QVariantMap folder = fv.toMap();
-        if (m_store)
-            m_store->upsertFolder(folder);
-    }
-
-    if (!status.trimmed().isEmpty()) {
-        const bool statusOk = !status.contains("failed"_L1, Qt::CaseInsensitive)
-                           && !status.contains("error"_L1, Qt::CaseInsensitive);
-        workerEmitRealtimeStatus(statusOk, status.trimmed());
-    }
-}
-
-QStringList
-ImapService::backgroundListFolders(const QVariantMap &account, const QString &email, const QString &accessToken) {
-    QString status;
-    const QString host = account.value("imapHost"_L1).toString();
-    const int port = account.value("imapPort"_L1).toInt();
-    const QVariantList folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &status);
-
-    QSet<QString> parentContainers;
-    for (const QVariant &f : folders) {
-        const QString name = f.toMap().value("name"_L1).toString().trimmed();
-        const int slash = name.indexOf('/');
-        if (slash > 0)
-            parentContainers.insert(name.left(slash).toLower());
-    }
-
-    QStringList out;
-    out.reserve(folders.size());
-    for (const QVariant &f : folders) {
-        const auto row = f.toMap();
-        const QString name = row.value("name"_L1).toString().trimmed();
-        const QString flags = row.value("flags"_L1).toString().toLower();
-        const QString lowerName = name.toLower();
-
-        const bool isNoSelect = flags.contains("\\noselect"_L1);
-        const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
-        const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
-                                  || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0;
-        const bool isParentContainer = parentContainers.contains(lowerName);
-
-        if (name.isEmpty() || isNoSelect || isCategory || isContainerRoot || isParentContainer)
-            continue;
-
-        out.push_back(name);
-    }
-
-    return out;
-}
-
-bool
-ImapService::backgroundShouldSyncFolder(const QVariantMap &, const QString &, const QString &folder,
-                                        const QString &) {
-    const auto name = folder.trimmed();
-    if (name.isEmpty())
-        return false;
-
-    // Skip synthetic/container folders that are not message-bearing.
-    if (name.startsWith('[') && name.endsWith(']'))
-        return false;
-
-    return true;
-}
 
 void
 ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &, const QString &folder,
@@ -1279,31 +1194,17 @@ ImapService::resolveAccounts(const QVariantList &accounts) {
 }
 
 QVariantList
-ImapService::fetchFolderHeaders(const QString &host, int port, const QString &email,
-                                const QString &accessToken, QString *statusOut,
+ImapService::fetchFolderHeaders(const QString &email,
+                                QString *statusOut,
                                 const QString &folderName,
                                 const std::function<void(const QVariantMap &)> &onHeader,
                                 qint64 minUidExclusive,
                                 bool reconcileDeletes,
                                 int fetchBudget) {
-    if (accessToken.isEmpty()) {
-        if (statusOut)
-            *statusOut = "No access token for fetch."_L1;
-        return {};
-    }
-
-    auto pooled = getPooledConnection();
+    auto pooled = getPooledConnection(email);
     if (!pooled) {
         if (statusOut)
             *statusOut = "Operational IMAP pool timeout."_L1;
-        return {};
-    }
-
-    const bool needsConnect = !pooled->isConnected()
-                           || pooled->host().compare(host, Qt::CaseInsensitive) != 0
-                           || pooled->email().compare(email, Qt::CaseInsensitive) != 0;
-    if (needsConnect && !pooled->connectAndAuth(host, port, email, accessToken).success) {
-        if (statusOut) *statusOut = "IMAP connect/auth failed."_L1;
         return {};
     }
 
@@ -1373,9 +1274,6 @@ ImapService::syncFolderInternal(const AccountInfo &account,
                                   const std::function<void()> &flush) {
     const bool isInbox = (target.compare("INBOX"_L1, Qt::CaseInsensitive) == 0);
     const QString &email = account.email;
-    const QString &host = account.host;
-    const QString &accessToken = account.accessToken;
-    const int port = account.port;
     const bool announce = options.announce;
 
     qint64 dbMaxUid = 0;
@@ -1418,7 +1316,7 @@ ImapService::syncFolderInternal(const AccountInfo &account,
 
     QString fetchStatus;
     const QVariantList headers = fetchFolderHeaders(
-        host, port, email, accessToken, &fetchStatus,
+        email, &fetchStatus,
         target, onHeader, minUid, reconcileDeletes, budget);
 
     qInfo().noquote() << "[sync-folder]" << "folder=" << target
@@ -1472,15 +1370,20 @@ ImapService::refreshFolderList(bool announce) {
             qsizetype total = 0;
             QString notes;
 
-            for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
+            for (const auto &info : resolveAccounts(accounts)) {
+                const auto &email = info.email;
                 if (m_cancelRequested.load()) {
                     SyncResult r;
                     r.message = "Refresh aborted."_L1;
                     return r;
                 }
 
+                auto pooled = getPooledConnection(email);
+                if (!pooled) continue;
+
                 QString status;
-                const auto folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &status);
+                const auto folders = Imap::SyncEngine::fetchFolders(pooled, &status);
+                pooled.reset();
                 total += folders.size();
 
                 for (const QVariant &fv : folders) {
@@ -1625,38 +1528,22 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, html);
     });
 
-    watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm]() -> QString {
+    const QString emailCopy = emailNorm;
+    watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm, emailCopy]() -> QString {
         if (m_destroying)
             return {};
 
-        const auto      email = account.value("email"_L1).toString();
-        const auto      host  = account.value("imapHost"_L1).toString();
-        const qint32    port  = account.value("imapPort"_L1).toInt();
-
-        if (email.isEmpty() || host.isEmpty() || port <= 0) {
-            qWarning().noquote() << "[hydrate] abort: invalid account settings"
-                                 << "email=" << email << "host=" << host << "port=" << port;
-            return {};
-        }
-
         if (account.value("authType"_L1).toString() != "oauth2"_L1) {
-            qWarning().noquote() << "[hydrate] abort: non-oauth account" << email;
-            return {};
-        }
-
-        const auto accessToken = refreshAccessToken(account, email);
-        if (accessToken.isEmpty()) {
-            qWarning().noquote() << "[hydrate] abort: empty access token" << email;
+            qWarning().noquote() << "[hydrate] abort: non-oauth account" << emailCopy;
             return {};
         }
 
         Imap::MessageHydrator::Request r;
-        r.host = host; r.port = port; r.email = email; r.accessToken = accessToken;
         r.folderName = folderNorm; r.uid = uidNorm;
 
         QVariantList mappedCandidates;
-        QMetaObject::invokeMethod(this, [this, &mappedCandidates, email, folderNorm, uidNorm]() {
-                if (m_store) mappedCandidates = m_store->fetchCandidatesForMessageKey(email, folderNorm, uidNorm);
+        QMetaObject::invokeMethod(this, [this, &mappedCandidates, emailCopy, folderNorm, uidNorm]() {
+                if (m_store) mappedCandidates = m_store->fetchCandidatesForMessageKey(emailCopy, folderNorm, uidNorm);
             },
         Qt::BlockingQueuedConnection);
 
@@ -1664,6 +1551,13 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             const auto m = v.toMap();
             r.extraCandidates.push_back( { m.value("folder"_L1).toString(), m.value("uid"_L1).toString() } );
         }
+
+        auto pooled = getPooledConnection(emailCopy);
+        if (!pooled) {
+            qWarning().noquote() << "[hydrate] abort: pool timeout" << emailCopy;
+            return {};
+        }
+        r.cxn = std::move(pooled);
 
         return Imap::MessageHydrator::execute(r);
     }));
@@ -1674,7 +1568,6 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
                           const QString &uid, const QString &targetFolder) {
     if (m_destroying || accountEmail.isEmpty() || uid.isEmpty() || targetFolder.isEmpty())
         return;
-    if (!m_accounts) return;
 
     qint64 messageId = -1;
     int    unreadVal = 0;
@@ -1694,95 +1587,67 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
             m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
     }
 
-    const QVariantList accounts = m_accounts->accounts();
-
-    const auto retval = QtConcurrent::run([this, accounts, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
+    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
-        for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
-            if (email != accountEmail) continue;
+        auto cxn = getPooledConnection(accountEmail);
+        if (!cxn) return;
 
-            auto cxn = getPooledConnection();
-            if (!cxn) return;
+        if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(folder);
+            if (!ok) return;
+        }
 
-            const bool needsConnect = !cxn->isConnected()
-                                   || cxn->host().compare(host, Qt::CaseInsensitive) != 0
-                                   || cxn->email().compare(email, Qt::CaseInsensitive) != 0;
-            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success)
-                return;
+        const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
 
-            if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-                const auto [ok, _] = cxn->select(folder);
-                if (!ok) return;
-            }
+        qInfo().noquote() << "[move-message]"
+                          << "uid=" << uid << "from=" << folder
+                          << "to=" << targetFolder << "resp=" << resp.simplified().left(120);
 
-            const QString resp = cxn->execute("UID MOVE %1 "%2""_L1.arg(uid, targetFolder));
-
-            qInfo().noquote() << "[move-message]"
-                              << "uid=" << uid << "from=" << folder
-                              << "to=" << targetFolder << "resp=" << resp.simplified().left(120);
-
-            static const QRegularExpression kCopyUidRe(
-                R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
-                QRegularExpression::CaseInsensitiveOption);
-            const QRegularExpressionMatch m = kCopyUidRe.match(resp);
-            if (m.hasMatch() && messageId > 0) {
-                const QString newUid = m.captured(1);
-                QMetaObject::invokeMethod(this,
-                    [this, accountEmail, targetFolder, newUid, messageId, unreadVal]() {
-                        if (!m_destroying.load() && m_store)
-                            m_store->insertFolderEdge(accountEmail, messageId,
-                                                      targetFolder, newUid, unreadVal);
-                    }, Qt::QueuedConnection);
-            } else if (messageId > 0) {
-                QMetaObject::invokeMethod(this,
-                    [this, accountEmail, messageId]() {
-                        if (!m_destroying.load() && m_store)
-                            m_store->removeAllEdgesForMessageId(accountEmail, messageId);
-                    }, Qt::QueuedConnection);
-            }
-            return;
+        static const QRegularExpression kCopyUidRe(
+            R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch m = kCopyUidRe.match(resp);
+        if (m.hasMatch() && messageId > 0) {
+            const QString newUid = m.captured(1);
+            QMetaObject::invokeMethod(this,
+                [this, accountEmail, targetFolder, newUid, messageId, unreadVal]() {
+                    if (!m_destroying.load() && m_store)
+                        m_store->insertFolderEdge(accountEmail, messageId,
+                                                  targetFolder, newUid, unreadVal);
+                }, Qt::QueuedConnection);
+        } else if (messageId > 0) {
+            QMetaObject::invokeMethod(this,
+                [this, accountEmail, messageId]() {
+                    if (!m_destroying.load() && m_store)
+                        m_store->removeAllEdgesForMessageId(accountEmail, messageId);
+                }, Qt::QueuedConnection);
         }
     });
 }
 
 void
-ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
-                              const QString &uid) {
+ImapService::markMessageRead(const QString &accountEmail, const QString &folder, const QString &uid) {
     if (m_destroying || accountEmail.isEmpty() || uid.isEmpty()) return;
 
     if (m_store)
         m_store->markMessageRead(accountEmail, uid);
 
-    if (!m_accounts) return;
-    const QVariantList accounts = m_accounts->accounts();
-
-    const auto retval = QtConcurrent::run([this, accounts, accountEmail, folder, uid]() {
+    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid]() {
         if (m_destroying.load()) return;
 
-        for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
-            if (email != accountEmail) continue;
+        auto cxn = getPooledConnection(accountEmail);
+        if (!cxn) return;
 
-            auto cxn = getPooledConnection();
-            if (!cxn) return;
-
-            const bool needsConnect = !cxn->isConnected()
-                                   || cxn->host().compare(host, Qt::CaseInsensitive) != 0
-                                   || cxn->email().compare(email, Qt::CaseInsensitive) != 0;
-            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success)
-                return;
-
-            if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-                const auto [ok, _] = cxn->select(folder);
-                if (!ok) return;
-            }
-
-            const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\Seen)").arg(uid));
-            Q_UNUSED(result);
-
-            qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
-            return;
+        if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(folder);
+            if (!ok) return;
         }
+
+        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\Seen)").arg(uid));
+        Q_UNUSED(result);
+
+        qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
     });
 }
 
@@ -1964,8 +1829,11 @@ ImapService::syncAll(bool announce) {
                 }
 
                 // Fetch and store folder list
+                auto pooled = getPooledConnection(email);
+                if (!pooled) continue;
                 QString folderStatus;
-                const auto folders = Imap::SyncEngine::fetchFolders(host, port, email, accessToken, &folderStatus);
+                const auto folders = Imap::SyncEngine::fetchFolders(pooled, &folderStatus);
+                pooled.reset();
                 for (const auto &fv : folders) {
                     const auto f = fv.toMap();
                     QMetaObject::invokeMethod(this, [this, f]() { m_store->upsertFolder(f); },
