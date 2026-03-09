@@ -31,11 +31,16 @@ BackgroundWorker::resolveAccount() {
     emit requestRefreshAccessToken(target.account, target.email, &accessToken);
 
     if (accessToken.isEmpty()) {
-        constexpr auto err = "Realtime sync: auth refresh failed; retrying."_L1;
-        SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
-                                 m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                 consecutiveFailures, err, 15, &m_running);
-        return {false, err};
+        const bool sameActive = m_activeEmail.compare(target.email, Qt::CaseInsensitive) == 0;
+        if (sameActive && !m_activeAccessToken.isEmpty()) {
+            accessToken = m_activeAccessToken;
+        } else {
+            constexpr auto err = "Realtime sync: auth refresh failed; retrying."_L1;
+            SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
+                                     m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
+                                     consecutiveFailures, err, 15, &m_running);
+            return {false, err};
+        }
     }
 
     m_activeAccount = target.account;
@@ -174,10 +179,11 @@ BackgroundWorker::start() {
             const auto email = m_activeEmail;
             const auto token = m_activeAccessToken;
             const auto folderCopy = folder;
-            QtConcurrent::run([this, account, email, token, folderCopy]() {
+            const auto dispatched = QtConcurrent::run([this, account, email, token, folderCopy]() {
                 emit syncHeadersAndFlagsRequested(account, email, folderCopy, token);
                 emit fetchBodiesRequested(account, email, folderCopy, token);
             });
+            Q_UNUSED(dispatched);
         }
 
         emit idleLiveUpdateRequested(m_activeAccount, m_activeEmail);
