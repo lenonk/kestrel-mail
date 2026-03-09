@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import QtWebEngine
+import QtQuick.Pdf
 import org.kde.kirigami as Kirigami
 
 Item {
@@ -25,12 +26,17 @@ Item {
     readonly property string previewLower: (previewSource || "").toLowerCase()
     readonly property string previewUrl: previewSource.length > 0 ? ("file://" + encodeURI(previewSource)) : ""
     readonly property bool isImagePreview: previewMimeType.toLowerCase().indexOf("image/") === 0
-    readonly property bool isWebPreview: !isImagePreview && (previewMimeType.toLowerCase().indexOf("pdf") >= 0
-                                                              || previewLower.endsWith(".pdf")
-                                                              || previewLower.endsWith(".txt")
-                                                              || previewLower.endsWith(".md")
-                                                              || previewLower.endsWith(".html")
-                                                              || previewLower.endsWith(".htm"))
+    readonly property bool isPdfPreview: previewMimeType.toLowerCase().indexOf("pdf") >= 0 || previewLower.endsWith(".pdf")
+    readonly property bool isWebPreview: !isImagePreview && !isPdfPreview && (previewLower.endsWith(".txt")
+                                                                               || previewLower.endsWith(".md")
+                                                                               || previewLower.endsWith(".html")
+                                                                               || previewLower.endsWith(".htm"))
+
+    function borderForTheme() {
+        const c = Kirigami.Theme.backgroundColor;
+        const luminance = (0.2126 * c.r) + (0.7152 * c.g) + (0.0722 * c.b);
+        return luminance < 0.5 ? Qt.lighter(c, 1.35) : Qt.darker(c, 1.8);
+    }
 
     signal openTriggered()
     signal saveTriggered()
@@ -139,7 +145,7 @@ Item {
             Layout.preferredHeight: root.previewHeight
             color: Qt.darker(Kirigami.Theme.backgroundColor, 1.08)
             border.width: 1
-            border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.35)
+            border.color: root.borderForTheme()
             clip: true
 
             Image {
@@ -155,14 +161,28 @@ Item {
                 visible: root.isImagePreview && status === Image.Ready
             }
 
+            PdfDocument {
+                id: pdfDoc
+                source: root.isPdfPreview ? root.previewUrl : ""
+            }
+
+            PdfPageImage {
+                id: pdfPreview
+                anchors.fill: parent
+                anchors.margins: 2
+                document: pdfDoc
+                currentFrame: 0
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                visible: root.isPdfPreview && status === Image.Ready
+            }
+
             WebEngineView {
                 id: previewWeb
                 anchors.fill: parent
                 anchors.margins: 2
                 visible: root.isWebPreview
                 url: root.isWebPreview ? root.previewUrl : ""
-                settings.pluginsEnabled: true
-                settings.pdfViewerEnabled: true
                 settings.javascriptEnabled: false
                 settings.localContentCanAccessFileUrls: true
                 backgroundColor: "transparent"
@@ -174,7 +194,7 @@ Item {
                 height: 32
                 source: root.fallbackIcon
                 opacity: 0.7
-                visible: !previewImg.visible && !previewWeb.visible
+                visible: !previewImg.visible && !pdfPreview.visible && !previewWeb.visible
             }
         }
 
