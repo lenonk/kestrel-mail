@@ -68,6 +68,7 @@ Rectangle {
     property var attachmentItems: []
     property var attachmentLocalPaths: ({})
     property var attachmentProgress: ({})
+    property var attachmentDownloading: ({})
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
@@ -671,6 +672,7 @@ Rectangle {
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
         root.attachmentProgress = ({});
+        root.attachmentDownloading = ({});
         root.reloadAttachmentsForCurrentMessage();
         // Read messageData directly — derived bindings (isTrustedSender, senderDomain, etc.)
         // may not have re-evaluated yet when this handler fires.
@@ -1301,23 +1303,36 @@ Rectangle {
                         radius: 1
                         color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
                         readonly property real progressValue: Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0)
-                        visible: progressValue > 0 && progressValue < 100
+                        readonly property bool downloading: !!root.attachmentDownloading[attachmentCard.modelData.partId]
+                        visible: downloading || (progressValue > 0 && progressValue < 100)
 
                         onVisibleChanged: {
                             console.log("[attachment-progress] bar",
                                         "partId=", attachmentCard.modelData.partId,
                                         "name=", attachmentCard.modelData.name,
                                         "progress=", progressValue,
+                                        "downloading=", downloading,
                                         "visible=", visible)
                         }
 
                         Rectangle {
+                            id: progressFill
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             height: parent.height
                             radius: 1
                             color: root.systemPalette.highlight
-                            width: parent.width * (attachmentProgressBar.progressValue / 100.0)
+                            width: attachmentProgressBar.progressValue > 0
+                                 ? parent.width * (attachmentProgressBar.progressValue / 100.0)
+                                 : parent.width * 0.35
+                            opacity: attachmentProgressBar.progressValue > 0 ? 1.0 : 0.6
+
+                            SequentialAnimation on opacity {
+                                running: attachmentProgressBar.visible && attachmentProgressBar.progressValue <= 0
+                                loops: Animation.Infinite
+                                NumberAnimation { to: 0.25; duration: 300 }
+                                NumberAnimation { to: 0.75; duration: 300 }
+                            }
                         }
                     }
 
@@ -1595,6 +1610,10 @@ Rectangle {
             const p = Object.assign({}, root.attachmentProgress);
             p[partId] = 100;
             root.attachmentProgress = p;
+
+            const d = Object.assign({}, root.attachmentDownloading);
+            d[partId] = false;
+            root.attachmentDownloading = d;
         }
 
         function onAttachmentDownloadProgress(accountEmail, uid, partId, progressPercent) {
@@ -1609,6 +1628,10 @@ Rectangle {
             const p = Object.assign({}, root.attachmentProgress);
             p[partId] = progressPercent;
             root.attachmentProgress = p;
+
+            const d = Object.assign({}, root.attachmentDownloading);
+            d[partId] = progressPercent < 100;
+            root.attachmentDownloading = d;
         }
     }
     QQC2.Dialog {
