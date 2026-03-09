@@ -683,11 +683,6 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
-        // Clear stale attachment UI immediately to avoid one-frame flashes from prior message state.
-        root.attachmentItems = [];
-        root.attachmentLocalPaths = ({});
-        root.attachmentProgress = ({});
-        root.attachmentDownloading = ({});
 
         const account = (messageData && messageData.accountEmail) ? messageData.accountEmail.toString() : "";
         const uid = (messageData && messageData.uid) ? messageData.uid.toString() : "";
@@ -695,15 +690,25 @@ Rectangle {
         const messageKey = hasIdentity ? (account + "|" + uid) : "";
         const isSameMessage = hasIdentity && (messageKey === root.lastAttachmentMessageKey);
 
-        if (hasIdentity && !isSameMessage) {
+        if (!hasIdentity) {
+            // No message selected — wipe everything.
+            root.attachmentItems = [];
+            root.attachmentLocalPaths = ({});
+            root.attachmentProgress = ({});
+            root.attachmentDownloading = ({});
+        } else if (!isSameMessage) {
+            // Different message — reset state and load fresh.
             root.lastAttachmentMessageKey = messageKey;
+            root.attachmentItems = [];
+            root.attachmentLocalPaths = ({});
             root.attachmentProgress = ({});
             root.attachmentDownloading = ({});
             root.reloadAttachmentsForCurrentMessage();
-        } else if (hasIdentity && root.attachmentItems.length === 0) {
-            // Allow a retry if the first lookup raced DB hydration.
+        } else if (root.attachmentItems.length === 0) {
+            // Same message, attachments not yet loaded — retry (race with DB hydration).
             root.reloadAttachmentsForCurrentMessage();
         }
+        // Same message with attachments already loaded: leave all state untouched.
 
         // Read messageData directly — derived bindings (isTrustedSender, senderDomain, etc.)
         // may not have re-evaluated yet when this handler fires.
@@ -1291,6 +1296,12 @@ Rectangle {
                     required property var modelData
                     readonly property bool selected: root.selectedAttachmentKey === attachmentCard.modelData.partId
                     readonly property string sizeText: root.formatAttachmentSize(attachmentCard.modelData.bytes)
+                    readonly property string localPath: (root.attachmentLocalPaths && root.attachmentLocalPaths[attachmentCard.modelData.partId]) ? root.attachmentLocalPaths[attachmentCard.modelData.partId] : ""
+                    readonly property bool hasImagePreview: {
+                        const mt = (attachmentCard.modelData.mimeType || "").toString().toLowerCase();
+                        return localPath.length > 0 && mt.indexOf("image/") === 0;
+                    }
+                    readonly property string previewSource: hasImagePreview ? ("file://" + localPath) : ""
 
                     border.color: selected ? root.systemPalette.highlight : Qt.lighter(Kirigami.Theme.backgroundColor, 1.35)
                     border.width: 1
@@ -1367,6 +1378,10 @@ Rectangle {
                         }
                     }
 
+                    HoverHandler {
+                        id: attachmentHover
+                    }
+
                     MouseArea {
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         anchors.fill: parent
@@ -1419,6 +1434,18 @@ Rectangle {
                         QQC2.MenuItem {
                             text: i18n("Open All Attachments")
                         }
+                    }
+
+                    AttachmentHoverPopup {
+                        anchorItem: attachmentCard
+                        targetHovered: attachmentHover.hovered || attachmentCard.selected
+                        previewSource: attachmentCard.previewSource
+                        fallbackIcon: root.iconForAttachment(attachmentCard.modelData.mimeType, attachmentCard.modelData.name)
+                        arrowLeftPx: Math.max(24, attachmentCard.width * 0.25)
+                        openButtonText: i18n("Open")
+                        saveButtonText: i18n("Save")
+                        onOpenTriggered: appRoot.imapServiceObj.openAttachment(root.messageData.accountEmail, root.messageData.folder, root.messageData.uid, attachmentCard.modelData.partId, attachmentCard.modelData.name, attachmentCard.modelData.encoding)
+                        onSaveTriggered: appRoot.imapServiceObj.saveAttachment(root.messageData.accountEmail, root.messageData.folder, root.messageData.uid, attachmentCard.modelData.partId, attachmentCard.modelData.name, attachmentCard.modelData.encoding)
                     }
                 }
             }
