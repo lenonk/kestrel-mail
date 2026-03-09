@@ -121,6 +121,17 @@ Rectangle {
             }
 
             Connections {
+                target: root.appRoot
+                ignoreUnknownSignals: true
+
+                function onSelectedFolderKeyChanged() {
+                    groupedMessageList.restorePending = false
+                    groupedMessageList.preservedContentY = 0
+                    Qt.callLater(function() { groupedMessageList.contentY = 0 })
+                }
+            }
+
+            Connections {
                 target: root.appRoot.messageListModelObj
                 ignoreUnknownSignals: true
 
