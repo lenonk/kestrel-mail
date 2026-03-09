@@ -932,7 +932,14 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
         [this, announce](const SyncResult &r) {
             if (announce) {
                 emit syncFinished(r.ok, r.message);
-            } else if (r.ok && r.inserted > 0) {
+                return;
+            }
+
+            // Background folder syncs should still surface completion status
+            // (shown as Kirigami inline messages by the QML realtimeStatus handler).
+            emit realtimeStatus(r.ok, r.message);
+
+            if (r.ok && r.inserted > 0) {
                 emit realtimeStatus(true, QStringLiteral("%1 new message%2 received.")
                                          .arg(r.inserted)
                                          .arg(r.inserted == 1 ? QString() : "s"));
