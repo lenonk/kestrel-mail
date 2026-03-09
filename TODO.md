@@ -8,6 +8,8 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] Add user setting to toggle hover-expand behavior in the content pane (keep feature, make configurable).
 - [ ] Add user option: **Download all messages for offline use** (deferred; not default behavior).
 - [ ] Ensure message list pane never changes scroll position during updates (verify/follow up after current fix in `MessageListPane.qml`).
+- [ ] On folder switch (new folder selection), auto-scroll message list to top.
+- [ ] Tags section should auto-refresh on startup: ensure tag data appears without manual collapse/expand, and default Tags group expanded state remains correct.
 
 ## Sync / Parity / Correctness
 

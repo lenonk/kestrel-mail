@@ -93,6 +93,19 @@ Rectangle {
             property real preservedContentY: 0
             property bool restorePending: false
 
+            property string debugHoverPayload: ""
+
+            function showDebugHoverPopup(payload, globalX, globalY) {
+                debugHoverPayload = payload
+                debugHoverPopup.preferredX = globalX + 12
+                debugHoverPopup.preferredY = globalY + 12
+                debugHoverPopup.show()
+            }
+
+            function hideDebugHoverPopup() {
+                debugHoverPopup.hide()
+            }
+
             function queueRestoreScroll() {
                 if (!restorePending)
                     return
@@ -136,6 +149,42 @@ Rectangle {
             }
 
             onContentHeightChanged: queueRestoreScroll()
+
+            TextToolTip {
+                id: debugHoverPopup
+                delay: 0
+                clampToOverlay: true
+
+                contentItem: Column {
+                    spacing: 6
+
+                    QQC2.Label {
+                        text: groupedMessageList.debugHoverPayload
+                        leftPadding: 8
+                        rightPadding: 8
+                        topPadding: 6
+                        bottomPadding: 0
+                        font.family: "monospace"
+                    }
+
+                    QQC2.Button {
+                        text: i18n("Copy")
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        anchors.bottomMargin: 6
+                        onClicked: {
+                            copyBuffer.text = groupedMessageList.debugHoverPayload
+                            copyBuffer.selectAll()
+                            copyBuffer.copy()
+                        }
+                    }
+                }
+
+                TextEdit {
+                    id: copyBuffer
+                    visible: false
+                }
+            }
 
             Rectangle {
                 anchors.fill: parent
@@ -258,6 +307,21 @@ Rectangle {
                             id: messageMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
+
+                            onEntered: {
+                                const payload = "messageKey=" + (messageCard.messageKeyValue || "") + "\n"
+                                              + "accountEmail=" + (accountEmail || "") + "\n"
+                                              + "folder=" + (folder || "") + "\n"
+                                              + "uid=" + (uid || "") + "\n"
+                                              + "receivedAt=" + (receivedAt || "") + "\n"
+                                              + "sender=" + (sender || "") + "\n"
+                                              + "subject=" + (subject || "")
+                                const p = messageMouseArea.mapToItem(null, mouseX, mouseY)
+                                groupedMessageList.showDebugHoverPopup(payload, p.x, p.y)
+                            }
+
+                            onExited: groupedMessageList.hideDebugHoverPopup()
+
                             onClicked: function(mouse) {
                                 if (mouse.modifiers & Qt.ShiftModifier
                                         && root.appRoot.lastClickedMessageIndex >= 0
