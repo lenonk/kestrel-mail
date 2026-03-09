@@ -932,7 +932,10 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
             QMutexLocker locker(&m_inFlightBodyHydrationsMutex);
             m_inFlightBodyHydrations.remove(inFlightKey);
         }
-        qWarning().noquote() << "[hydrate] no matching account for" << emailNorm;
+        qWarning().noquote() << "[hydrate-fail] reason=account-not-found"
+                             << "account=" << emailNorm
+                             << "folder=" << folderNorm
+                             << "uid=" << uidNorm;
         emit hydrateStatus(false, "Message body fetch failed: account not found.");
         return;
     }
@@ -954,6 +957,10 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
             return;
 
         if (bodyHtml.isEmpty()) {
+            qWarning().noquote() << "[hydrate-fail] reason=empty-body-html"
+                                 << "account=" << emailNorm
+                                 << "folder=" << folderNorm
+                                 << "uid=" << uidNorm;
             emit hydrateStatus(false, "Message body fetch failed: parser returned empty HTML.");
             return;
         }

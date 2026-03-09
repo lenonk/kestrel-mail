@@ -305,9 +305,8 @@ Rectangle {
                 console.log("[tracking] neutralize skipped first-party pixel src=" + src.substring(0, 80))
                 return tag
             }
-            const vendor = root.trackerVendor || "unknown"
             console.log("[tracking] neutralized pixel #" + (++count)
-                        + " vendor=" + vendor + " src=" + src.substring(0, 120))
+                        + " src=" + src.substring(0, 120))
             return tag.replace(/(\bsrc\s*=\s*(["']))([^"']+)\2/i, '$1' + blank + '$2')
         })
         if (count === 0)
