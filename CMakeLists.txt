@@ -118,6 +118,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/PopupMenu.qml
         qml/components/AvatarBadge.qml
         qml/components/ContactHoverPopup.qml
+        qml/components/AttachmentHoverPopup.qml
         qml/components/InviteCard.qml
         qml/components/PaneIconStrip.qml
         qml/components/CollapsedPaneRail.qml
