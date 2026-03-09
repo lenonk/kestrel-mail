@@ -120,6 +120,8 @@ IdleWatcher::start() {
         return;
 
     qint32 consecutiveFailures = 0;
+    QString lastAccessToken;
+    QString lastEmail;
 
     while (m_running) {
         QVariantList accounts;
@@ -136,20 +138,29 @@ IdleWatcher::start() {
         QString accessToken;
         emit requestRefreshAccessToken(target.account, target.email, &accessToken);
         if (accessToken.isEmpty()) {
-            SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
-                                     m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                     consecutiveFailures, "Realtime sync: auth refresh failed; retrying."_L1, 15);
-            continue;
+            if (lastEmail.compare(target.email, Qt::CaseInsensitive) == 0 && !lastAccessToken.isEmpty()) {
+                accessToken = lastAccessToken;
+            } else {
+                SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
+                                         m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
+                                         consecutiveFailures, "Realtime sync: auth refresh failed; retrying."_L1, 15);
+                continue;
+            }
         }
 
         auto cxn = std::make_shared<Connection>();
         const auto connectResult = cxn->connectAndAuth(target.host, target.port, target.email, accessToken);
         if (!connectResult.success) {
+            if (lastEmail.compare(target.email, Qt::CaseInsensitive) == 0 && accessToken == lastAccessToken)
+                lastAccessToken.clear();
             SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                      m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
                                      consecutiveFailures, connectResult.message, 10);
             continue;
         }
+
+        lastEmail = target.email;
+        lastAccessToken = accessToken;
 
         if (const auto [ok, resp] = cxn->select("INBOX"_L1); !ok) {
             SyncUtils::handleFailure([this](bool ok2, const QString &msg) { emit realtimeStatus(ok2, msg); },
