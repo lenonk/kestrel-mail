@@ -2518,8 +2518,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         return out;
     };
 
-    auto annotateHasAttachments = [&](QVariantList &list) {
-        if (!database.isValid() || !database.isOpen() || list.isEmpty())
+    auto annotateMessageFlags = [&](QVariantList &list) {
+        if (list.isEmpty())
             return;
 
         QStringList messageIds;
@@ -2529,29 +2529,37 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             if (!mid.isEmpty())
                 messageIds.push_back(mid);
         }
-        if (messageIds.isEmpty())
-            return;
-
-        QStringList placeholders;
-        placeholders.reserve(messageIds.size());
-        for (int i = 0; i < messageIds.size(); ++i)
-            placeholders << QStringLiteral(":m%1").arg(i);
 
         QSet<QString> withAttachments;
-        QSqlQuery q(database);
-        q.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_attachments WHERE message_id IN (%1)").arg(placeholders.join(',')));
-        for (int i = 0; i < messageIds.size(); ++i)
-            q.bindValue(QStringLiteral(":m%1").arg(i), messageIds.at(i));
+        if (database.isValid() && database.isOpen() && !messageIds.isEmpty()) {
+            QStringList placeholders;
+            placeholders.reserve(messageIds.size());
+            for (int i = 0; i < messageIds.size(); ++i)
+                placeholders << QStringLiteral(":m%1").arg(i);
 
-        if (q.exec()) {
-            while (q.next())
-                withAttachments.insert(q.value(0).toString());
+            QSqlQuery q(database);
+            q.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_attachments WHERE message_id IN (%1)").arg(placeholders.join(',')));
+            for (int i = 0; i < messageIds.size(); ++i)
+                q.bindValue(QStringLiteral(":m%1").arg(i), messageIds.at(i));
+
+            if (q.exec()) {
+                while (q.next())
+                    withAttachments.insert(q.value(0).toString());
+            }
         }
+
+        static const QRegularExpression oneByOneExternalImgRe(
+            QStringLiteral("<img\\b[^>]*\\bsrc\\s*=\\s*[\"']https?:[^\"']+[\"'][^>]*\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*>|"
+                           "<img\\b[^>]*\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*\\bsrc\\s*=\\s*[\"']https?:[^\"']+[\"'][^>]*>"),
+            QRegularExpression::CaseInsensitiveOption);
 
         for (int i = 0; i < list.size(); ++i) {
             QVariantMap row = list.at(i).toMap();
             const QString mid = row.value(QStringLiteral("messageId")).toString();
             row.insert(QStringLiteral("hasAttachments"), withAttachments.contains(mid));
+
+            const QString bodyHtml = row.value(QStringLiteral("bodyHtml")).toString();
+            row.insert(QStringLiteral("hasTrackingPixel"), oneByOneExternalImgRe.match(bodyHtml).hasMatch());
             list[i] = row;
         }
     };
@@ -2561,7 +2569,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         if (limit <= 0) {
             if (hasMore) *hasMore = false;
             QVariantList out = in;
-            annotateHasAttachments(out);
+            annotateMessageFlags(out);
             return out;
         }
         const int total = in.size();
@@ -2574,7 +2582,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         out.reserve(end - safeOffset);
         for (int i = safeOffset; i < end; ++i) out.push_back(in.at(i));
         if (hasMore) *hasMore = (end < total);
-        annotateHasAttachments(out);
+        annotateMessageFlags(out);
         return out;
     };
 
@@ -2744,7 +2752,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             if (hasMore) *hasMore = true;
             filtered = filtered.mid(0, limit);
         }
-        annotateHasAttachments(filtered);
+        annotateMessageFlags(filtered);
         return filtered;
     }
 

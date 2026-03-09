@@ -547,13 +547,25 @@ Rectangle {
                                         Layout.fillWidth: true
                                     }
 
-                                    Kirigami.Icon {
-                                        source: "mail-attachment"
-                                        Layout.preferredWidth: 14
-                                        Layout.preferredHeight: 14
+                                    RowLayout {
                                         Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                        opacity: 0.75
-                                        visible: !!hasAttachments
+                                        spacing: 4
+
+                                        Kirigami.Icon {
+                                            source: "crosshairs"
+                                            Layout.preferredWidth: 14
+                                            Layout.preferredHeight: 14
+                                            opacity: 0.78
+                                            visible: !!hasTrackingPixel
+                                        }
+
+                                        Kirigami.Icon {
+                                            source: "mail-attachment"
+                                            Layout.preferredWidth: 14
+                                            Layout.preferredHeight: 14
+                                            opacity: 0.75
+                                            visible: !!hasAttachments
+                                        }
                                     }
                                 }
 
