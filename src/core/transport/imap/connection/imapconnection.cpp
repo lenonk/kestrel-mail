@@ -2,6 +2,7 @@
 #include "imapio.h"
 
 #include <QRegularExpression>
+#include <QStringDecoder>
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -215,6 +216,81 @@ Connection::executeRaw(const QString &command) {
     m_socket->write(buildSimpleCommand(tag, command));
     m_socket->flush();
     return IO::readUntilTaggedRaw(*m_socket, tag, IO::kFetchReadTimeoutMs);
+}
+
+QByteArray
+Connection::fetchMimePartWithProgress(const QString &uid,
+                                      const QString &partSpecifier,
+                                      const int progressStepPercent,
+                                      const std::function<void(int, qint64)> &onProgress,
+                                      QString *statusOut) {
+    if (!isConnected()) {
+        if (statusOut) *statusOut = QStringLiteral("Not connected");
+        return {};
+    }
+
+    const QString tag = nextTag();
+    const QString command = QStringLiteral("UID FETCH %1 (BODY.PEEK[%2])").arg(uid, partSpecifier);
+    m_socket->write(buildSimpleCommand(tag, command));
+    m_socket->flush();
+
+    QByteArray acc;
+    QByteArray literal;
+    qint64 literalLen = -1;
+    qint64 literalRead = 0;
+    bool haveLiteral = false;
+    int lastPercent = -1;
+    const int step = qBound(1, progressStepPercent, 100);
+
+    static const QRegularExpression literalRe(QStringLiteral("\\{(\\d+)\\}\\r\\n"));
+
+    while (m_socket->waitForReadyRead(IO::kFetchReadTimeoutMs)) {
+        acc += m_socket->readAll();
+
+        if (!haveLiteral) {
+            const QString accText = QString::fromUtf8(acc);
+            const auto m = literalRe.match(accText);
+            if (m.hasMatch()) {
+                literalLen = m.captured(1).toLongLong();
+                const int payloadStart = m.capturedEnd(0);
+                if (payloadStart < acc.size()) {
+                    const qint64 take = qMin<qint64>(literalLen, acc.size() - payloadStart);
+                    literal = acc.mid(payloadStart, static_cast<int>(take));
+                    literalRead = literal.size();
+                }
+                haveLiteral = true;
+            }
+        } else if (literalRead < literalLen) {
+            // Consume any bytes not yet captured from the accumulator tail.
+            const qint64 missing = literalLen - literalRead;
+            const qint64 take = qMin<qint64>(missing, acc.size());
+            if (take > 0) {
+                literal += acc.right(static_cast<int>(take));
+                literalRead = literal.size();
+            }
+        }
+
+        if (haveLiteral && literalLen > 0 && onProgress) {
+            const int percent = qBound(0, static_cast<int>((literalRead * 100) / literalLen), 100);
+            if (percent == 100 || lastPercent < 0 || percent - lastPercent >= step) {
+                lastPercent = percent;
+                onProgress(percent, literalRead);
+            }
+        }
+
+        if (acc.contains((tag + " OK"_L1).toUtf8())
+            || acc.contains((tag + " NO"_L1).toUtf8())
+            || acc.contains((tag + " BAD"_L1).toUtf8())) {
+            if (statusOut) *statusOut = QString::fromUtf8(acc);
+            break;
+        }
+    }
+
+    if (haveLiteral)
+        return literal;
+
+    if (statusOut) *statusOut = QString::fromUtf8(acc);
+    return {};
 }
 
 QVariantList

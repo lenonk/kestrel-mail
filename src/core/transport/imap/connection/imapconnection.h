@@ -3,6 +3,7 @@
 #include <QSslSocket>
 #include <QVariantList>
 
+#include <functional>
 #include <memory>
 #include <tuple>
 
