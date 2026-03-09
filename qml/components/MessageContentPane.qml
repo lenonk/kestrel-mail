@@ -682,6 +682,11 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
+        // Clear stale attachment UI immediately to avoid one-frame flashes from prior message state.
+        root.attachmentItems = [];
+        root.attachmentLocalPaths = ({});
+        root.attachmentProgress = ({});
+        root.attachmentDownloading = ({});
 
         const account = (messageData && messageData.accountEmail) ? messageData.accountEmail.toString() : "";
         const uid = (messageData && messageData.uid) ? messageData.uid.toString() : "";
@@ -1642,11 +1647,11 @@ Rectangle {
         }
 
         function onAttachmentDownloadProgress(accountEmail, uid, partId, progressPercent) {
-            console.log("[attachment-progress] signal",
-                        "account=", accountEmail,
-                        "uid=", uid,
-                        "partId=", partId,
-                        "progress=", progressPercent)
+            // console.log("[attachment-progress] signal",
+            //             "account=", accountEmail,
+            //             "uid=", uid,
+            //             "partId=", partId,
+            //             "progress=", progressPercent)
 
             if (!root.messageData) return;
             if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid) return;
