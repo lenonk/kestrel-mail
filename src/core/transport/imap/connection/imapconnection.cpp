@@ -1,6 +1,5 @@
 #include "imapconnection.h"
 #include "imapio.h"
-#include "imapcommands.h"
 
 #include <QRegularExpression>
 
@@ -8,6 +7,20 @@ using namespace Qt::Literals::StringLiterals;
 
 namespace Imap {
 namespace {
+
+QByteArray buildXOAuth2Command(const QString &tag, const QString &email, const QString &accessToken) {
+    const QByteArray authRaw = QStringLiteral("user=%1\u0001auth=Bearer %2\u0001\u0001").arg(email, accessToken).toUtf8();
+    return tag.toUtf8() + " AUTHENTICATE XOAUTH2 " + authRaw.toBase64() + "\r\n";
+}
+
+QByteArray buildSelectCommand(const QString &tag, const QString &mailbox) {
+    const QString quotedMailbox = QStringLiteral("\"%1\"").arg(mailbox);
+    return tag.toUtf8() + " SELECT " + quotedMailbox.toUtf8() + "\r\n";
+}
+
+QByteArray buildSimpleCommand(const QString &tag, const QString &command) {
+    return tag.toUtf8() + " " + command.toUtf8() + "\r\n";
+}
 
 QVariantList parseListResponse(const QString &listResp) {
     QVariantList out;
@@ -109,7 +122,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
 
     // Authenticate with XOAUTH2
     const auto authTag = nextTag();
-    m_socket->write(ImapCommands::buildXOAuth2Command(authTag, email, accessToken));
+    m_socket->write(buildXOAuth2Command(authTag, email, accessToken));
     m_socket->flush();
 
     auto imapResp = IO::readUntilTagged(*m_socket, authTag, IO::kTaggedReadTimeoutMs);
@@ -130,7 +143,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
 
     // Fetch capabilities
     const auto capTag = nextTag();
-    m_socket->write(ImapCommands::buildSimpleCommand(capTag, "CAPABILITY"));
+    m_socket->write(buildSimpleCommand(capTag, "CAPABILITY"));
     m_socket->flush();
     imapResp = IO::readUntilTagged(*m_socket, capTag, IO::kFetchReadTimeoutMs);
     if (!imapResp.contains(capTag + " OK"_L1, Qt::CaseInsensitive)) {
@@ -141,7 +154,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
 
     // Enable UTF-8 acceptance (kept intentionally)
     const auto enableTag = nextTag();
-    m_socket->write(ImapCommands::buildSimpleCommand(enableTag, "ENABLE UTF8=ACCEPT"));
+    m_socket->write(buildSimpleCommand(enableTag, "ENABLE UTF8=ACCEPT"));
     m_socket->flush();
     imapResp = IO::readUntilTagged(*m_socket, enableTag, IO::kFetchReadTimeoutMs);
     if (!imapResp.contains(enableTag + " OK"_L1, Qt::CaseInsensitive)) {
@@ -157,7 +170,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
         const QString featureCmd = m_capabilities.contains("QRESYNC"_L1, Qt::CaseInsensitive)
             ? "ENABLE QRESYNC"_L1
             : "ENABLE CONDSTORE"_L1;
-        m_socket->write(ImapCommands::buildSimpleCommand(featureTag, featureCmd));
+        m_socket->write(buildSimpleCommand(featureTag, featureCmd));
         m_socket->flush();
         (void)IO::readUntilTagged(*m_socket, featureTag, IO::kFetchReadTimeoutMs);
     }
@@ -165,12 +178,12 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     // 2) NAMESPACE negotiation (or LIST "" "" delimiter fallback)
     if (m_capabilities.contains("NAMESPACE"_L1, Qt::CaseInsensitive)) {
         const QString nsTag = nextTag();
-        m_socket->write(ImapCommands::buildSimpleCommand(nsTag, "NAMESPACE"_L1));
+        m_socket->write(buildSimpleCommand(nsTag, "NAMESPACE"_L1));
         m_socket->flush();
         (void)IO::readUntilTagged(*m_socket, nsTag, IO::kFetchReadTimeoutMs);
     } else {
         const QString listTag = nextTag();
-        m_socket->write(ImapCommands::buildSimpleCommand(listTag, R"(LIST "" "")"_L1));
+        m_socket->write(buildSimpleCommand(listTag, R"(LIST "" "")"_L1));
         m_socket->flush();
         (void)IO::readUntilTagged(*m_socket, listTag, IO::kFetchReadTimeoutMs);
     }
@@ -185,7 +198,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
 QString
 Connection::execute(const QString &command) {
     const QString tag = nextTag();
-    m_socket->write(ImapCommands::buildSimpleCommand(tag, command));
+    m_socket->write(buildSimpleCommand(tag, command));
     m_socket->flush();
 
     QString imapResp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
@@ -199,7 +212,7 @@ Connection::execute(const QString &command) {
 QByteArray
 Connection::executeRaw(const QString &command) {
     const QString tag = nextTag();
-    m_socket->write(ImapCommands::buildSimpleCommand(tag, command));
+    m_socket->write(buildSimpleCommand(tag, command));
     m_socket->flush();
     return IO::readUntilTaggedRaw(*m_socket, tag, IO::kFetchReadTimeoutMs);
 }
@@ -211,13 +224,13 @@ Connection::list() {
 
     const QString tag = nextTag();
     const QString command = isGmail() ? R"(XLIST "" "*")"_L1 : R"(LIST "" "*")"_L1;
-    m_socket->write(ImapCommands::buildSimpleCommand(tag, command));
+    m_socket->write(buildSimpleCommand(tag, command));
     m_socket->flush();
 
     auto resp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
     if (!resp.contains(tag + " OK"_L1, Qt::CaseInsensitive) && isGmail()) {
         const QString fallbackTag = nextTag();
-        m_socket->write(ImapCommands::buildSimpleCommand(fallbackTag, R"(LIST "" "*")"_L1));
+        m_socket->write(buildSimpleCommand(fallbackTag, R"(LIST "" "*")"_L1));
         m_socket->flush();
         resp = IO::readUntilTagged(*m_socket, fallbackTag, IO::kFetchReadTimeoutMs);
         if (!resp.contains(fallbackTag + " OK"_L1, Qt::CaseInsensitive))
@@ -232,7 +245,7 @@ Connection::list() {
 std::tuple<bool, QString>
 Connection::select(const QString &mailbox) {
     const QString tag = nextTag();
-    m_socket->write(ImapCommands::buildSelectCommand(tag, mailbox));
+    m_socket->write(buildSelectCommand(tag, mailbox));
     m_socket->flush();
 
     const QString resp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
@@ -250,7 +263,7 @@ Connection::enterIdle() {
         return {false, "IDLE failed: not connected"_L1};
 
     const QString tag = nextTag();
-    m_socket->write(ImapCommands::buildSimpleCommand(tag, "IDLE"_L1));
+    m_socket->write(buildSimpleCommand(tag, "IDLE"_L1));
     m_socket->flush();
 
     if (!m_socket->waitForReadyRead(IO::kReadTimeoutMs))
@@ -297,7 +310,7 @@ Connection::disconnect() {
     }
 
     if (m_authenticated) {
-        m_socket->write(ImapCommands::buildSimpleCommand(nextTag(), QStringLiteral("LOGOUT")));
+        m_socket->write(buildSimpleCommand(nextTag(), QStringLiteral("LOGOUT")));
         m_socket->flush();
         // Don't wait for response — best effort only
     }

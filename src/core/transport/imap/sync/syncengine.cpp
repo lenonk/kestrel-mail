@@ -3,8 +3,7 @@
 #include "kestreltimer.h"
 #include "../parser/responseparser.h"
 #include "../connection/imapconnection.h"
-#include "../message/snippetutils.h"
-#include "../message/addressutils.h"
+#include "../message/messageutils.h"
 #include "../message/avatarresolver.h"
 #include "../message/bodyprocessor.h"
 
@@ -36,16 +35,16 @@ using Imap::Parser::parseUidSearchAll;
 using Imap::Parser::parseSearchIds;
 
 // Snippet utilities
-using Imap::SnippetUtils::decodeRfc2047;
-using Imap::SnippetUtils::compileDeterministicSnippet;
-using Imap::SnippetUtils::cleanSnippet;
-using Imap::SnippetUtils::snippetQualityScore;
-using Imap::SnippetUtils::snippetLooksLikeProtocolOrJunk;
+using Imap::MessageUtils::decodeRfc2047;
+using Imap::MessageUtils::compileDeterministicSnippet;
+using Imap::MessageUtils::cleanSnippet;
+using Imap::MessageUtils::snippetQualityScore;
+using Imap::MessageUtils::snippetLooksLikeProtocolOrJunk;
 
 // Address utilities
-using Imap::AddressUtils::extractEmailAddress;
-using Imap::AddressUtils::normalizeSenderValue;
-using Imap::AddressUtils::sanitizeAddressHeader;
+using Imap::MessageUtils::extractEmailAddress;
+using Imap::MessageUtils::normalizeSenderValue;
+using Imap::MessageUtils::sanitizeAddressHeader;
 using Imap::AvatarResolver::extractListIdDomain;
 
 // Avatar utilities

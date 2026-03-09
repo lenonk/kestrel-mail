@@ -1,5 +1,5 @@
 #include "bodyprocessor.h"
-#include "snippetutils.h"
+#include "messageutils.h"
 #include "../../../mime/mailioparser.h"
 #include <QRegularExpression>
 #include <QTextDocument>
@@ -397,11 +397,11 @@ extractBodySnippetFromFetch(const QByteArray &fetchRespRaw) {
         }
 
         const auto decoded = decodeTransferEncoded(literalBytes);
-        auto cand = SnippetUtils::cleanSnippet(QString::fromUtf8(decoded)).left(180);
+        auto cand = MessageUtils::cleanSnippet(QString::fromUtf8(decoded)).left(180);
         if (cand.isEmpty())
-            cand = SnippetUtils::cleanSnippet(QString::fromUtf8(literalBytes)).left(180);
+            cand = MessageUtils::cleanSnippet(QString::fromUtf8(literalBytes)).left(180);
 
-        if (const auto score = SnippetUtils::snippetQualityScore(cand); !cand.isEmpty() && score > bestScore) {
+        if (const auto score = MessageUtils::snippetQualityScore(cand); !cand.isEmpty() && score > bestScore) {
             best = cand;
             bestScore = score;
         }
@@ -410,7 +410,7 @@ extractBodySnippetFromFetch(const QByteArray &fetchRespRaw) {
     }
 
     if (best.isEmpty()) {
-        best = SnippetUtils::cleanSnippet(QString::fromUtf8(fetchRespRaw)).left(180);
+        best = MessageUtils::cleanSnippet(QString::fromUtf8(fetchRespRaw)).left(180);
     }
     return best;
 }
