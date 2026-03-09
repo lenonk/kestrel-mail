@@ -11,6 +11,9 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] On folder switch (new folder selection), auto-scroll message list to top.
 - [ ] Tags section should auto-refresh on startup: ensure tag data appears without manual collapse/expand, and default Tags group expanded state remains correct.
 - [ ] Window close via X no longer exits app reliably (regression after shutdown/crash fix) — restore normal close behavior without reintroducing thread-destroy crash.
+- [ ] Investigate startup UI responsiveness regression: for several seconds after launch, window dragging/moving is delayed.
+- [ ] Investigate message-list hitching during sync idle/refresh cycles (UI stutters even when no rows are inserted).
+- [ ] Audit and move non-trivial work off the UI thread (QML/GUI): identify blocking operations during startup and sync tick paths.
 - [ ] Move MessageContentPane heavy processing from QML to C++ backend (first targets: sanitizeRenderHtml, tracking pixel/link normalization, darkenHtml injection pipeline).
 - [ ] Implement conversation/threaded message view (high priority; start soon).
 - [ ] Replace hardcoded Gmail category handling with DB-discovered categories (discover from message labels, persist category set, and read categories from DB everywhere UI/logic iterates them).
