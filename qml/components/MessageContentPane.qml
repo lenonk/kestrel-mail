@@ -182,7 +182,7 @@ Rectangle {
         setCurrentTags(tags);
     }
     function darkenHtml(html) {
-        const darkBg = Kirigami.Theme.backgroundColor.toString();
+        const darkBg = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
         const surfaceBg = Kirigami.Theme.alternateBackgroundColor.toString();
         const lightText = Kirigami.Theme.textColor.toString();
         const borderColor = Kirigami.Theme.disabledTextColor.toString();
@@ -384,11 +384,53 @@ Rectangle {
             appRoot.openComposeDialog(i18n("mailto"));
         return true;
     }
-    function htmlForMessage() {
-        if (messageBodyHtml && messageBodyHtml.trim().length > 0) {
-            return messageBodyHtml;
+    function inlineAttachmentBorderColorCss() {
+        const c = Kirigami.Theme.backgroundColor;
+        const luminance = (0.2126 * c.r) + (0.7152 * c.g) + (0.0722 * c.b);
+        if (luminance < 0.5)
+            return "rgba(255,255,255,0.42)";
+        return Qt.darker(c, 2.0).toString();
+    }
+
+    function inlineImageAttachmentsHtml() {
+        // TODO: gate inline rendering behind a user setting.
+        if (!root.attachmentItems || root.attachmentItems.length === 0)
+            return "";
+
+        const images = [];
+        for (let i = 0; i < root.attachmentItems.length; i++) {
+            const a = root.attachmentItems[i] || {};
+            const mt = (a.mimeType || "").toString().toLowerCase();
+            const name = (a.name || "").toString();
+            const isImage = mt.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name);
+            if (!isImage)
+                continue;
+
+            const partId = (a.partId || "").toString();
+            const localPath = (root.attachmentLocalPaths && partId.length) ? (root.attachmentLocalPaths[partId] || "") : "";
+            if (!localPath || !localPath.length)
+                continue;
+
+            const src = "file://" + encodeURI(localPath);
+            const alt = (name || i18n("Image attachment")).replace(/"/g, "&quot;");
+            images.push("<img src=\"" + src + "\" alt=\"" + alt + "\" style=\"display:block;max-width:100%;height:auto;border:1px solid " + inlineAttachmentBorderColorCss() + ";margin:8px 0 0 0;\" />");
         }
-        return "";
+
+        if (images.length === 0)
+            return "";
+
+        return "<div data-kestrel-inline-attachments='1' style='margin-top:12px;padding-top:8px;border-top:1px solid " + inlineAttachmentBorderColorCss() + ";'>" + images.join("") + "</div>";
+    }
+
+    function htmlForMessage() {
+        const base = (messageBodyHtml && messageBodyHtml.trim().length > 0) ? messageBodyHtml : "";
+        const inlineImages = inlineImageAttachmentsHtml();
+        if (!inlineImages.length)
+            return base;
+
+        if (/<\/body\s*>/i.test(base))
+            return base.replace(/<\/body\s*>/i, inlineImages + "</body>");
+        return base + inlineImages;
     }
     function iconForAttachment(mimeType, name) {
         const mt = (mimeType || "").toLowerCase();
