@@ -404,6 +404,13 @@ Rectangle {
         return "file://" + encodeURI(p);
     }
 
+    function hasEmbeddedCidImage(baseHtml) {
+        const html = (baseHtml || "").toString();
+        if (!html.length)
+            return false;
+        return /<img\b[^>]*\bsrc\s*=\s*["']cid:[^"']+["'][^>]*>/i.test(html);
+    }
+
     function inlineImageAlreadyPresent(baseHtml, attachmentName) {
         const html = (baseHtml || "").toString();
         const name = (attachmentName || "").toString();
@@ -436,6 +443,13 @@ Rectangle {
         // TODO: gate inline rendering behind a user setting.
         if (!root.attachmentItems || root.attachmentItems.length === 0)
             return "";
+
+        // If body already uses CID-embedded images, those are usually the same attachments.
+        // Avoid appending a second inline copy at the bottom.
+        if (hasEmbeddedCidImage(baseHtml)) {
+            console.log("[inline-image] skip append: cid images already present in body");
+            return "";
+        }
 
         const images = [];
         for (let i = 0; i < root.attachmentItems.length; i++) {
