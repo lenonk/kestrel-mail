@@ -225,7 +225,8 @@ ImapService::runBackgroundTask(std::function<void()> task) {
 
 // Forward declaration — defined later in this file.
 static QByteArray fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid,
-                                          const QString &partId, const QString &encoding);
+                                          const QString &partId, const QString &encoding,
+                                          const std::function<void(int, qint64)> &onProgress = {});
 
 void
 ImapService::prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
@@ -323,7 +324,8 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
 }
 
 static QByteArray
-fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid, const QString &partId, const QString &encoding) {
+fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid, const QString &partId, const QString &encoding,
+                        const std::function<void(int, qint64)> &onProgress = {}) {
     const QByteArray raw = cxn.executeRaw("UID FETCH %1 (BODY.PEEK[%2])"_L1.arg(uid, partId));
 
     // Extract the IMAP literal: find {N}\r\n and return the N bytes following it.
