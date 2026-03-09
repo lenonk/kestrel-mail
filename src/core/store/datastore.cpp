@@ -2548,10 +2548,31 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             }
         }
 
-        static const QRegularExpression oneByOneExternalImgRe(
-            QStringLiteral("<img\\b[^>]*\\bsrc\\s*=\\s*[\"']https?:[^\"']+[\"'][^>]*\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*>|"
-                           "<img\\b[^>]*\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"'][^>]*\\bsrc\\s*=\\s*[\"']https?:[^\"']+[\"'][^>]*>"),
-            QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression imgTagRe(QStringLiteral("<img\\b[^>]*>"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression srcRe(QStringLiteral("\\bsrc\\s*=\\s*[\"'](https?://[^\"']+)[\"']"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression widthRe(QStringLiteral("\\bwidth\\s*=\\s*[\"']?\\s*1\\s*[\"']?"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression heightRe(QStringLiteral("\\bheight\\s*=\\s*[\"']?\\s*1\\s*[\"']?"), QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression hostRe(QStringLiteral("^https?://([^/?#]+)"), QRegularExpression::CaseInsensitiveOption);
+
+        auto sldFromHost = [](const QString &hostRaw) {
+            QString host = hostRaw.toLower();
+            const int colon = host.indexOf(':');
+            if (colon > 0)
+                host = host.left(colon);
+            const QStringList parts = host.split('.', Qt::SkipEmptyParts);
+            if (parts.size() < 2)
+                return QString();
+            return parts.at(parts.size() - 2);
+        };
+
+        auto senderSldFromRow = [&](const QVariantMap &row) {
+            const QString sender = row.value(QStringLiteral("sender")).toString();
+            const QString email = extractFirstEmail(sender);
+            const int at = email.lastIndexOf('@');
+            if (at < 0)
+                return QString();
+            return sldFromHost(email.mid(at + 1));
+        };
 
         for (int i = 0; i < list.size(); ++i) {
             QVariantMap row = list.at(i).toMap();
@@ -2559,7 +2580,33 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             row.insert(QStringLiteral("hasAttachments"), withAttachments.contains(mid));
 
             const QString bodyHtml = row.value(QStringLiteral("bodyHtml")).toString();
-            row.insert(QStringLiteral("hasTrackingPixel"), oneByOneExternalImgRe.match(bodyHtml).hasMatch());
+            const QString senderSld = senderSldFromRow(row);
+            bool hasTrackingPixel = false;
+
+            QRegularExpressionMatchIterator it = imgTagRe.globalMatch(bodyHtml);
+            while (it.hasNext()) {
+                const QString tag = it.next().captured(0);
+                if (!widthRe.match(tag).hasMatch() || !heightRe.match(tag).hasMatch())
+                    continue;
+
+                const auto srcM = srcRe.match(tag);
+                if (!srcM.hasMatch())
+                    continue;
+
+                const QString src = srcM.captured(1);
+                const auto hostM = hostRe.match(src);
+                if (!hostM.hasMatch())
+                    continue;
+
+                const QString pixelSld = sldFromHost(hostM.captured(1));
+                if (!senderSld.isEmpty() && !pixelSld.isEmpty() && senderSld == pixelSld)
+                    continue; // first-party pixel: don't mark as tracker
+
+                hasTrackingPixel = true;
+                break;
+            }
+
+            row.insert(QStringLiteral("hasTrackingPixel"), hasTrackingPixel);
             list[i] = row;
         }
     };
