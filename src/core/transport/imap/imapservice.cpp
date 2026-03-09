@@ -59,87 +59,49 @@ QWaitCondition g_poolWait;
 QVector<PooledConnSlot> g_poolSlots;
 std::atomic_bool g_poolPrewarmed{false};
 constexpr int kOperationalPoolMax = 3; // Separate from IDLE connection.
+thread_local int g_tlsPoolSlotIndex = -1;
+constexpr int kPoolAcquireTimeoutMs = 3500;
 }
 
-bool ImapService::getConnection(const QString &host, const int port,
-                                       const QString &email, const QString &accessToken,
-                                       const QString &folderName, const int timeoutMs,
-                                       const std::function<void(Imap::Connection&)> &work) {
-    if (!work)
-        return false;
+std::shared_ptr<Imap::Connection> ImapService::getPooledConnection() {
+    if (g_tlsPoolSlotIndex >= 0 && g_tlsPoolSlotIndex < g_poolSlots.size()) {
+        return std::shared_ptr<Imap::Connection>(g_poolSlots[g_tlsPoolSlotIndex].conn.get(), [](Imap::Connection*) {});
+    }
 
     int slotIndex = -1;
-    const auto deadline = QDateTime::currentMSecsSinceEpoch() + qMax(1, timeoutMs);
+    const auto deadline = QDateTime::currentMSecsSinceEpoch() + kPoolAcquireTimeoutMs;
 
-    {
-        QMutexLocker lock(&g_poolMutex);
-        while (true) {
-            for (int i = 0; i < g_poolSlots.size(); ++i) {
-                auto &s = g_poolSlots[i];
-                if (!s.busy && s.email.compare(email, Qt::CaseInsensitive) == 0) {
-                    s.busy = true;
-                    slotIndex = i;
-                    break;
-                }
-            }
-
-            if (slotIndex < 0 && g_poolSlots.size() < kOperationalPoolMax) {
-                PooledConnSlot s;
-                s.conn = std::make_unique<Imap::Connection>();
-                s.busy = true;
-                s.host = host;
-                s.port = port;
-                s.email = email;
-                g_poolSlots.push_back(std::move(s));
-                slotIndex = g_poolSlots.size() - 1;
-            }
-
-            if (slotIndex >= 0)
+    QMutexLocker lock(&g_poolMutex);
+    while (true) {
+        for (int i = 0; i < g_poolSlots.size(); ++i) {
+            if (!g_poolSlots[i].busy) {
+                g_poolSlots[i].busy = true;
+                slotIndex = i;
                 break;
-
-            const qint64 now = QDateTime::currentMSecsSinceEpoch();
-            const int remaining = static_cast<int>(deadline - now);
-            if (remaining <= 0)
-                return false;
-            g_poolWait.wait(&g_poolMutex, remaining);
+            }
         }
+
+        if (slotIndex >= 0)
+            break;
+
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const int remaining = static_cast<int>(deadline - now);
+        if (remaining <= 0)
+            return {};
+        g_poolWait.wait(&g_poolMutex, remaining);
     }
 
-    auto release = [&]() {
-        QMutexLocker lock(&g_poolMutex);
-        if (slotIndex >= 0 && slotIndex < g_poolSlots.size())
-            g_poolSlots[slotIndex].busy = false;
+    g_tlsPoolSlotIndex = slotIndex;
+    return std::shared_ptr<Imap::Connection>(g_poolSlots[slotIndex].conn.get(), [](Imap::Connection*) {});
+}
+
+void ImapService::releasePooledConnection() {
+    QMutexLocker lock(&g_poolMutex);
+    if (g_tlsPoolSlotIndex >= 0 && g_tlsPoolSlotIndex < g_poolSlots.size()) {
+        g_poolSlots[g_tlsPoolSlotIndex].busy = false;
+        g_tlsPoolSlotIndex = -1;
         g_poolWait.wakeOne();
-    };
-
-    auto &slot = g_poolSlots[slotIndex];
-    auto &cxn = *slot.conn;
-
-    const auto needsConnect = !cxn.isConnected()
-                           || slot.host.compare(host, Qt::CaseInsensitive) != 0
-                           || slot.port != port
-                           || slot.email.compare(email, Qt::CaseInsensitive) != 0;
-
-    if (needsConnect) {
-        if (const auto res = cxn.connectAndAuth(host, port, email, accessToken); !res.success) {
-            release();
-            return false;
-        }
-        slot.host = host;
-        slot.port = port;
-        slot.email = email;
     }
-
-    if (!folderName.isEmpty() && cxn.selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-        if (const auto [ok, _] = cxn.select(folderName); !ok) {
-            release();
-            return false;
-        }
-    }
-
-    work(cxn);
-    release();
-    return true;
 }
 
 ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
@@ -486,78 +448,96 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
         if (token.isEmpty())
             return;
 
-        const bool pooledOk = ImapService::getConnection(host, port, accountEmail, token, folderName, 3500,
-            [this, &accountEmail, &uid, &toFetch](Imap::Connection &cxn) {
-                const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                                        + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
-
-                for (const auto &a : toFetch) {
-                    if (m_destroying.load())
-                        break;
-
-                    const auto    am       = a.toMap();
-                    const QString partId   = am.value("partId"_L1).toString();
-                    const QString encoding = am.value("encoding"_L1).toString();
-                    const QString name     = am.value("name"_L1).toString();
-
-                    const QString key = attachmentCacheKey(accountEmail, uid, partId);
-
-                    {
-                        QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-                        if (m_inFlightAttachmentDownloads.contains(key))
-                            continue;
-                        m_inFlightAttachmentDownloads.insert(key);
-                    }
-
-                    const auto clearInFlight = [this, key]() {
-                        QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-                        m_inFlightAttachmentDownloads.remove(key);
-                    };
-
-                    if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
-                        emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
-                        clearInFlight();
-                        continue;
-                    }
-
-                    emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
-                    const QByteArray data = fetchAttachmentPartById(cxn, uid, partId, encoding,
-                        [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
-                            emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
-                        });
-                    if (data.isEmpty()) {
-                        emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
-                        clearInFlight();
-                        continue;
-                    }
-
-                    const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
-                    const QString partDir    = cacheBase + "/"_L1 + safePartId;
-                    QDir().mkpath(partDir);
-
-                    const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
-                    const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
-
-                    QSaveFile f(localPath);
-                    if (!f.open(QIODevice::WriteOnly)) {
-                        clearInFlight();
-                        continue;
-                    }
-                    f.write(data);
-                    if (!f.commit()) {
-                        clearInFlight();
-                        continue;
-                    }
-
-                    attachmentCacheInsert(key, localPath);
-                    emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
-                    emit attachmentReady(accountEmail, uid, partId, localPath);
-                    clearInFlight();
-                }
-            });
-
-        if (!pooledOk)
+        auto cxn = getPooledConnection();
+        if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
+            return;
+        }
+        const auto release = [this]() { releasePooledConnection(); };
+
+        const bool needsConnect = !cxn->isConnected()
+                               || cxn->host().compare(host, Qt::CaseInsensitive) != 0
+                               || cxn->email().compare(accountEmail, Qt::CaseInsensitive) != 0;
+        if (needsConnect && !cxn->connectAndAuth(host, port, accountEmail, token).success) {
+            release();
+            return;
+        }
+        if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(folderName);
+            if (!ok) {
+                release();
+                return;
+            }
+        }
+
+        const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                                + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
+
+        for (const auto &a : toFetch) {
+            if (m_destroying.load())
+                break;
+
+            const auto    am       = a.toMap();
+            const QString partId   = am.value("partId"_L1).toString();
+            const QString encoding = am.value("encoding"_L1).toString();
+            const QString name     = am.value("name"_L1).toString();
+
+            const QString key = attachmentCacheKey(accountEmail, uid, partId);
+
+            {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                if (m_inFlightAttachmentDownloads.contains(key))
+                    continue;
+                m_inFlightAttachmentDownloads.insert(key);
+            }
+
+            const auto clearInFlight = [this, key]() {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                m_inFlightAttachmentDownloads.remove(key);
+            };
+
+            if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
+                clearInFlight();
+                continue;
+            }
+
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+            const QByteArray data = fetchAttachmentPartById(*cxn, uid, partId, encoding,
+                [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
+                    emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
+                });
+            if (data.isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+                clearInFlight();
+                continue;
+            }
+
+            const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
+            const QString partDir    = cacheBase + "/"_L1 + safePartId;
+            QDir().mkpath(partDir);
+
+            const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
+            const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
+
+            QSaveFile f(localPath);
+            if (!f.open(QIODevice::WriteOnly)) {
+                clearInFlight();
+                continue;
+            }
+            f.write(data);
+            if (!f.commit()) {
+                clearInFlight();
+                continue;
+            }
+
+            attachmentCacheInsert(key, localPath);
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
+            emit attachmentReady(accountEmail, uid, partId, localPath);
+            clearInFlight();
+        }
+
+        release();
     });
 }
 
@@ -600,78 +580,96 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
         if (token.isEmpty())
             return;
 
-        const bool pooledOk = ImapService::getConnection(host, port, accountEmail, token, folderName, 3500,
-            [this, &accountEmail, &uid, &toFetch](Imap::Connection &cxn) {
-                const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                                        + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
-
-                for (const auto &a : toFetch) {
-                    if (m_destroying.load())
-                        break;
-
-                    const auto    am       = a.toMap();
-                    const QString partId   = am.value("partId"_L1).toString();
-                    const QString encoding = am.value("encoding"_L1).toString();
-                    const QString name     = am.value("name"_L1).toString();
-
-                    const QString key = attachmentCacheKey(accountEmail, uid, partId);
-
-                    {
-                        QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-                        if (m_inFlightAttachmentDownloads.contains(key))
-                            continue;
-                        m_inFlightAttachmentDownloads.insert(key);
-                    }
-
-                    const auto clearInFlight = [this, key]() {
-                        QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-                        m_inFlightAttachmentDownloads.remove(key);
-                    };
-
-                    if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
-                        emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
-                        clearInFlight();
-                        continue;
-                    }
-
-                    emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
-                    const QByteArray data = fetchAttachmentPartById(cxn, uid, partId, encoding,
-                        [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
-                            emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
-                        });
-                    if (data.isEmpty()) {
-                        emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
-                        clearInFlight();
-                        continue;
-                    }
-
-                    const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
-                    const QString partDir    = cacheBase + "/"_L1 + safePartId;
-                    QDir().mkpath(partDir);
-
-                    const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
-                    const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
-
-                    QSaveFile f(localPath);
-                    if (!f.open(QIODevice::WriteOnly)) {
-                        clearInFlight();
-                        continue;
-                    }
-                    f.write(data);
-                    if (!f.commit()) {
-                        clearInFlight();
-                        continue;
-                    }
-
-                    attachmentCacheInsert(key, localPath);
-                    emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
-                    emit attachmentReady(accountEmail, uid, partId, localPath);
-                    clearInFlight();
-                }
-            });
-
-        if (!pooledOk)
+        auto cxn = getPooledConnection();
+        if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
+            return;
+        }
+        const auto release = [this]() { releasePooledConnection(); };
+
+        const bool needsConnect = !cxn->isConnected()
+                               || cxn->host().compare(host, Qt::CaseInsensitive) != 0
+                               || cxn->email().compare(accountEmail, Qt::CaseInsensitive) != 0;
+        if (needsConnect && !cxn->connectAndAuth(host, port, accountEmail, token).success) {
+            release();
+            return;
+        }
+        if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(folderName);
+            if (!ok) {
+                release();
+                return;
+            }
+        }
+
+        const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                                + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
+
+        for (const auto &a : toFetch) {
+            if (m_destroying.load())
+                break;
+
+            const auto    am       = a.toMap();
+            const QString partId   = am.value("partId"_L1).toString();
+            const QString encoding = am.value("encoding"_L1).toString();
+            const QString name     = am.value("name"_L1).toString();
+
+            const QString key = attachmentCacheKey(accountEmail, uid, partId);
+
+            {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                if (m_inFlightAttachmentDownloads.contains(key))
+                    continue;
+                m_inFlightAttachmentDownloads.insert(key);
+            }
+
+            const auto clearInFlight = [this, key]() {
+                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+                m_inFlightAttachmentDownloads.remove(key);
+            };
+
+            if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
+                clearInFlight();
+                continue;
+            }
+
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+            const QByteArray data = fetchAttachmentPartById(*cxn, uid, partId, encoding,
+                [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
+                    emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
+                });
+            if (data.isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+                clearInFlight();
+                continue;
+            }
+
+            const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
+            const QString partDir    = cacheBase + "/"_L1 + safePartId;
+            QDir().mkpath(partDir);
+
+            const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
+            const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
+
+            QSaveFile f(localPath);
+            if (!f.open(QIODevice::WriteOnly)) {
+                clearInFlight();
+                continue;
+            }
+            f.write(data);
+            if (!f.commit()) {
+                clearInFlight();
+                continue;
+            }
+
+            attachmentCacheInsert(key, localPath);
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
+            emit attachmentReady(accountEmail, uid, partId, localPath);
+            clearInFlight();
+        }
+
+        release();
     });
 }
 
@@ -1314,61 +1312,72 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
         return {};
     }
 
-    Imap::SyncResult syncResult;
-    bool ran = false;
-    const bool pooledOk = ImapService::withPooledConnection(host, port, email, accessToken, folderName, 5000,
-        [&](Imap::Connection &pooled) {
-            auto cxn = std::shared_ptr<Imap::Connection>(&pooled, [](Imap::Connection*) {});
-
-            // ── Build context and delegate to SyncEngine ─────────────────────────────
-            Imap::SyncContext ctx;
-            ctx.cxn                     = cxn;
-            ctx.folderName              = folderName;
-            ctx.minUidExclusive         = minUidExclusive;
-            ctx.reconcileDeletes        = reconcileDeletes;
-            ctx.fetchBudget             = fetchBudget;
-            ctx.cancelRequested         = &m_cancelRequested;
-            ctx.onHeader                = onHeader;
-
-            ctx.avatarShouldRefresh = [this](const QString &senderEmail, int ttlSecs, int maxFailures) -> bool {
-                bool result = true;
-                QMetaObject::invokeMethod(this, [this, &result, senderEmail, ttlSecs, maxFailures]() {
-                    if (m_store) result = m_store->avatarShouldRefresh(senderEmail, ttlSecs, maxFailures);
-                }, Qt::BlockingQueuedConnection);
-                return result;
-            };
-
-            ctx.getFolderUids = [this](const QString &acctEmail, const QString &folder) -> QStringList {
-                QStringList result;
-                QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
-                    if (m_store) result = m_store->folderUids(acctEmail, folder);
-                }, Qt::BlockingQueuedConnection);
-                return result;
-            };
-
-            ctx.removeUids = [this](const QString &acctEmail, const QStringList &uids) {
-                QMetaObject::invokeMethod(this, [this, acctEmail, uids]() {
-                    if (m_store) m_store->removeAccountUidsEverywhere(acctEmail, uids);
-                }, Qt::QueuedConnection);
-            };
-
-            ctx.onFlagsReconciled = [this](const QString &acctEmail, const QString &folder,
-                                            const QStringList &readUids) {
-                QMetaObject::invokeMethod(this, [this, acctEmail, folder, readUids]() {
-                    if (m_store) m_store->reconcileReadFlags(acctEmail, folder, readUids);
-                }, Qt::QueuedConnection);
-            };
-
-            // SyncEngine::execute() handles SELECT internally.
-            syncResult = Imap::SyncEngine{}.execute(ctx);
-            ran = true;
-        });
-
-    if (!pooledOk || !ran) {
+    auto pooled = getPooledConnection();
+    if (!pooled) {
         if (statusOut)
             *statusOut = "Operational IMAP pool timeout."_L1;
         return {};
     }
+    const auto release = [this]() { releasePooledConnection(); };
+
+    const bool needsConnect = !pooled->isConnected()
+                           || pooled->host().compare(host, Qt::CaseInsensitive) != 0
+                           || pooled->email().compare(email, Qt::CaseInsensitive) != 0;
+    if (needsConnect && !pooled->connectAndAuth(host, port, email, accessToken).success) {
+        release();
+        if (statusOut) *statusOut = "IMAP connect/auth failed."_L1;
+        return {};
+    }
+
+    if (!folderName.isEmpty() && pooled->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
+        const auto [ok, _] = pooled->select(folderName);
+        if (!ok) {
+            release();
+            if (statusOut) *statusOut = "IMAP select failed."_L1;
+            return {};
+        }
+    }
+
+    Imap::SyncContext ctx;
+    ctx.cxn                     = pooled;
+    ctx.folderName              = folderName;
+    ctx.minUidExclusive         = minUidExclusive;
+    ctx.reconcileDeletes        = reconcileDeletes;
+    ctx.fetchBudget             = fetchBudget;
+    ctx.cancelRequested         = &m_cancelRequested;
+    ctx.onHeader                = onHeader;
+
+    ctx.avatarShouldRefresh = [this](const QString &senderEmail, int ttlSecs, int maxFailures) -> bool {
+        bool result = true;
+        QMetaObject::invokeMethod(this, [this, &result, senderEmail, ttlSecs, maxFailures]() {
+            if (m_store) result = m_store->avatarShouldRefresh(senderEmail, ttlSecs, maxFailures);
+        }, Qt::BlockingQueuedConnection);
+        return result;
+    };
+
+    ctx.getFolderUids = [this](const QString &acctEmail, const QString &folder) -> QStringList {
+        QStringList result;
+        QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
+            if (m_store) result = m_store->folderUids(acctEmail, folder);
+        }, Qt::BlockingQueuedConnection);
+        return result;
+    };
+
+    ctx.removeUids = [this](const QString &acctEmail, const QStringList &uids) {
+        QMetaObject::invokeMethod(this, [this, acctEmail, uids]() {
+            if (m_store) m_store->removeAccountUidsEverywhere(acctEmail, uids);
+        }, Qt::QueuedConnection);
+    };
+
+    ctx.onFlagsReconciled = [this](const QString &acctEmail, const QString &folder,
+                                    const QStringList &readUids) {
+        QMetaObject::invokeMethod(this, [this, acctEmail, folder, readUids]() {
+            if (m_store) m_store->reconcileReadFlags(acctEmail, folder, readUids);
+        }, Qt::QueuedConnection);
+    };
+
+    const Imap::SyncResult syncResult = Imap::SyncEngine{}.execute(ctx);
+    release();
 
     if (statusOut)
         *statusOut = syncResult.statusMessage;
@@ -1724,13 +1733,27 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
             if (email != accountEmail) continue;
 
-            QString resp;
-            const bool pooledOk = ImapService::withPooledConnection(host, port, email, accessToken, folder, 3500,
-                [&](Imap::Connection &cxn) {
-                    // UID MOVE (RFC 6851) — atomic copy+expunge in one round-trip.
-                    resp = cxn.execute("UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
-                });
-            if (!pooledOk) return;
+            auto cxn = getPooledConnection();
+            if (!cxn) return;
+            const auto release = [this]() { releasePooledConnection(); };
+
+            const bool needsConnect = !cxn->isConnected()
+                                   || cxn->host().compare(host, Qt::CaseInsensitive) != 0
+                                   || cxn->email().compare(email, Qt::CaseInsensitive) != 0;
+            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success) {
+                release();
+                return;
+            }
+            if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+                const auto [ok, _] = cxn->select(folder);
+                if (!ok) {
+                    release();
+                    return;
+                }
+            }
+
+            // UID MOVE (RFC 6851) — atomic copy+expunge in one round-trip.
+            const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
 
             qInfo().noquote() << "[move-message]"
                               << "uid=" << uid << "from=" << folder
@@ -1759,6 +1782,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
                             m_store->removeAllEdgesForMessageId(accountEmail, messageId);
                     }, Qt::QueuedConnection);
             }
+            release();
             return;
         }
     });
@@ -1783,12 +1807,28 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
         for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
             if (email != accountEmail) continue;
 
-            QString result;
-            const bool pooledOk = ImapService::withPooledConnection(host, port, email, accessToken, folder, 3500,
-                [&](Imap::Connection &cxn) {
-                    result = cxn.execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
-                });
-            if (!pooledOk) return;
+            auto cxn = getPooledConnection();
+            if (!cxn) return;
+            const auto release = [this]() { releasePooledConnection(); };
+
+            const bool needsConnect = !cxn->isConnected()
+                                   || cxn->host().compare(host, Qt::CaseInsensitive) != 0
+                                   || cxn->email().compare(email, Qt::CaseInsensitive) != 0;
+            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success) {
+                release();
+                return;
+            }
+            if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+                const auto [ok, _] = cxn->select(folder);
+                if (!ok) {
+                    release();
+                    return;
+                }
+            }
+
+            const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
+            Q_UNUSED(result);
+            release();
 
             qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
             return;

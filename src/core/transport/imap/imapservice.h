@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <atomic>
+#include <memory>
 #include <QFuture>
 #include <QHash>
 #include <QSet>
@@ -28,10 +29,8 @@ public:
     ~ImapService() override;
 
     Q_INVOKABLE void syncAll(bool announce = true);
-    static bool getConnection(const QString &host, int port,
-                                     const QString &email, const QString &accessToken,
-                                     const QString &folderName, int timeoutMs,
-                                     const std::function<void(Imap::Connection&)> &work);
+    std::shared_ptr<Imap::Connection> getPooledConnection();
+    void releasePooledConnection();
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true);
     Q_INVOKABLE void refreshFolderList(bool announce = true);
     Q_INVOKABLE void hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid);
