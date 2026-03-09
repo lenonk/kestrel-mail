@@ -494,7 +494,8 @@ Rectangle {
                     progress[a.partId] = 100;
                     downloading[a.partId] = false;
                 } else {
-                    progress[a.partId] = 0;
+                    const existing = Number(root.attachmentProgress[a.partId] || 0);
+                    progress[a.partId] = existing > 0 ? existing : 0;
                     downloading[a.partId] = true;
                 }
             }
@@ -1655,12 +1656,15 @@ Rectangle {
 
             if (!root.messageData) return;
             if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid) return;
+            const prev = Number(root.attachmentProgress[partId] || 0);
+            const next = (progressPercent === 0 && prev > 0 && prev < 100) ? prev : Math.max(prev, progressPercent);
+
             const p = Object.assign({}, root.attachmentProgress);
-            p[partId] = progressPercent;
+            p[partId] = next;
             root.attachmentProgress = p;
 
             const d = Object.assign({}, root.attachmentDownloading);
-            d[partId] = progressPercent < 100;
+            d[partId] = next < 100;
             root.attachmentDownloading = d;
         }
     }
