@@ -10,6 +10,8 @@
 #include "sync/idlewatcher.h"
 #include "sync/backgroundworker.h"
 
+namespace Imap { class Connection; }
+
 class AccountRepository;
 class DataStore;
 class TokenVault;
@@ -26,6 +28,10 @@ public:
     ~ImapService() override;
 
     Q_INVOKABLE void syncAll(bool announce = true);
+    static bool withPooledConnection(const QString &host, int port,
+                                     const QString &email, const QString &accessToken,
+                                     const QString &folderName, int timeoutMs,
+                                     const std::function<void(Imap::Connection&)> &work);
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true);
     Q_INVOKABLE void refreshFolderList(bool announce = true);
     Q_INVOKABLE void hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid);
