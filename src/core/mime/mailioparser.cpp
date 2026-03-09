@@ -3,6 +3,7 @@
 #include <QRegularExpression>
 #include <QHash>
 #include <QDebug>
+#include <functional>
 
 #include <mailio/message.hpp>
 #include <mailio/mime.hpp>
@@ -238,6 +239,105 @@ QString extractPlainTextWithMailio(const QByteArray &fetchRespRaw)
         return {};
     } catch (...) {
         qWarning().noquote() << "[mime] mailio-plain-exception: unknown";
+        return {};
+    }
+}
+
+QVariantList extractAttachmentsWithMailio(const QByteArray &fetchRespRaw)
+{
+    QVariantList out;
+    try {
+        const QByteArray rfc822 = extractRfc822Literal(fetchRespRaw);
+        if (rfc822.isEmpty())
+            return out;
+
+        mailio::message msg;
+        msg.parse(truncateLongHeaderLines(rfc822).toStdString(), false);
+
+        int index = 0;
+        std::function<void(const mailio::mime&)> walk = [&](const mailio::mime &part) {
+            auto &mutablePart = const_cast<mailio::mime&>(part);
+            const auto ct = mutablePart.content_type();
+            const auto mediaType = ct.media_type();
+            const auto subtype = QString::fromStdString(ct.media_subtype()).toLower();
+
+            const QString fileName = QString::fromStdString(mutablePart.name()).trimmed();
+            const std::string body = part.content();
+            const int sizeBytes = static_cast<int>(body.size());
+
+            const bool hasFileName = !fileName.isEmpty();
+            const bool nonTextLeaf = mediaType != mailio::mime::media_type_t::TEXT;
+            if (hasFileName || nonTextLeaf) {
+                QVariantMap row;
+                row.insert("index", index++);
+                row.insert("name", hasFileName ? fileName : QStringLiteral("Attachment"));
+                QString mediaName = "application";
+                switch (mediaType) {
+                    case mailio::mime::media_type_t::TEXT: mediaName = "text"; break;
+                    case mailio::mime::media_type_t::IMAGE: mediaName = "image"; break;
+                    case mailio::mime::media_type_t::AUDIO: mediaName = "audio"; break;
+                    case mailio::mime::media_type_t::VIDEO: mediaName = "video"; break;
+                    case mailio::mime::media_type_t::APPLICATION: mediaName = "application"; break;
+                    case mailio::mime::media_type_t::MULTIPART: mediaName = "multipart"; break;
+                    case mailio::mime::media_type_t::MESSAGE: mediaName = "message"; break;
+                    default: break;
+                }
+                row.insert("mimeType", QStringLiteral("%1/%2").arg(mediaName, subtype));
+                row.insert("bytes", sizeBytes);
+                row.insert("canPreview", mediaType == mailio::mime::media_type_t::IMAGE);
+                out.push_back(row);
+            }
+
+            for (const auto &child : part.parts())
+                walk(child);
+        };
+
+        walk(msg);
+        return out;
+    } catch (...) {
+        return out;
+    }
+}
+
+QByteArray extractAttachmentDataWithMailio(const QByteArray &fetchRespRaw, const int index)
+{
+    try {
+        const QByteArray rfc822 = extractRfc822Literal(fetchRespRaw);
+        if (rfc822.isEmpty())
+            return {};
+
+        mailio::message msg;
+        msg.parse(truncateLongHeaderLines(rfc822).toStdString(), false);
+
+        int current = 0;
+        QByteArray out;
+        std::function<void(const mailio::mime&)> walk = [&](const mailio::mime &part) {
+            if (!out.isEmpty())
+                return;
+
+            auto &mutablePart = const_cast<mailio::mime&>(part);
+            const auto ct = mutablePart.content_type();
+            const auto mediaType = ct.media_type();
+            const QString fileName = QString::fromStdString(mutablePart.name()).trimmed();
+            const bool hasFileName = !fileName.isEmpty();
+            const bool nonTextLeaf = mediaType != mailio::mime::media_type_t::TEXT;
+
+            if (hasFileName || nonTextLeaf) {
+                if (current == index) {
+                    const std::string body = part.content();
+                    out = QByteArray(body.data(), static_cast<int>(body.size()));
+                    return;
+                }
+                ++current;
+            }
+
+            for (const auto &child : part.parts())
+                walk(child);
+        };
+
+        walk(msg);
+        return out;
+    } catch (...) {
         return {};
     }
 }

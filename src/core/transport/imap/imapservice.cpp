@@ -9,6 +9,7 @@
 #include "message/messagehydrator.h"
 #include "message/bodyprocessor.h"
 #include "parser/responseparser.h"
+#include "../../mime/mailioparser.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -206,44 +207,8 @@ ImapService::attachmentsForMessage(const QString &accountEmail, const QString &f
     if (!std::get<0>(selectResult))
         return out;
 
-    const QString resp = cxn->execute(QStringLiteral("UID FETCH %1 (BODYSTRUCTURE)").arg(uid));
-    const auto parts = Imap::BodyProcessor::parsePreferredTextParts(resp);
-
-    // Best-effort filename extraction directly from BODYSTRUCTURE response.
-    QStringList filenamePool;
-    {
-        static const QRegularExpression fnRe(QStringLiteral("(?:\"filename\"|\"name\")\\s+\"([^\"]+)\""),
-                                             QRegularExpression::CaseInsensitiveOption);
-        auto it = fnRe.globalMatch(resp);
-        while (it.hasNext()) {
-            const auto m = it.next();
-            const auto fn = m.captured(1).trimmed();
-            if (!fn.isEmpty())
-                filenamePool.push_back(fn);
-        }
-    }
-    int filenameIdx = 0;
-
-    for (const auto &p : parts) {
-        const bool attachmentLike = p.isAttachment
-                                 || p.type.compare("TEXT"_L1, Qt::CaseInsensitive) != 0;
-        if (!attachmentLike)
-            continue;
-        QString resolvedName = p.filename.trimmed();
-        if (resolvedName.isEmpty() && filenameIdx < filenamePool.size())
-            resolvedName = filenamePool.at(filenameIdx++);
-        if (resolvedName.isEmpty())
-            resolvedName = QStringLiteral("Attachment");
-
-        QVariantMap row;
-        row.insert("partId"_L1, p.partId);
-        row.insert("name"_L1, resolvedName);
-        row.insert("mimeType"_L1, QStringLiteral("%1/%2").arg(p.type.toLower(), p.subtype.toLower()));
-        row.insert("encoding"_L1, p.encoding);
-        row.insert("bytes"_L1, p.bytes);
-        row.insert("canPreview"_L1, p.type.compare("IMAGE"_L1, Qt::CaseInsensitive) == 0);
-        out.push_back(row);
-    }
+    const QString resp = cxn->execute(QStringLiteral("UID FETCH %1 (BODY.PEEK[])").arg(uid));
+    out = Mime::extractAttachmentsWithMailio(resp.toUtf8());
 
     // Ensure display names are unique per message for UI clarity.
     {
@@ -271,10 +236,9 @@ ImapService::attachmentsForMessage(const QString &accountEmail, const QString &f
 }
 
 static QByteArray
-fetchAttachmentBytesForPart(Imap::Connection &cxn, const QString &uid, const QString &partId) {
-    const QString resp = cxn.execute(QStringLiteral("UID FETCH %1 (BODY.PEEK[%2])").arg(uid, partId));
-    const QByteArray literal = Imap::Parser::extractLastLiteralBytesFromFetch(resp.toUtf8());
-    return Imap::BodyProcessor::decodeTransferEncoded(literal);
+fetchAttachmentBytesByIndex(Imap::Connection &cxn, const QString &uid, const int index) {
+    const QString resp = cxn.execute(QStringLiteral("UID FETCH %1 (BODY.PEEK[])").arg(uid));
+    return Mime::extractAttachmentDataWithMailio(resp.toUtf8(), index);
 }
 
 void
@@ -307,7 +271,8 @@ ImapService::openAttachment(const QString &accountEmail, const QString &folderNa
     if (!std::get<0>(selectResult))
         return;
 
-    const QByteArray data = fetchAttachmentBytesForPart(*cxn, uid, partId);
+    const int index = partId.toInt();
+    const QByteArray data = fetchAttachmentBytesByIndex(*cxn, uid, index);
     if (data.isEmpty())
         return;
 
@@ -356,7 +321,8 @@ ImapService::saveAttachment(const QString &accountEmail, const QString &folderNa
     if (!std::get<0>(selectResult))
         return false;
 
-    const QByteArray data = fetchAttachmentBytesForPart(*cxn, uid, partId);
+    const int index = partId.toInt();
+    const QByteArray data = fetchAttachmentBytesByIndex(*cxn, uid, index);
     if (data.isEmpty())
         return false;
 
