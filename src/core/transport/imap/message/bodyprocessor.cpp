@@ -146,10 +146,14 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
 
     // BODYSTRUCTURE param format: ("KEY" "VALUE" "KEY2" "VALUE2" ...)
     // Both key and value are quoted atoms separated by whitespace.
-    static const QRegularExpression charsetRe(QStringLiteral("\"charset\"\\s+\"([a-z0-9._-]+)\""));
-    static const QRegularExpression nameRe(QStringLiteral("\"(?:name|filename)\"\\s+\"([^\"]+)\""));
+    static const QRegularExpression charsetRe(
+        QStringLiteral("\"charset\"\\s+\"([a-z0-9._-]+)\""),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression nameRe(
+        QStringLiteral("\"(?:name|filename)\"\\s+\"([^\"]+)\""),
+        QRegularExpression::CaseInsensitiveOption);
 
-    // Helper: extract paren-delimited block at current position, return lowercased.
+    // Helper: extract paren-delimited block at current position, preserving original case.
     auto readParenBlock = [&]() -> QString {
         skipWs();
         if (m_i >= m_text.size() || m_text[m_i] != '(') return {};
@@ -160,7 +164,8 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
             else if (m_text[m_i] == ')') --depth;
             ++m_i;
         } while (m_i < m_text.size() && depth > 0);
-        return m_text.mid(start, m_i - start).toLower();
+        // Preserve original casing (especially filenames); regexes are case-insensitive.
+        return m_text.mid(start, m_i - start);
     };
 
     QString charset;
