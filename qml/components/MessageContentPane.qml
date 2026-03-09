@@ -546,7 +546,7 @@ Rectangle {
             root.attachmentDownloading = downloading;
         }
     }
-    function startAttachmentPrefetchForCurrentMessage() {
+    function startImageAttachmentPrefetchForCurrentMessage() {
         if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
             return;
         const account = (root.messageData.accountEmail || "").toString();
@@ -555,6 +555,17 @@ Rectangle {
         if (!account.length || !folder.length || !uid.length)
             return;
         appRoot.imapServiceObj.prefetchImageAttachments(account, folder, uid);
+    }
+
+    function startAllAttachmentPrefetchForCurrentMessage() {
+        if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
+            return;
+        const account = (root.messageData.accountEmail || "").toString();
+        const folder = (root.messageData.folder || "").toString();
+        const uid = (root.messageData.uid || "").toString();
+        if (!account.length || !folder.length || !uid.length)
+            return;
+        appRoot.imapServiceObj.prefetchAttachments(account, folder, uid);
     }
     function removeTagByName(name) {
         const tags = activeTags.filter(function (t) {
@@ -753,11 +764,11 @@ Rectangle {
             root.attachmentProgress = ({});
             root.attachmentDownloading = ({});
             root.reloadAttachmentsForCurrentMessage();
-            root.startAttachmentPrefetchForCurrentMessage();
+            root.startImageAttachmentPrefetchForCurrentMessage();
         } else if (root.attachmentItems.length === 0) {
             // Same message, attachments not yet loaded — retry (race with DB hydration).
             root.reloadAttachmentsForCurrentMessage();
-            root.startAttachmentPrefetchForCurrentMessage();
+            root.startImageAttachmentPrefetchForCurrentMessage();
         }
         // Same message with attachments already loaded: leave all state untouched.
 
@@ -1394,7 +1405,7 @@ Rectangle {
 
                     HoverHandler {
                         id: attachmentHover
-                        onHoveredChanged: if (hovered) root.startAttachmentPrefetchForCurrentMessage()
+                        onHoveredChanged: if (hovered) root.startAllAttachmentPrefetchForCurrentMessage()
                     }
 
                     MouseArea {
@@ -1403,7 +1414,7 @@ Rectangle {
                         cursorShape: Qt.PointingHandCursor
 
                         onClicked: function (mouse) {
-                            root.startAttachmentPrefetchForCurrentMessage();
+                            root.startAllAttachmentPrefetchForCurrentMessage();
                             if (mouse.button === Qt.LeftButton) {
                                 root.selectedAttachmentKey = attachmentCard.modelData.partId;
                             } else if (mouse.button === Qt.RightButton) {
@@ -1414,7 +1425,7 @@ Rectangle {
                         onDoubleClicked: function (mouse) {
                             if (mouse.button !== Qt.LeftButton)
                                 return;
-                            root.startAttachmentPrefetchForCurrentMessage();
+                            root.startAllAttachmentPrefetchForCurrentMessage();
                             appRoot.imapServiceObj.openAttachment(root.messageData.accountEmail, root.messageData.folder, root.messageData.uid, attachmentCard.modelData.partId, attachmentCard.modelData.name, attachmentCard.modelData.encoding);
                         }
                     }
