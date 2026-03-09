@@ -1061,8 +1061,9 @@ Rectangle {
                 delegate: Rectangle {
                     id: attachmentCard
                     required property var modelData
+                    property bool pressed: false
                     radius: 8
-                    color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.08)
+                    color: pressed ? root.systemPalette.highlight : Qt.lighter(Kirigami.Theme.backgroundColor, 1.08)
                     border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
                     border.width: 1
                     height: 34
@@ -1096,6 +1097,13 @@ Rectangle {
                     MouseArea {
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onPressed: function(mouse) {
+                            attachmentCard.pressed = (mouse.button === Qt.LeftButton)
+                        }
+                        onReleased: function() {
+                            attachmentCard.pressed = false
+                        }
+                        onCanceled: attachmentCard.pressed = false
                         onClicked: function(mouse) {
                             if (mouse.button === Qt.LeftButton)
                                 appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
