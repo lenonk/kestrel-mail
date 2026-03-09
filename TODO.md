@@ -14,6 +14,7 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] Investigate startup UI responsiveness regression: for several seconds after launch, window dragging/moving is delayed.
 - [ ] Investigate message-list hitching during sync idle/refresh cycles (UI stutters even when no rows are inserted).
 - [ ] Audit and move non-trivial work off the UI thread (QML/GUI): identify blocking operations during startup and sync tick paths.
+- [ ] Prevent content pane reflow/reload jump when inline images become available: no fade-out/fade-in, preserve current scroll position, and avoid resetting to top.
 - [ ] Move MessageContentPane heavy processing from QML to C++ backend (first targets: sanitizeRenderHtml, tracking pixel/link normalization, darkenHtml injection pipeline).
 - [ ] Implement conversation/threaded message view (high priority; start soon).
 - [ ] Replace hardcoded Gmail category handling with DB-discovered categories (discover from message labels, persist category set, and read categories from DB everywhere UI/logic iterates them).
