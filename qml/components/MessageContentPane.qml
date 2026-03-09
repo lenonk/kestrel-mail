@@ -1293,14 +1293,23 @@ Rectangle {
                         }
                     }
                     Rectangle {
+                        id: attachmentProgressBar
                         anchors.bottom: parent.bottom
                         anchors.left: parent.left
                         anchors.right: parent.right
                         height: 2
                         radius: 1
                         color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
-                        visible: Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0) > 0
-                              && Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0) < 100
+                        readonly property real progressValue: Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0)
+                        visible: progressValue > 0 && progressValue < 100
+
+                        onVisibleChanged: {
+                            console.log("[attachment-progress] bar",
+                                        "partId=", attachmentCard.modelData.partId,
+                                        "name=", attachmentCard.modelData.name,
+                                        "progress=", progressValue,
+                                        "visible=", visible)
+                        }
 
                         Rectangle {
                             anchors.left: parent.left
@@ -1308,7 +1317,7 @@ Rectangle {
                             height: parent.height
                             radius: 1
                             color: root.systemPalette.highlight
-                            width: parent.width * (Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0) / 100.0)
+                            width: parent.width * (attachmentProgressBar.progressValue / 100.0)
                         }
                     }
 
@@ -1571,6 +1580,12 @@ Rectangle {
         target: appRoot ? appRoot.imapServiceObj : null
 
         function onAttachmentReady(accountEmail, uid, partId, localPath) {
+            console.log("[attachment-progress] ready",
+                        "account=", accountEmail,
+                        "uid=", uid,
+                        "partId=", partId,
+                        "path=", localPath)
+
             if (!root.messageData) return;
             if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid) return;
             const updated = Object.assign({}, root.attachmentLocalPaths);
@@ -1583,6 +1598,12 @@ Rectangle {
         }
 
         function onAttachmentDownloadProgress(accountEmail, uid, partId, progressPercent) {
+            console.log("[attachment-progress] signal",
+                        "account=", accountEmail,
+                        "uid=", uid,
+                        "partId=", partId,
+                        "progress=", progressPercent)
+
             if (!root.messageData) return;
             if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid) return;
             const p = Object.assign({}, root.attachmentProgress);
