@@ -12,9 +12,7 @@
     "oauthTokenUrl": "https://oauth2.googleapis.com/token",
     "oauthScopes": "https://mail.google.com/",
     "oauthClientId": "",
-    "oauthClientSecret": "",
-    "oauthEnvClientId": "KESTREL_GOOGLE_CLIENT_ID",
-    "oauthEnvClientSecret": "KESTREL_GOOGLE_CLIENT_SECRET"
+    "oauthClientSecret": ""
   },
   {
     "id": "microsoft365",
@@ -28,7 +26,7 @@
     "oauthAuthUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
     "oauthTokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
     "oauthScopes": "offline_access IMAP.AccessAsUser.All SMTP.Send",
-    "oauthEnvClientId": "KESTREL_MS_CLIENT_ID",
-    "oauthEnvClientSecret": "KESTREL_MS_CLIENT_SECRET"
+    "oauthClientId": "",
+    "oauthClientSecret": ""
   }
 ]

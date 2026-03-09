@@ -132,13 +132,8 @@ QString ImapLabController::refreshAccessToken(const QVariantMap &account, const 
     if (refreshToken.isEmpty()) return {};
 
     const QString tokenUrl = account.value("oauthTokenUrl").toString();
-    const QString envClientId = account.value("oauthEnvClientId").toString();
-    const QString envClientSecret = account.value("oauthEnvClientSecret").toString();
-
     QString clientId = account.value("oauthClientId").toString().trimmed();
     QString clientSecret = account.value("oauthClientSecret").toString();
-    if (clientId.isEmpty() && !envClientId.isEmpty()) clientId = qEnvironmentVariable(envClientId.toUtf8().constData()).trimmed();
-    if (clientSecret.isEmpty() && !envClientSecret.isEmpty()) clientSecret = qEnvironmentVariable(envClientSecret.toUtf8().constData());
 
     if (tokenUrl.isEmpty() || clientId.isEmpty()) return {};
 

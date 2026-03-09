@@ -124,8 +124,6 @@ bool AccountSetupController::saveCurrentAccount(const QString &accountName, cons
     account.insert("oauthTokenUrl", m_selectedProvider.value("oauthTokenUrl"));
     account.insert("oauthClientId", m_selectedProvider.value("oauthClientId"));
     account.insert("oauthClientSecret", m_selectedProvider.value("oauthClientSecret"));
-    account.insert("oauthEnvClientId", m_selectedProvider.value("oauthEnvClientId"));
-    account.insert("oauthEnvClientSecret", m_selectedProvider.value("oauthEnvClientSecret"));
 
     m_accounts->addOrUpdateAccount(account);
     m_statusMessage = QStringLiteral("Account saved to local repository.");

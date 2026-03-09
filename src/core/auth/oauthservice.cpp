@@ -43,23 +43,12 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
     const QString authEndpoint = provider.value("oauthAuthUrl").toString();
     m_pendingTokenUrl = provider.value("oauthTokenUrl").toString();
     const QString scope = provider.value("oauthScopes").toString();
-    const QString envClientId = provider.value("oauthEnvClientId").toString();
-    const QString envClientSecret = provider.value("oauthEnvClientSecret").toString();
-
     m_pendingClientId = provider.value("oauthClientId").toString().trimmed();
     m_pendingClientSecret = provider.value("oauthClientSecret").toString();
-
-    if (m_pendingClientId.isEmpty() && !envClientId.isEmpty()) {
-        m_pendingClientId = qEnvironmentVariable(envClientId.toUtf8().constData()).trimmed();
-    }
-    if (m_pendingClientSecret.isEmpty() && !envClientSecret.isEmpty()) {
-        m_pendingClientSecret = qEnvironmentVariable(envClientSecret.toUtf8().constData());
-    }
 
     if (m_pendingClientId.trimmed().isEmpty()) {
         qWarning().noquote() << "[oauth] missing client id"
                              << "providerId=" << providerId
-                             << "envClientIdKey=" << envClientId
                              << "hasInlineClientId=" << !provider.value("oauthClientId").toString().trimmed().isEmpty();
         m_lastStatus = QStringLiteral("Sign-in is not configured yet for this provider in this build.");
         emit lastStatusChanged();

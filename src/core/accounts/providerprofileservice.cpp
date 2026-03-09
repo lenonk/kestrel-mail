@@ -35,8 +35,6 @@ QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const
         gmail.insert("oauthScopes", "https://mail.google.com/ https://www.googleapis.com/auth/contacts.readonly");
         gmail.insert("oauthClientId", "");
         gmail.insert("oauthClientSecret", "");
-        gmail.insert("oauthEnvClientId", "KESTREL_GOOGLE_CLIENT_ID");
-        gmail.insert("oauthEnvClientSecret", "KESTREL_GOOGLE_CLIENT_SECRET");
         return gmail;
     }
 
@@ -53,8 +51,6 @@ QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const
         ms.insert("oauthAuthUrl", "https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
         ms.insert("oauthTokenUrl", "https://login.microsoftonline.com/common/oauth2/v2.0/token");
         ms.insert("oauthScopes", "offline_access IMAP.AccessAsUser.All SMTP.Send");
-        ms.insert("oauthEnvClientId", "KESTREL_MS_CLIENT_ID");
-        ms.insert("oauthEnvClientSecret", "KESTREL_MS_CLIENT_SECRET");
         return ms;
     }
 

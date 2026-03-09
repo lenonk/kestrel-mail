@@ -25,14 +25,9 @@ Project scaffold is in place (Qt 6 + Kirigami + CMake). Core mail functionality 
 
 ## OAuth setup (Gmail / Microsoft 365)
 
-Set OAuth client credentials before running:
-
-```bash
-export KESTREL_GOOGLE_CLIENT_ID="..."
-export KESTREL_GOOGLE_CLIENT_SECRET="..."   # optional for some app types
-export KESTREL_MS_CLIENT_ID="..."
-export KESTREL_MS_CLIENT_SECRET="..."
-```
+Configure provider OAuth client credentials directly in provider profile data
+(or account/provider settings in-app). Environment-variable based OAuth client
+configuration is intentionally not supported.
 
 ## Build
 
