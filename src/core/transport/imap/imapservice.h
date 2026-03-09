@@ -135,4 +135,9 @@ private:
                                     QVariantList &resultHeaders,
                                     QElapsedTimer &flushTimer,
                                     const std::function<void()> &flush);
+
+    void hydrateMessageBodyInternal(const QString &accountEmail,
+                                    const QString &folderName,
+                                    const QString &uid,
+                                    bool userInitiated);
 };

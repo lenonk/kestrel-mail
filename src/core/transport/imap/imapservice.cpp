@@ -511,7 +511,7 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     }
 
     for (const auto &uid : candidates)
-        hydrateMessageBody(email, folder, uid);
+        hydrateMessageBodyInternal(email, folder, uid, false);
 }
 
 void
@@ -898,6 +898,12 @@ bodyAlreadyFetched(const DataStore *store, const QString& accountEmail, const QS
 
 void
 ImapService::hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid) {
+    hydrateMessageBodyInternal(accountEmail, folderName, uid, true);
+}
+
+void
+ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QString &folderName, const QString &uid,
+                                        const bool userInitiated) {
     const auto emailNorm = accountEmail.trimmed();
     const auto folderNorm = folderName.trimmed();
     const auto uidNorm = uid.trimmed();
@@ -936,15 +942,15 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
                              << "account=" << emailNorm
                              << "folder=" << folderNorm
                              << "uid=" << uidNorm;
-        // Background/body-hydration failures are logged with structured context,
-        // but should not surface user-facing error toasts.
+        if (userInitiated)
+            emit hydrateStatus(false, "Message body fetch failed: account not found.");
         return;
     }
 
     auto *watcher = new QFutureWatcher<QString>(this);
     registerWatcher(watcher);
 
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, emailNorm, folderNorm, uidNorm, inFlightKey]() {
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, emailNorm, folderNorm, uidNorm, inFlightKey, userInitiated]() {
         const auto bodyHtml = watcher->result().trimmed();
         unregisterWatcher(watcher);
         watcher->deleteLater();
@@ -962,7 +968,8 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
                                  << "account=" << emailNorm
                                  << "folder=" << folderNorm
                                  << "uid=" << uidNorm;
-            // Logged above as [hydrate-fail]; suppress user-facing toast noise.
+            if (userInitiated)
+                emit hydrateStatus(false, "Message body fetch failed: parser returned empty HTML.");
             return;
         }
 
