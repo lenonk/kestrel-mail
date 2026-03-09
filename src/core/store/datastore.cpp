@@ -2555,24 +2555,21 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         static const QRegularExpression heightRe(QStringLiteral("\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"']"), QRegularExpression::CaseInsensitiveOption);
         static const QRegularExpression hostRe(QStringLiteral("^https?://([^/?#]+)"), QRegularExpression::CaseInsensitiveOption);
 
-        auto sldFromHost = [](const QString &hostRaw) {
-            QString host = hostRaw.toLower();
+        auto normalizedHost = [](const QString &hostRaw) {
+            QString host = hostRaw.toLower().trimmed();
             const int colon = host.indexOf(':');
             if (colon > 0)
                 host = host.left(colon);
-            const QStringList parts = host.split('.', Qt::SkipEmptyParts);
-            if (parts.size() < 2)
-                return QString();
-            return parts.at(parts.size() - 2);
+            return host;
         };
 
-        auto senderSldFromRow = [&](const QVariantMap &row) {
+        auto senderDomainFromRow = [&](const QVariantMap &row) {
             const QString sender = row.value(QStringLiteral("sender")).toString();
             const QString email = extractFirstEmail(sender);
             const int at = email.lastIndexOf('@');
             if (at < 0)
                 return QString();
-            return sldFromHost(email.mid(at + 1));
+            return normalizedHost(email.mid(at + 1));
         };
 
         for (int i = 0; i < list.size(); ++i) {
@@ -2581,7 +2578,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             row.insert(QStringLiteral("hasAttachments"), withAttachments.contains(mid));
 
             const QString bodyHtml = row.value(QStringLiteral("bodyHtml")).toString();
-            const QString senderSld = senderSldFromRow(row);
+            const QString senderDomain = senderDomainFromRow(row);
             bool hasTrackingPixel = false;
 
             QRegularExpressionMatchIterator it = imgTagRe.globalMatch(bodyHtml);
@@ -2599,9 +2596,11 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                 if (!hostM.hasMatch())
                     continue;
 
-                const QString pixelSld = sldFromHost(hostM.captured(1));
-                if (!senderSld.isEmpty() && !pixelSld.isEmpty() && senderSld == pixelSld)
+                const QString pixelHost = normalizedHost(hostM.captured(1));
+                if (!senderDomain.isEmpty() && !pixelHost.isEmpty()
+                    && (pixelHost == senderDomain || pixelHost.endsWith("." + senderDomain))) {
                     continue; // first-party pixel: don't mark as tracker
+                }
 
                 hasTrackingPixel = true;
                 break;
