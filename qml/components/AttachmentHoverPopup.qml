@@ -29,6 +29,12 @@ Item {
     readonly property string previewLower: (previewSource || "").toLowerCase()
     readonly property string previewUrl: previewSource.length > 0 ? ("file://" + encodeURI(previewSource)) : ""
     readonly property bool isImagePreview: previewMimeType.toLowerCase().indexOf("image/") === 0
+                                           || previewLower.endsWith(".png")
+                                           || previewLower.endsWith(".jpg")
+                                           || previewLower.endsWith(".jpeg")
+                                           || previewLower.endsWith(".webp")
+                                           || previewLower.endsWith(".gif")
+                                           || previewLower.endsWith(".bmp")
     readonly property bool isPdfPreview: previewMimeType.toLowerCase().indexOf("pdf") >= 0 || previewLower.endsWith(".pdf")
     readonly property bool isWebPreview: !isImagePreview && !isPdfPreview && (previewLower.endsWith(".txt")
                                                                                || previewLower.endsWith(".md")
@@ -38,7 +44,7 @@ Item {
     function borderForTheme() {
         const c = Kirigami.Theme.backgroundColor;
         const luminance = (0.2126 * c.r) + (0.7152 * c.g) + (0.0722 * c.b);
-        return luminance < 0.5 ? Qt.lighter(c, 1.35) : Qt.darker(c, 1.8);
+        return luminance < 0.5 ? Qt.lighter(c, 1.6) : Qt.darker(c, 2.0);
     }
 
     signal openTriggered()
@@ -174,7 +180,7 @@ Item {
                 Image {
                     id: previewImg
                     anchors.fill: parent
-                    anchors.margins: 2
+                    anchors.margins: 0
                     source: root.isImagePreview ? root.previewUrl : ""
                     fillMode: Image.PreserveAspectFit
                     horizontalAlignment: Image.AlignLeft
@@ -192,7 +198,7 @@ Item {
                 PdfPageImage {
                     id: pdfPreview
                     anchors.fill: parent
-                    anchors.margins: 2
+                    anchors.margins: 0
                     document: pdfDoc
                     currentFrame: 0
                     fillMode: Image.PreserveAspectFit
@@ -203,7 +209,7 @@ Item {
                 WebEngineView {
                     id: previewWeb
                     anchors.fill: parent
-                    anchors.margins: 2
+                    anchors.margins: 0
                     visible: root.isWebPreview
                     url: root.isWebPreview ? root.previewUrl : ""
                     settings.javascriptEnabled: false

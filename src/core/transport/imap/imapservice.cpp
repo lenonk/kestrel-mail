@@ -227,7 +227,10 @@ ImapService::attachmentPreviewPath(const QString &accountEmail, const QString &u
     if (!officeLike)
         return {};
 
-    if (QStandardPaths::findExecutable("libreoffice").isEmpty())
+    QString officeBin = QStandardPaths::findExecutable("libreoffice");
+    if (officeBin.isEmpty())
+        officeBin = QStandardPaths::findExecutable("soffice");
+    if (officeBin.isEmpty())
         return {};
 
     const QString previewDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
@@ -240,7 +243,7 @@ ImapService::attachmentPreviewPath(const QString &accountEmail, const QString &u
         return expected;
 
     QProcess p;
-    p.setProgram("libreoffice"_L1);
+    p.setProgram(officeBin);
     p.setArguments({"--headless"_L1, "--convert-to"_L1, "png"_L1, "--outdir"_L1, previewDir, localPath});
     p.start();
     if (!p.waitForFinished(8000) || p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0)

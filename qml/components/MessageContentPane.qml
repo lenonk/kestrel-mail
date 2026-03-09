@@ -1347,47 +1347,6 @@ Rectangle {
                             visible: attachmentCard.sizeText.length > 0
                         }
                     }
-                    Rectangle {
-                        id: attachmentProgressBar
-                        anchors.bottom: parent.bottom
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        height: 2
-                        radius: 1
-                        color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
-                        readonly property real progressValue: Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0)
-                        readonly property bool downloading: !!root.attachmentDownloading[attachmentCard.modelData.partId]
-                        visible: downloading || (progressValue > 0 && progressValue < 100)
-
-                        onVisibleChanged: {
-                            console.log("[attachment-progress] bar",
-                                        "partId=", attachmentCard.modelData.partId,
-                                        "name=", attachmentCard.modelData.name,
-                                        "progress=", progressValue,
-                                        "downloading=", downloading,
-                                        "visible=", visible)
-                        }
-
-                        Rectangle {
-                            id: progressFill
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            height: parent.height
-                            radius: 1
-                            color: root.systemPalette.highlight
-                            width: attachmentProgressBar.progressValue > 0
-                                 ? parent.width * (attachmentProgressBar.progressValue / 100.0)
-                                 : parent.width * 0.35
-                            opacity: attachmentProgressBar.progressValue > 0 ? 1.0 : 0.6
-
-                            SequentialAnimation on opacity {
-                                running: attachmentProgressBar.visible && attachmentProgressBar.progressValue <= 0
-                                loops: Animation.Infinite
-                                NumberAnimation { to: 0.25; duration: 300 }
-                                NumberAnimation { to: 0.75; duration: 300 }
-                            }
-                        }
-                    }
 
                     HoverHandler {
                         id: attachmentHover
