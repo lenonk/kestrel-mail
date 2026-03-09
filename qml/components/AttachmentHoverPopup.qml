@@ -120,7 +120,7 @@ Item {
             ctx.lineTo(ax + root.arrowWidth, root.arrowHeight)
             ctx.closePath()
             ctx.lineWidth = 1
-            ctx.strokeStyle = cssColor(root.borderForTheme())
+            ctx.strokeStyle = cssColor(Qt.lighter(Kirigami.Theme.backgroundColor, 1.35))
             ctx.stroke()
         }
 
@@ -181,11 +181,11 @@ Item {
                 Image {
                     id: previewImg
                     anchors.fill: parent
-                    anchors.margins: 0
+                    anchors.margins: parent.border.width
                     source: root.isImagePreview ? root.previewUrl : ""
-                    fillMode: Image.PreserveAspectFit
+                    fillMode: Image.PreserveAspectCrop
                     horizontalAlignment: Image.AlignHCenter
-                    verticalAlignment: Image.AlignTop
+                    verticalAlignment: Image.AlignVCenter
                     asynchronous: true
                     cache: false
                     visible: root.isImagePreview && status === Image.Ready
@@ -199,12 +199,12 @@ Item {
                 PdfPageImage {
                     id: pdfPreview
                     anchors.fill: parent
-                    anchors.margins: 0
+                    anchors.margins: parent.border.width
                     document: pdfDoc
                     currentFrame: 0
-                    fillMode: Image.PreserveAspectFit
+                    fillMode: Image.PreserveAspectCrop
                     horizontalAlignment: Image.AlignHCenter
-                    verticalAlignment: Image.AlignTop
+                    verticalAlignment: Image.AlignVCenter
                     asynchronous: true
                     visible: root.isPdfPreview && status === Image.Ready
                 }
@@ -212,7 +212,7 @@ Item {
                 WebEngineView {
                     id: previewWeb
                     anchors.fill: parent
-                    anchors.margins: 0
+                    anchors.margins: parent.border.width
                     visible: root.isWebPreview
                     url: root.isWebPreview ? root.previewUrl : ""
                     settings.javascriptEnabled: false
@@ -262,7 +262,7 @@ Item {
                                           : (openBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
                                                              : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
                         border.width: 1
-                        border.color: root.borderForTheme()
+                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
                         radius: 0
                     }
                 }
@@ -295,7 +295,7 @@ Item {
                                           : (saveBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
                                                              : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
                         border.width: 1
-                        border.color: root.borderForTheme()
+                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
                         radius: 0
                     }
                 }
