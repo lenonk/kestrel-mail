@@ -44,7 +44,6 @@ public:
     Q_INVOKABLE bool saveAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
                                     const QString &partId, const QString &fileName, const QString &encoding);
     Q_INVOKABLE void prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid);
-    Q_INVOKABLE void prefetchAttachment(const QString &accountEmail, const QString &folderName, const QString &uid, const QString &partId);
     Q_INVOKABLE void prefetchImageAttachments(const QString &accountEmail, const QString &folderName, const QString &uid);
     Q_INVOKABLE QString cachedAttachmentPath(const QString &accountEmail, const QString &uid, const QString &partId) const;
     Q_INVOKABLE QString attachmentPreviewPath(const QString &accountEmail, const QString &uid, const QString &partId,

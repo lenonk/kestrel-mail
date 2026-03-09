@@ -591,17 +591,16 @@ Rectangle {
         }
     }
 
-    function startAttachmentPrefetchForPart(partId) {
+    function startAllAttachmentPrefetchForCurrentMessage() {
         if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
             return;
         const account = (root.messageData.accountEmail || "").toString();
         const folder = (root.messageData.folder || "").toString();
         const uid = (root.messageData.uid || "").toString();
-        const pid = (partId || "").toString();
-        if (!account.length || !folder.length || !uid.length || !pid.length)
+        if (!account.length || !folder.length || !uid.length)
             return;
 
-        appRoot.imapServiceObj.prefetchAttachment(account, folder, uid, pid);
+        appRoot.imapServiceObj.prefetchAttachments(account, folder, uid);
         if (appRoot.dataStoreObj && appRoot.dataStoreObj.fetchCandidatesForMessageKey) {
             const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
             for (let i = 0; i < candidates.length; ++i) {
@@ -610,7 +609,7 @@ Rectangle {
                 const cu = (c.uid || "").toString();
                 if (!cf.length || !cu.length || (cf === folder && cu === uid))
                     continue;
-                appRoot.imapServiceObj.prefetchAttachment(account, cf, cu, pid);
+                appRoot.imapServiceObj.prefetchAttachments(account, cf, cu);
             }
         }
     }
@@ -1452,7 +1451,7 @@ Rectangle {
 
                     HoverHandler {
                         id: attachmentHover
-                        onHoveredChanged: if (hovered) root.startAttachmentPrefetchForPart(attachmentCard.modelData.partId)
+                        onHoveredChanged: if (hovered) root.startAllAttachmentPrefetchForCurrentMessage()
                     }
 
                     MouseArea {
@@ -1461,7 +1460,7 @@ Rectangle {
                         cursorShape: Qt.PointingHandCursor
 
                         onClicked: function (mouse) {
-                            root.startAttachmentPrefetchForPart(attachmentCard.modelData.partId);
+                            root.startAllAttachmentPrefetchForCurrentMessage();
                             if (mouse.button === Qt.LeftButton) {
                                 root.selectedAttachmentKey = attachmentCard.modelData.partId;
                             } else if (mouse.button === Qt.RightButton) {
@@ -1472,7 +1471,7 @@ Rectangle {
                         onDoubleClicked: function (mouse) {
                             if (mouse.button !== Qt.LeftButton)
                                 return;
-                            root.startAttachmentPrefetchForPart(attachmentCard.modelData.partId);
+                            root.startAllAttachmentPrefetchForCurrentMessage();
                             appRoot.imapServiceObj.openAttachment(root.messageData.accountEmail, root.messageData.folder, root.messageData.uid, attachmentCard.modelData.partId, attachmentCard.modelData.name, attachmentCard.modelData.encoding);
                         }
                     }
