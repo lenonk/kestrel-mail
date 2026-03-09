@@ -506,11 +506,6 @@ Rectangle {
         const dataHashes = bodyDataImageHashes(baseHtml);
 
         console.log("[cid-compare]", cidNames);
-        if (cidNames.length === 0) {
-            const sampleImgs = ((baseHtml || "").toString().match(/<img\b[^>]*>/gi) || []).slice(0, 3);
-            if (sampleImgs.length > 0)
-                console.log("[inline-image] img-tag-sample", sampleImgs.join(" || "));
-        }
 
         const images = [];
         for (let i = 0; i < root.attachmentItems.length; i++) {
