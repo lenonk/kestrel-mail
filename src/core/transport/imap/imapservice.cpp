@@ -6,7 +6,6 @@
 #include "connection/imapconnection.h"
 #include "sync/syncutils.h"
 #include "sync/syncengine.h"
-#include "sync/synccontext.h"
 #include "message/messagehydrator.h"
 
 #include <QByteArray>

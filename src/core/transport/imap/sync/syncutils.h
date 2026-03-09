@@ -9,12 +9,10 @@
 #include <span>
 #include <cstdint>
 
-namespace Imap {
-
 /**
  * Sync-related utility functions.
  */
-namespace SyncUtils {
+namespace Imap::SyncUtils {
 
 struct OAuthAccountTarget {
     QString email;
@@ -69,5 +67,5 @@ void handleFailure(const std::function<void(bool, const QString &)> &onRealtimeS
                    int sleepSeconds,
                    std::atomic_bool *running = nullptr);
 
-} // namespace SyncUtils
-} // namespace Imap
+} // namespace Imap::SyncUtils
+
