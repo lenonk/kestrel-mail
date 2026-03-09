@@ -6,7 +6,6 @@
 
 #include <QSet>
 #include <QRegularExpression>
-#include <QtConcurrentRun>
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -50,9 +49,7 @@ BackgroundWorker::FolderStatus
 BackgroundWorker::fetchFolderStatus(const QString &folder) const {
     FolderStatus out;
 
-    std::shared_ptr<Connection> cxn;
-    while (m_running.load() && !cxn)
-        cxn = ImapService::getPooledConnection(m_activeEmail);
+    auto cxn = ImapService::getPooledConnection(m_activeEmail);
     if (!cxn)
         return out;
 
@@ -99,11 +96,12 @@ BackgroundWorker::start() {
         if (!m_bootstrapped.load())
             doBootstrap();
 
-        std::shared_ptr<Connection> pooled;
-        while (m_running.load() && !pooled)
-            pooled = ImapService::getPooledConnection(m_activeEmail);
-        if (!pooled)
+        auto pooled = ImapService::getPooledConnection(m_activeEmail);
+        if (!pooled) {
+            emit loopError("Background sync: pooled connection unavailable."_L1);
+            SyncUtils::sleepInterruptible(m_running, 2);
             continue;
+        }
 
         QString folderStatus;
         const QVariantList folderRows = SyncEngine::fetchFolders(pooled, &folderStatus, !m_bootstrapped.load());
@@ -170,15 +168,8 @@ BackgroundWorker::start() {
             if (!changedByStatus)
                 continue;
 
-            const auto account = m_activeAccount;
-            const auto email = m_activeEmail;
-            const auto token = m_activeAccessToken;
-            const auto folderCopy = folder;
-            const auto dispatched = QtConcurrent::run([this, account, email, token, folderCopy]() {
-                emit syncHeadersAndFlagsRequested(account, email, folderCopy, token);
-                emit fetchBodiesRequested(account, email, folderCopy, token);
-            });
-            Q_UNUSED(dispatched);
+            emit syncHeadersAndFlagsRequested(m_activeAccount, m_activeEmail, folder, m_activeAccessToken);
+            emit fetchBodiesRequested(m_activeAccount, m_activeEmail, folder, m_activeAccessToken);
         }
 
         emit idleLiveUpdateRequested(m_activeAccount, m_activeEmail);
