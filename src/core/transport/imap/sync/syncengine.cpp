@@ -953,19 +953,18 @@ executeFull(SyncContext &ctx) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 QVariantList
-SyncEngine::fetchFolders(const QString &host, const qint32 port,
-                         const QString &email, const QString &accessToken,
-                         QString *statusOut) {
-    if (accessToken.isEmpty()) {
-        if (statusOut) *statusOut = "No access token for folder fetch.";
+SyncEngine::fetchFolders(std::shared_ptr<Connection> cxn, QString *statusOut, const bool refresh) {
+    if (!cxn) {
+        if (statusOut) *statusOut = "No connection for folder fetch."_L1;
         return {};
     }
 
-    auto cxn = std::make_shared<Connection>();
-    const auto connectResult = cxn->connectAndAuth(host, port, email, accessToken);
-    if (!connectResult.success) {
-        if (statusOut) *statusOut = "Using default Gmail folders.";
-        return defaultGmailFolders(email);
+    const QString email = cxn->email();
+
+    static QVariantList cachedFolders;
+    if (!refresh && !cachedFolders.isEmpty()) {
+        if (statusOut) *statusOut = QStringLiteral("Using cached folders (%1).").arg(cachedFolders.size());
+        return cachedFolders;
     }
 
     QVariantList out = cxn->list();
@@ -975,11 +974,13 @@ SyncEngine::fetchFolders(const QString &host, const qint32 port,
         entry = row;
     }
 
-    if (out.isEmpty())
-        out = defaultGmailFolders(email);
+    if (out.isEmpty()) {
+        if (statusOut) *statusOut = "Using default Gmail folders."_L1;
+        cachedFolders = defaultGmailFolders(email);
+        return cachedFolders;
+    }
 
-    cxn->disconnect();
-
+    cachedFolders = out;
     if (statusOut) *statusOut = QStringLiteral("Fetched %1 folders.").arg(out.size());
     return out;
 }

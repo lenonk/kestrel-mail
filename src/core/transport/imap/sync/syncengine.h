@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 
 #include "../connection/imapconnection.h"
 
@@ -49,11 +50,7 @@ struct SyncResult {
 
 class SyncEngine {
 public:
-    static QVariantList fetchFolders(const QString &host,
-                                     qint32 port,
-                                     const QString &email,
-                                     const QString &accessToken,
-                                     QString *statusOut);
+    static QVariantList fetchFolders(std::shared_ptr<Connection> cxn, QString *statusOut, bool refresh = false);
 
     SyncResult execute(SyncContext &ctx);
 };

@@ -1382,7 +1382,7 @@ ImapService::refreshFolderList(bool announce) {
                 if (!pooled) continue;
 
                 QString status;
-                const auto folders = Imap::SyncEngine::fetchFolders(pooled, &status);
+                const auto folders = Imap::SyncEngine::fetchFolders(pooled, &status, true);
                 pooled.reset();
                 total += folders.size();
 
@@ -1832,7 +1832,7 @@ ImapService::syncAll(bool announce) {
                 auto pooled = getPooledConnection(email);
                 if (!pooled) continue;
                 QString folderStatus;
-                const auto folders = Imap::SyncEngine::fetchFolders(pooled, &folderStatus);
+                const auto folders = Imap::SyncEngine::fetchFolders(pooled, &folderStatus, true);
                 pooled.reset();
                 for (const auto &fv : folders) {
                     const auto f = fv.toMap();

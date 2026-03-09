@@ -104,7 +104,7 @@ BackgroundWorker::start() {
         }
 
         QString folderStatus;
-        const QVariantList folderRows = SyncEngine::fetchFolders(pooled, &folderStatus);
+        const QVariantList folderRows = SyncEngine::fetchFolders(pooled, &folderStatus, !m_bootstrapped.load());
         emit upsertFoldersRequested(folderRows);
 
         QSet<QString> parentContainers;
