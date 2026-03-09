@@ -171,16 +171,21 @@ Rectangle {
             })
         }
 
-        // 1) Rich anchor links
+        // 1) Structured anchor links
         const anchorRe = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
         let m
         while ((m = anchorRe.exec(src)) !== null)
             maybeAdd(m[1], m[2])
 
-        // 2) Generic href-bearing tags (some templates put navigable targets on non-<a> tags)
+        // 2) Generic href-bearing attributes
         const hrefRe = /\bhref\s*=\s*["']([^"']+)["']/gi
         while ((m = hrefRe.exec(src)) !== null)
             maybeAdd(m[1], "")
+
+        // 3) URL token scan for templates where links are flattened/mangled inlined HTML
+        const urlRe = /https?:\/\/[^\s"'<>]+/gi
+        while ((m = urlRe.exec(src)) !== null)
+            maybeAdd(m[0], "")
 
         return out
     }
