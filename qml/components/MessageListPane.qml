@@ -98,8 +98,8 @@ Rectangle {
             function showDebugHoverPopup(payload, globalX, globalY) {
                 debugHoverPayload = payload
                 debugHoverPopup.toolTipText = payload
-                debugHoverPopup.preferredX = globalX + 12
-                debugHoverPopup.preferredY = globalY + 12
+                debugHoverPopup.preferredX = globalX + 4
+                debugHoverPopup.preferredY = globalY + 4
                 debugHoverPopup.show()
             }
 
@@ -327,24 +327,23 @@ Rectangle {
                         HoverHandler {
                             id: rowHover
                             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                            onPointChanged: {
-                                const payload = "messageKey=" + (messageCard.messageKeyValue || "") + "\n"
-                                              + "accountEmail=" + (accountEmail || "") + "\n"
-                                              + "folder=" + (folder || "") + "\n"
-                                              + "uid=" + (uid || "") + "\n"
-                                              + "receivedAt=" + (receivedAt || "") + "\n"
-                                              + "sender=" + (sender || "") + "\n"
-                                              + "subject=" + (subject || "")
-                                const overlay = QQC2.Overlay.overlay
-                                const p = messageCard.mapToItem(overlay, point.position.x, point.position.y)
-                                groupedMessageList.showDebugHoverPopup(payload, p.x, p.y)
-                            }
                             onHoveredChanged: {
                                 debugPopupHideTimer.rowHovered = hovered
-                                if (hovered)
+                                if (hovered) {
                                     debugPopupHideTimer.stop()
-                                else
+                                    const payload = "messageKey=" + (messageCard.messageKeyValue || "") + "\n"
+                                                  + "accountEmail=" + (accountEmail || "") + "\n"
+                                                  + "folder=" + (folder || "") + "\n"
+                                                  + "uid=" + (uid || "") + "\n"
+                                                  + "receivedAt=" + (receivedAt || "") + "\n"
+                                                  + "sender=" + (sender || "") + "\n"
+                                                  + "subject=" + (subject || "")
+                                    const overlay = QQC2.Overlay.overlay
+                                    const p = messageCard.mapToItem(overlay, point.position.x, point.position.y)
+                                    groupedMessageList.showDebugHoverPopup(payload, p.x, p.y)
+                                } else {
                                     debugPopupHideTimer.start()
+                                }
                             }
                         }
 
