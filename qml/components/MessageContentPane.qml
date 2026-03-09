@@ -413,7 +413,7 @@ Rectangle {
 
             const src = "file://" + encodeURI(localPath);
             const alt = (name || i18n("Image attachment")).replace(/"/g, "&quot;");
-            images.push("<img src=\"" + src + "\" alt=\"" + alt + "\" style=\"display:block;max-width:100%;height:auto;border:1px solid " + inlineAttachmentBorderColorCss() + ";margin:8px 0 0 0;\" />");
+            images.push("<img src=\"" + src + "\" alt=\"" + alt + "\" style=\"display:block;max-width:100%;height:auto;margin:8px 0 0 0;\" />");
         }
 
         if (images.length === 0)
