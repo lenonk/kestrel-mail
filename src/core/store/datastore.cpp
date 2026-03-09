@@ -2891,6 +2891,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             }
         }
 
+        annotateMessageFlags(out);
         return out;
     }
 
