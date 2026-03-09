@@ -94,6 +94,8 @@ Rectangle {
             property bool restorePending: false
             property bool restoreTargetLocked: false
             property var folderScrollByKey: ({})
+            property var folderTopIndexByKey: ({})
+            property int pendingRestoreIndex: -1
             property string lastFolderKey: (root.appRoot && root.appRoot.selectedFolderKey)
                                            ? root.appRoot.selectedFolderKey.toString()
                                            : ""
@@ -119,8 +121,14 @@ Rectangle {
                 if (!restorePending)
                     return
                 Qt.callLater(function() {
-                    const maxY = Math.max(0, groupedMessageList.contentHeight - groupedMessageList.height)
-                    groupedMessageList.contentY = Math.max(0, Math.min(maxY, groupedMessageList.preservedContentY))
+                    if (groupedMessageList.pendingRestoreIndex >= 0
+                            && groupedMessageList.pendingRestoreIndex < groupedMessageList.count) {
+                        groupedMessageList.positionViewAtIndex(groupedMessageList.pendingRestoreIndex, ListView.Beginning)
+                    } else {
+                        const maxY = Math.max(0, groupedMessageList.contentHeight - groupedMessageList.height)
+                        groupedMessageList.contentY = Math.max(0, Math.min(maxY, groupedMessageList.preservedContentY))
+                    }
+                    groupedMessageList.pendingRestoreIndex = -1
                     groupedMessageList.restorePending = false
                     groupedMessageList.restoreTargetLocked = false
                 })
@@ -132,16 +140,21 @@ Rectangle {
 
                 function onSelectedFolderKeyChanged() {
                     const oldKey = groupedMessageList.lastFolderKey
-                    if (oldKey && oldKey.length)
+                    if (oldKey && oldKey.length) {
                         groupedMessageList.folderScrollByKey[oldKey] = groupedMessageList.contentY
+                        groupedMessageList.folderTopIndexByKey[oldKey] = groupedMessageList.indexAt(0, 0)
+                    }
 
                     const newKey = (root.appRoot.selectedFolderKey || "").toString()
                     groupedMessageList.lastFolderKey = newKey
 
-                    const saved = groupedMessageList.folderScrollByKey[newKey]
-                    const targetY = (saved === undefined || saved === null) ? 0 : Number(saved)
+                    const savedY = groupedMessageList.folderScrollByKey[newKey]
+                    const targetY = (savedY === undefined || savedY === null) ? 0 : Number(savedY)
+                    const savedIndex = groupedMessageList.folderTopIndexByKey[newKey]
 
                     groupedMessageList.preservedContentY = isFinite(targetY) ? targetY : 0
+                    groupedMessageList.pendingRestoreIndex = (savedIndex === undefined || savedIndex === null)
+                                                           ? -1 : Number(savedIndex)
                     groupedMessageList.restoreTargetLocked = true
                     groupedMessageList.restorePending = true
                     groupedMessageList.queueRestoreScroll()
