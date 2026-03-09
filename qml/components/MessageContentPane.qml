@@ -397,13 +397,8 @@ Rectangle {
         if (!p.length)
             return "";
         p = p.replace(/\\/g, "/");
-        const parts = p.split("/");
-        for (let i = 0; i < parts.length; ++i) {
-            if (!parts[i].length)
-                continue;
-            parts[i] = encodeURIComponent(parts[i]);
-        }
-        return "file://" + parts.join("/");
+        // Keep '@' and path semantics intact; only encode characters that require escaping.
+        return "file://" + encodeURI(p);
     }
 
     function inlineImageAttachmentsHtml() {
