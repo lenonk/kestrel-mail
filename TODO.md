@@ -11,6 +11,7 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] On folder switch (new folder selection), auto-scroll message list to top.
 - [ ] Tags section should auto-refresh on startup: ensure tag data appears without manual collapse/expand, and default Tags group expanded state remains correct.
 - [ ] Window close via X no longer exits app reliably (regression after shutdown/crash fix) — restore normal close behavior without reintroducing thread-destroy crash.
+- [ ] Move MessageContentPane heavy processing from QML to C++ backend (first targets: sanitizeRenderHtml, tracking pixel/link normalization, darkenHtml injection pipeline).
 
 ## Sync / Parity / Correctness
 
