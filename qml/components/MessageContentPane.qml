@@ -410,18 +410,33 @@ Rectangle {
         if (!html.length)
             return out;
 
-        const imgTagRe = /<img\b[^>]*\bsrc\s*=\s*(["'])cid:([^"']+)\1[^>]*>/gi;
+        const imgTagRe = /<img\b[^>]*>/gi;
         let m;
         while ((m = imgTagRe.exec(html)) !== null) {
-            const cidRaw = (m[2] || "").toString();
-            if (!cidRaw.length)
+            const tag = (m[0] || "").toString();
+            const srcM = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+            if (!srcM)
                 continue;
-            let cid = cidRaw.toLowerCase();
+
+            const rawSrc = (srcM[1] || srcM[2] || srcM[3] || "").toString().trim();
+            if (!rawSrc.length)
+                continue;
+
+            let src = rawSrc;
             try {
-                cid = decodeURIComponent(cidRaw).toLowerCase();
+                src = decodeURIComponent(rawSrc);
             } catch (_) {
             }
-            out.push(cid);
+            const lower = src.toLowerCase();
+            if (!lower.startsWith("cid:"))
+                continue;
+
+            let cid = src.slice(4).trim();
+            if (cid.startsWith("<") && cid.endsWith(">") && cid.length > 2)
+                cid = cid.slice(1, -1);
+            if (!cid.length)
+                continue;
+            out.push(cid.toLowerCase());
         }
         return out;
     }
@@ -460,6 +475,9 @@ Rectangle {
             return "";
 
         const cidNames = bodyCidImageNames(baseHtml);
+
+        console.log("[cid-compare]", cidNames);
+
         const images = [];
         for (let i = 0; i < root.attachmentItems.length; i++) {
             const a = root.attachmentItems[i] || {};
@@ -472,6 +490,7 @@ Rectangle {
             const lowerName = name.toLowerCase();
             const encodedName = encodeURIComponent(name).toLowerCase();
             const alreadyByCid = cidNames.some(function (c) {
+                console.log("[cid-compare] Comparing:", c, "to:", lowerName, "and:", encodedName);
                 return c.indexOf(lowerName) >= 0 || c.indexOf(encodedName) >= 0;
             });
             if (alreadyByCid) {
