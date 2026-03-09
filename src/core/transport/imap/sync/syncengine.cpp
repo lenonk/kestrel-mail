@@ -553,16 +553,10 @@ fetchUidBatch(SyncContext &ctx,
     const QString batchResp = ctx.cxn->execute(fetchCmd);
 
     if (!batchResp.contains(" OK"_L1, Qt::CaseInsensitive)) {
-        qWarning().noquote() << "[sync-fetch-batch-fail]"
-                             << "folder=" << ctx.folderName
-                             << "response=" << batchResp.left(220).replace('\n', ' ');
         return;
     }
     if (batchResp.contains("THROTTLED"_L1, Qt::CaseInsensitive)) {
         throttleBackoffMs = (throttleBackoffMs <= 0) ? 250 : qMin(2000, throttleBackoffMs * 2);
-        qWarning().noquote() << "[sync-throttle]"
-                             << "folder=" << ctx.folderName
-                             << "backoffMs=" << throttleBackoffMs;
     } else if (throttleBackoffMs > 0) {
         throttleBackoffMs = qMax(0, throttleBackoffMs - 100);
     }
@@ -691,14 +685,6 @@ executeIncremental(SyncContext &ctx) {
         return a.toLongLong() < b.toLongLong();
     });
 
-    qInfo().noquote() << "[sync-folder-search]"
-                      << "foldername=" << ctx.folderName
-                      << "minUidExclusive=" << ctx.minUidExclusive
-                      << "rawReturned=" << rawReturned
-                      << "filteredReturned=" << newUids.size()
-                      << "firstUid=" << (newUids.isEmpty() ? QString() : newUids.first())
-                      << "lastUid="  << (newUids.isEmpty() ? QString() : newUids.last())
-                      << "elapsedMs=" << folderSearchTimer.elapsed();
 
     // Fetch new UIDs in batches.
     qint32 throttleBackoffMs = 0;
@@ -782,12 +768,6 @@ executeIncremental(SyncContext &ctx) {
 
             flushBackfill();
 
-            qInfo().noquote() << "[sync-folder-backfill]"
-                              << "folder=" << ctx.folderName
-                              << "budget=" << ctx.fetchBudget
-                              << "newUids=" << newUids.size()
-                              << "localKnown=" << localSet.size()
-                              << "fetchedBackfill=" << fetchedBackfill;
         }
     }
 
@@ -820,10 +800,6 @@ executeFull(SyncContext &ctx) {
             const qint32 v = u.toInt(&ok);
             if (ok && v > 0) knownFolderUids.insert(v);
         }
-        qInfo().noquote() << "[sync-initial-dedupe]"
-                          << "folder=" << ctx.cxn->selectedFolder()
-                          << "knownUids=" << knownFolderUids.size()
-                          << "elapsedMs=" << dedupeTimer.elapsed();
     }
 
     QSet<qint32> pendingUidSet;
@@ -833,10 +809,6 @@ executeFull(SyncContext &ctx) {
     // UID SEARCH ALL to collect all remote UIDs.
     const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
     const QStringList allIds = parseSearchIds(allResp);
-    qInfo().noquote() << "[sync-search-all-result]"
-                      << "folder=" << ctx.folderName
-                      << "count=" << allIds.size()
-                      << "elapsedMs=" << searchAllTimer.elapsed();
 
     searchAllTimer.restart();
     for (const QString &id : allIds) {
@@ -855,8 +827,6 @@ executeFull(SyncContext &ctx) {
             const QString cmd = QStringLiteral("UID SEARCH X-GM-RAW \"category:%1\"").arg(cat);
             const QString resp = ctx.cxn->execute(cmd);
             const QStringList ids = parseSearchIds(resp);
-            qInfo().noquote() << "[sync-search-category-result]"
-                              << "category=" << cat << "count=" << ids.size() << "elapsedMs=" << searchAllTimer.elapsed();
             searchAllTimer.restart();
             const QString mappedFolder = categoryToFolder(cat);
             for (const QString &id : ids) {
@@ -897,12 +867,6 @@ executeFull(SyncContext &ctx) {
                    && static_cast<int>(chunk.size()) < kSyncBatchSize)
                 chunk.push_back(pending[idx++]);
 
-            qInfo().noquote() << "[sync-fetch-batch]"
-                              << "folder=" << ctx.folderName
-                              << "size=" << chunk.size()
-                              << "fuzzyContiguous=" << SyncUtils::chunkIsFuzzyContiguous(
-                                     std::span<const qint32>(chunk.data(), chunk.size()))
-                              << "elapsedMs=" << searchAllTimer.elapsed();
 
             if (throttleBackoffMs > 0)
                 QThread::msleep(static_cast<unsigned long>(throttleBackoffMs));

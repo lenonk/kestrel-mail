@@ -109,13 +109,11 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
         }
     }
 
-    qInfo().noquote() << "[conn-pool] connection: " << slotIndex << " leased";
     return {raw, [slotIndex](Imap::Connection *) {
         QMutexLocker rel(&g_poolMutex);
         if (slotIndex >= 0 && slotIndex < static_cast<int>(g_poolSlots.size())) {
             g_poolSlots[slotIndex].busy = false;
             g_poolWait.wakeOne();
-            qInfo().noquote() << "[conn-pool] connection: " << slotIndex << " returned";
         }
     }};
 }
@@ -144,23 +142,28 @@ ImapService::initialize() {
     }
 
     if (!g_poolInitialized.exchange(true)) {
-        runBackgroundTask([this]() {
-            if (!m_accounts) return;
-            const auto accounts = resolveAccounts(m_accounts->accounts());
-            for (const auto &[email, host, accessToken, port] : accounts) {
-                for (int i = 0; i < kOperationalPoolMax; ++i) {
-                    if (m_destroying.load()) return;
+
+        if (!m_accounts) return;
+        const auto accounts = resolveAccounts(m_accounts->accounts());
+        for (const auto &[email, host, accessToken, port] : accounts) {
+            for (int i = 0; i < kOperationalPoolMax; ++i) {
+                runBackgroundTask([this, host, email, port, accessToken]() {
+                    if (m_destroying.load())
+                        return;
+
                     auto conn = std::make_unique<Imap::Connection>();
                     conn->connectAndAuth(host, port, email, accessToken);
+
                     PooledConnSlot s;
                     s.email = email; s.host = host; s.port = port;
                     s.conn = std::move(conn); s.busy = false;
+
                     QMutexLocker lock(&g_poolMutex);
                     g_poolSlots.push_back(std::move(s));
                     g_poolWait.wakeOne();
-                }
+                });
             }
-        });
+        }
     }
 
     startBackgroundWorker();
@@ -1320,8 +1323,6 @@ ImapService::syncFolderInternal(const AccountInfo &account,
         email, &fetchStatus,
         target, onHeader, minUid, reconcileDeletes, budget);
 
-    qInfo().noquote() << "[sync-folder]" << "folder=" << target
-                      << "fetched=" << headers.size() << "status=" << fetchStatus.left(80);
 
     if (isInbox && m_idleWatcher) {
         qint64 maxFetched = 0;

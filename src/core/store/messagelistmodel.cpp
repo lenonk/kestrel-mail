@@ -236,21 +236,12 @@ void MessageListModel::setExpansionState(bool todayExpanded,
 void MessageListModel::refresh()
 {
     if (m_isLoadingPage) {
-        qInfo().noquote() << "[list-refresh-skip]" << "reason=already-loading"
-                          << "folderKey=" << m_folderKey
-                          << "nextOffset=" << m_nextOffset;
         return;
     }
     m_isLoadingPage = true;
 
     Imap::KestrelTimer refreshTimer;
 
-    qInfo().noquote() << "[list-refresh-start]"
-                      << "folderKey=" << m_folderKey
-                      << "selectedCategoryIndex=" << m_selectedCategoryIndex
-                      << "loadedSourceRows(before)=" << m_loadedSourceRows.size()
-                      << "nextOffset(before)=" << m_nextOffset
-                      << "elapsedMs=" << refreshTimer.elapsed();
 
     QVariantList sourceRows;
     bool hasMore = false;
@@ -267,12 +258,6 @@ void MessageListModel::refresh()
     m_loadedSourceRows = sourceRows;
     m_nextOffset = m_loadedSourceRows.size();
 
-    qInfo().noquote() << "[list-refresh-data]"
-                      << "folderKey=" << m_folderKey
-                      << "fetchedRows=" << sourceRows.size()
-                      << "hasMore=" << hasMore
-                      << "nextOffset(after)=" << m_nextOffset
-                      << "elapsedMs=" << refreshTimer.elapsed();
 
     const bool oldHasMore = m_hasMore;
     m_hasMore = hasMore;
@@ -291,12 +276,6 @@ void MessageListModel::refresh()
     for (int i = m_windowStart; i < end; ++i) window.push_back(m_allRows.at(i));
     applyRows(std::move(window));
 
-    qInfo().noquote() << "[list-refresh-end]"
-                      << "folderKey=" << m_folderKey
-                      << "allRows=" << m_allRows.size()
-                      << "visibleRows=" << m_rows.size()
-                      << "hasMore=" << m_hasMore
-                      << "elapsedMs=" << refreshTimer.elapsed();
 
     m_isLoadingPage = false;
 }
