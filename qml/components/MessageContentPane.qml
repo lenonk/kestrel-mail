@@ -426,14 +426,6 @@ Rectangle {
         return out;
     }
 
-    function bodyCidImageCount(baseHtml) {
-        const html = (baseHtml || "").toString();
-        if (!html.length)
-            return 0;
-        const m = html.match(/<img\b[^>]*\bsrc\s*=\s*(["'])cid:[^"']+\1[^>]*>/gi);
-        return m ? m.length : 0;
-    }
-
     function inlineImageAlreadyPresent(baseHtml, attachmentName) {
         const html = (baseHtml || "").toString();
         const name = (attachmentName || "").toString();
@@ -468,24 +460,6 @@ Rectangle {
             return "";
 
         const cidNames = bodyCidImageNames(baseHtml);
-        const cidCount = bodyCidImageCount(baseHtml);
-
-        let imageAttachmentCount = 0;
-        for (let i = 0; i < root.attachmentItems.length; i++) {
-            const a0 = root.attachmentItems[i] || {};
-            const mt0 = (a0.mimeType || "").toString().toLowerCase();
-            const nm0 = (a0.name || "").toString();
-            if (mt0.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(nm0))
-                imageAttachmentCount++;
-        }
-
-        // If body already has at least as many CID images as image attachments,
-        // assume all image attachments are already inlined in body.
-        if (cidCount > 0 && cidCount >= imageAttachmentCount) {
-            console.log("[inline-image] skip append: cid coverage", "cidCount=", cidCount, "imageAttachmentCount=", imageAttachmentCount);
-            return "";
-        }
-
         const images = [];
         for (let i = 0; i < root.attachmentItems.length; i++) {
             const a = root.attachmentItems[i] || {};
