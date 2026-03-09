@@ -1313,6 +1313,22 @@ ImapService::syncAll(bool announce) {
                     if (m_cancelRequested)
                         break;
 
+                    QString folderLabel = folderTarget;
+                    if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
+                        folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
+                    if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
+                        folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
+                    if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
+                        folderLabel = "Inbox"_L1;
+
+                    const auto syncingToast = QStringLiteral("Syncing %1").arg(folderLabel);
+                    QMetaObject::invokeMethod(this, [this, announce, syncingToast]() {
+                        if (announce)
+                            emit syncFinished(true, syncingToast);
+                        else
+                            emit realtimeStatus(true, syncingToast);
+                    }, Qt::QueuedConnection);
+
                     // Always use the stored watermark: minUid=0 means never synced (full),
                     // minUid>0 means incremental. This is true for both startup and heartbeat.
                     qint64 minUid = 0;
@@ -1337,14 +1353,6 @@ ImapService::syncAll(bool announce) {
                     const int syncedCount = uniqueUids.size();
                     if (syncedCount <= 0)
                         continue;
-
-                    QString folderLabel = folderTarget;
-                    if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
-                        folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
-                    if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
-                        folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
-                    if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
-                        folderLabel = "Inbox"_L1;
 
                     const auto toast = QStringLiteral("%1 synced %2 messages.")
                                            .arg(folderLabel).arg(syncedCount);
