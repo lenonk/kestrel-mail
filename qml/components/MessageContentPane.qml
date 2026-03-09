@@ -404,7 +404,35 @@ Rectangle {
         return "file://" + encodeURI(p);
     }
 
-    function inlineImageAttachmentsHtml() {
+    function inlineImageAlreadyPresent(baseHtml, attachmentName) {
+        const html = (baseHtml || "").toString();
+        const name = (attachmentName || "").toString();
+        if (!html.length || !name.length)
+            return false;
+
+        const lowerName = name.toLowerCase();
+        const encodedName = encodeURIComponent(name).toLowerCase();
+        const imgTagRe = /<img\b[^>]*>/gi;
+        let m;
+        while ((m = imgTagRe.exec(html)) !== null) {
+            const tag = m[0];
+            const srcM = tag.match(/\bsrc\s*=\s*(["'])([^"']+)\1/i);
+            if (!srcM)
+                continue;
+            const src = (srcM[2] || "").toString();
+            const srcLower = src.toLowerCase();
+            let decodedLower = srcLower;
+            try {
+                decodedLower = decodeURIComponent(src).toLowerCase();
+            } catch (_) {
+            }
+            if (srcLower.indexOf(lowerName) >= 0 || decodedLower.indexOf(lowerName) >= 0 || srcLower.indexOf(encodedName) >= 0)
+                return true;
+        }
+        return false;
+    }
+
+    function inlineImageAttachmentsHtml(baseHtml) {
         // TODO: gate inline rendering behind a user setting.
         if (!root.attachmentItems || root.attachmentItems.length === 0)
             return "";
@@ -417,6 +445,11 @@ Rectangle {
             const isImage = mt.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name);
             if (!isImage)
                 continue;
+
+            if (inlineImageAlreadyPresent(baseHtml, name)) {
+                console.log("[inline-image] skip already present in body", "name=", name);
+                continue;
+            }
 
             const partId = (a.partId || "").toString();
             const localPath = (root.attachmentLocalPaths && partId.length) ? (root.attachmentLocalPaths[partId] || "") : "";
@@ -439,7 +472,7 @@ Rectangle {
 
     function htmlForMessage() {
         const base = (messageBodyHtml && messageBodyHtml.trim().length > 0) ? messageBodyHtml : "";
-        const inlineImages = inlineImageAttachmentsHtml();
+        const inlineImages = inlineImageAttachmentsHtml(base);
         if (!inlineImages.length)
             return base;
 
