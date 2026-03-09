@@ -921,15 +921,29 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
             return result;
         },
-        [this, announce](const SyncResult &r) {
+        [this, announce, target](const SyncResult &r) {
+            QString folderLabel = target;
+            if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
+                folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
+            if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
+                folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
+            if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
+                folderLabel = "Inbox"_L1;
+
+            const int syncedCount = r.headers.size();
             if (announce) {
-                emit syncFinished(r.ok, r.message);
+                if (!r.ok)
+                    emit syncFinished(false, r.message);
+                else if (syncedCount > 0)
+                    emit syncFinished(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
                 return;
             }
 
-            // Background folder syncs should still surface completion status
-            // (shown as Kirigami inline messages by the QML realtimeStatus handler).
-            emit realtimeStatus(r.ok, r.message);
+            if (!r.ok) {
+                emit realtimeStatus(false, r.message);
+            } else if (syncedCount > 0) {
+                emit realtimeStatus(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
+            }
 
             if (r.ok && r.inserted > 0) {
                 emit realtimeStatus(true, QStringLiteral("%1 new message%2 received.")
