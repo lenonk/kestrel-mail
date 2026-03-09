@@ -713,6 +713,85 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
     return syncResult.headers;
 }
 
+QVariantList
+ImapService::syncFolderForAccount(const QString &email,
+                                  const QString &host,
+                                  const QString &accessToken,
+                                  const int port,
+                                  const QString &target,
+                                  const bool announce,
+                                  int &seqNum,
+                                  int &inboxInserted,
+                                  QVariantList &pendingHeaders,
+                                  QVariantList &resultHeaders,
+                                  QElapsedTimer &flushTimer,
+                                  const std::function<void()> &flush) {
+    const bool isInbox = (target.compare("INBOX"_L1, Qt::CaseInsensitive) == 0);
+
+    qint64 dbMaxUid = 0;
+    QMetaObject::invokeMethod(this, [this, &dbMaxUid, email = email, &target]() {
+        if (m_store) dbMaxUid = m_store->folderMaxUid(email, target);
+    }, Qt::BlockingQueuedConnection);
+
+    qint64 minUid = dbMaxUid;
+    bool hadIdleHint = false;
+
+    if (isInbox && !announce && m_idleWatcher) {
+        const qint64 idleHint = m_idleWatcher->minUidHint.exchange(0);
+        hadIdleHint = (idleHint > 0);
+        const qint64 watermark = m_idleWatcher->maxUidWatermark.load();
+        minUid = qMax(minUid, qMax(idleHint, watermark));
+
+        if (minUid > watermark)
+            m_idleWatcher->maxUidWatermark.store(minUid);
+    }
+
+    const bool reconcileDeletes = !announce && !hadIdleHint && minUid > 0;
+    const int budget = (minUid == 0) ? Imap::SyncUtils::recentFetchCount() : 0;
+
+    const auto onHeader = [&, email = email](const QVariantMap &h) mutable {
+        auto row = h;
+        row.insert("accountEmail"_L1, email);
+
+        if (row.value("uid"_L1).toString().isEmpty())
+            row.insert("uid"_L1, "real-%1-%2"_L1.arg(email).arg(++seqNum));
+
+        if (row.value("folder"_L1).toString().compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
+            ++inboxInserted;
+
+        pendingHeaders.push_back(row);
+        resultHeaders.push_back(row);
+
+        if (flushTimer.elapsed() >= 250)
+            flush();
+    };
+
+    QString fetchStatus;
+    const QVariantList headers = fetchFolderHeaders(
+        host, port, email, accessToken, &fetchStatus,
+        target, onHeader, minUid, reconcileDeletes, budget);
+
+    qInfo().noquote() << "[sync-folder]" << "folder=" << target
+                      << "fetched=" << headers.size() << "status=" << fetchStatus.left(80);
+
+    if (isInbox && m_idleWatcher) {
+        qint64 maxFetched = 0;
+        for (const QVariant &hv : headers) {
+            bool ok; const qint64 uid = hv.toMap().value("uid"_L1)
+                                             .toString().toLongLong(&ok);
+            if (ok && uid > maxFetched) maxFetched = uid;
+        }
+        if (maxFetched > 0) {
+            m_idleWatcher->maxUidWatermark.store(
+                qMax(maxFetched, m_idleWatcher->maxUidWatermark.load()));
+            m_idleWatcher->minUidHint.store(
+                qMax(maxFetched, m_idleWatcher->minUidHint.load()));
+        }
+    }
+
+    return headers;
+}
+
 
 void
 ImapService::refreshFolderList(bool announce) {
@@ -824,9 +903,9 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
     runAsync(
         [this, accounts, target, announce]() -> SyncResult {
-            const bool isInbox = (target.compare("INBOX"_L1, Qt::CaseInsensitive) == 0);
             SyncResult result;
             int inboxInserted = 0;
+            int seqNum = 0;
             QVariantList pendingHeaders;
             QElapsedTimer flushTimer;
             flushTimer.start();
@@ -848,70 +927,9 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
                     return r;
                 }
 
-                // Determine incremental fetch baseline
-                qint64 dbMaxUid = 0;
-                QMetaObject::invokeMethod(this, [this, &dbMaxUid, email = email, &target]() {
-                    if (m_store) dbMaxUid = m_store->folderMaxUid(email, target);
-                }, Qt::BlockingQueuedConnection);
-
-                qint64 minUid = dbMaxUid;
-                bool hadIdleHint = false;
-
-                if (isInbox && !announce && m_idleWatcher) {
-                    // Background INBOX sync: advance minUid using the idle hint and watermark
-                    const qint64 idleHint = m_idleWatcher->minUidHint.exchange(0);
-                    hadIdleHint = (idleHint > 0);
-                    const qint64 watermark = m_idleWatcher->maxUidWatermark.load();
-                    minUid = qMax(minUid, qMax(idleHint, watermark));
-
-                    if (minUid > watermark)
-                        m_idleWatcher->maxUidWatermark.store(minUid);
-                }
-
-                const bool reconcileDeletes = !announce && !hadIdleHint && minUid > 0;
-                // Full syncs (minUid=0): newest-first, capped by KESTREL_RECENT_FETCH_COUNT.
-                // Incremental syncs (minUid>0): fetch all new UIDs above watermark, no backfill.
-                const int budget = (minUid == 0) ? Imap::SyncUtils::recentFetchCount() : 0;
-                int seqNum = 0;
-                const auto onHeader = [&, email = email](const QVariantMap &h) mutable {
-                    auto row = h;
-                    row.insert("accountEmail"_L1, email);
-
-                    if (row.value("uid"_L1).toString().isEmpty())
-                        row.insert("uid"_L1, "real-%1-%2"_L1.arg(email).arg(++seqNum));
-
-                    if (row.value("folder"_L1).toString().compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
-                        ++inboxInserted;
-
-                    pendingHeaders.push_back(row);
-                    result.headers.push_back(row);
-
-                    if (flushTimer.elapsed() >= 250)
-                        flush();
-                };
-
-                QString fetchStatus;
-                const QVariantList headers = fetchFolderHeaders(
-                    host, port, email, accessToken, &fetchStatus,
-                    target, onHeader, minUid, reconcileDeletes, budget);
-                qInfo().noquote() << "[sync-folder]" << "folder=" << target
-                                  << "fetched=" << headers.size() << "status=" << fetchStatus.left(80);
-
-                // Advance INBOX watermarks so the next incremental sync starts from the right place
-                if (isInbox && m_idleWatcher) {
-                    qint64 maxFetched = 0;
-                    for (const QVariant &hv : headers) {
-                        bool ok; const qint64 uid = hv.toMap().value("uid"_L1)
-                                                         .toString().toLongLong(&ok);
-                        if (ok && uid > maxFetched) maxFetched = uid;
-                    }
-                    if (maxFetched > 0) {
-                        m_idleWatcher->maxUidWatermark.store(
-                            qMax(maxFetched, m_idleWatcher->maxUidWatermark.load()));
-                        m_idleWatcher->minUidHint.store(
-                            qMax(maxFetched, m_idleWatcher->minUidHint.load()));
-                    }
-                }
+                (void)syncFolderForAccount(email, host, accessToken, port, target, announce,
+                                           seqNum, inboxInserted, pendingHeaders, result.headers,
+                                           flushTimer, flush);
             }
 
             flush();
@@ -1311,25 +1329,8 @@ ImapService::syncAll(bool announce) {
                         targets << QLatin1String(f);
                 }
 
-                // Sync each folder
+                // Sync each folder through the same canonical folder-sync path.
                 int seqNum = 0;
-                const auto onHeader = [&, email = email](const QVariantMap &h) mutable {
-                    auto row = h;
-                    row.insert("accountEmail"_L1, email);
-
-                    if (row.value("uid"_L1).toString().isEmpty())
-                        row.insert("uid"_L1, "real-%1-%2"_L1.arg(email).arg(++seqNum));
-
-                    if (row.value("folder"_L1).toString() .compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
-                        ++inboxInserted;
-
-                    pendingHeaders.push_back(row);
-                    result.headers.push_back(row);
-
-                    if (flushTimer.elapsed() >= 250)
-                        flush();
-                };
-
                 for (const auto &folderTarget : targets) {
                     if (m_cancelRequested)
                         break;
@@ -1350,20 +1351,9 @@ ImapService::syncAll(bool announce) {
                             emit realtimeStatus(true, syncingToast);
                     }, Qt::QueuedConnection);
 
-                    // Always use the stored watermark: minUid=0 means never synced (full),
-                    // minUid>0 means incremental. This is true for both startup and heartbeat.
-                    qint64 minUid = 0;
-                    QMetaObject::invokeMethod(this, [this, &minUid, email, folderTarget]() {
-                        if (m_store) minUid = m_store->folderMaxUid(email, folderTarget);
-                    }, Qt::BlockingQueuedConnection);
-
-                    // Full syncs (minUid=0): newest-first, capped by KESTREL_RECENT_FETCH_COUNT.
-                    // Incremental syncs (minUid>0): fetch all new UIDs above watermark, no backfill.
-                    const int budget = (minUid == 0) ? Imap::SyncUtils::recentFetchCount() : 0;
-
-                    QString fetchStatus;
-                    const auto folderHeaders = fetchFolderHeaders(host, port, email, accessToken,
-                        &fetchStatus, folderTarget, onHeader, minUid, false, budget);
+                    const auto folderHeaders = syncFolderForAccount(email, host, accessToken, port,
+                        folderTarget, announce, seqNum, inboxInserted,
+                        pendingHeaders, result.headers, flushTimer, flush);
 
                     QSet<QString> uniqueUids;
                     for (const auto &hv : folderHeaders) {
@@ -1377,14 +1367,11 @@ ImapService::syncAll(bool announce) {
 
                     const auto toast = QStringLiteral("%1 synced %2 messages.")
                                            .arg(folderLabel).arg(syncedCount);
-                    QMetaObject::invokeMethod(this, [this, announce, toast, fetchStatus]() {
-                        if (announce) {
+                    QMetaObject::invokeMethod(this, [this, announce, toast]() {
+                        if (announce)
                             emit syncFinished(true, toast);
-                        } else {
-                            const bool ok = !fetchStatus.contains("failed"_L1, Qt::CaseInsensitive)
-                                         && !fetchStatus.contains("error"_L1, Qt::CaseInsensitive);
-                            emit realtimeStatus(ok, toast);
-                        }
+                        else
+                            emit realtimeStatus(true, toast);
                     }, Qt::QueuedConnection);
                 }
             }

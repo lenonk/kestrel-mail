@@ -16,6 +16,7 @@ class TokenVault;
 class QFutureWatcherBase;
 class QTimer;
 class QThread;
+class QElapsedTimer;
 
 class ImapService : public QObject
 {
@@ -121,4 +122,17 @@ private:
                                    qint64 minUidExclusive = -1,
                                    bool reconcileDeletes = false,
                                    int fetchBudget = -1);
+
+    QVariantList syncFolderForAccount(const QString &email,
+                                      const QString &host,
+                                      const QString &accessToken,
+                                      int port,
+                                      const QString &target,
+                                      bool announce,
+                                      int &seqNum,
+                                      int &inboxInserted,
+                                      QVariantList &pendingHeaders,
+                                      QVariantList &resultHeaders,
+                                      QElapsedTimer &flushTimer,
+                                      const std::function<void()> &flush);
 };
