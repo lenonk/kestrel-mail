@@ -107,6 +107,53 @@ Rectangle {
         return /src\s*=\s*["']https?:\/\//i.test(html)
     }
 
+    function _fileNameFromUrl(url) {
+        const raw = (url || "").toString()
+        if (!raw.length) return i18n("Attachment")
+        const noQuery = raw.split("?")[0]
+        const parts = noQuery.split("/")
+        const last = parts.length ? parts[parts.length - 1] : ""
+        return last.length ? decodeURIComponent(last) : i18n("Attachment")
+    }
+
+    function extractAttachmentItemsFromHtml(html) {
+        const out = []
+        const src = (html || "").toString()
+        if (!src.length) return out
+
+        const re = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+        let m
+        const seen = {}
+        while ((m = re.exec(src)) !== null) {
+            const href = (m[1] || "").trim()
+            if (!/^https?:\/\//i.test(href))
+                continue
+            if (seen[href])
+                continue
+            seen[href] = true
+
+            let label = (m[2] || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+            if (!label.length)
+                label = root._fileNameFromUrl(href)
+
+            const lower = href.toLowerCase()
+            const isLikelyAttachment = /\.(pdf|png|jpe?g|gif|webp|heic|docx?|xlsx?|pptx?|zip|rar|7z|txt|csv)($|\?)/i.test(lower)
+                                     || /download|attachment|document|file/i.test(label)
+
+            if (!isLikelyAttachment)
+                continue
+
+            out.push({
+                name: label,
+                url: href,
+                canPreview: /\.(png|jpe?g|gif|webp)($|\?)/i.test(lower)
+            })
+        }
+        return out
+    }
+
+    readonly property var attachmentItems: extractAttachmentItemsFromHtml(root.messageBodyHtml)
+
     // Tracking pixel detection: scans for 1×1 external <img> tags to confirm tracking is
     // present, then determines the vendor using headers before falling back to the pixel URL.
     // Priority: espVendor (C++ pre-computed from X-Mailgun-Sid / Received chain / etc.) →
@@ -997,6 +1044,91 @@ Rectangle {
                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
                     color: Kirigami.Theme.textColor
                     Layout.fillWidth: false
+                }
+            }
+        }
+
+        Flow {
+            id: attachmentFlow
+            Layout.fillWidth: true
+            visible: !!root.messageData && root.attachmentItems.length > 0
+            spacing: Kirigami.Units.smallSpacing
+            Layout.bottomMargin: visible ? Kirigami.Units.largeSpacing : 0
+
+            Repeater {
+                model: root.attachmentItems
+
+                delegate: Rectangle {
+                    id: attachmentCard
+                    required property var modelData
+                    radius: 8
+                    color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.08)
+                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
+                    border.width: 1
+                    height: 34
+                    width: Math.min(320, Math.max(180, nameLabel.implicitWidth + 60))
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 8
+
+                        Kirigami.Icon {
+                            source: "mail-attachment"
+                            Layout.preferredWidth: 16
+                            Layout.preferredHeight: 16
+                        }
+
+                        QQC2.Label {
+                            id: nameLabel
+                            text: attachmentCard.modelData.name
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                    }
+
+                    HoverHandler {
+                        id: attachmentHover
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function(mouse) {
+                            if (mouse.button === Qt.LeftButton)
+                                appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
+                            else if (mouse.button === Qt.RightButton)
+                                attachmentMenu.popup()
+                        }
+                    }
+
+                    QQC2.Menu {
+                        id: attachmentMenu
+                        QQC2.MenuItem {
+                            text: i18n("Open")
+                            onTriggered: appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
+                        }
+                        QQC2.MenuItem {
+                            text: i18n("Save as…")
+                            onTriggered: appRoot.imapServiceObj.saveAttachmentUrl(attachmentCard.modelData.url, attachmentCard.modelData.name)
+                        }
+                    }
+
+                    ContactHoverPopup {
+                        id: attachmentPopup
+                        anchorItem: attachmentCard
+                        targetHovered: attachmentHover.hovered
+                        titleText: attachmentCard.modelData.name
+                        subtitleText: attachmentCard.modelData.url
+                        avatarText: ""
+                        avatarSources: attachmentCard.modelData.canPreview ? [attachmentCard.modelData.url] : []
+                        primaryButtonText: i18n("Open")
+                        secondaryButtonText: i18n("Save")
+                        onPrimaryTriggered: appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
+                        onSecondaryTriggered: appRoot.imapServiceObj.saveAttachmentUrl(attachmentCard.modelData.url, attachmentCard.modelData.name)
+                    }
                 }
             }
         }

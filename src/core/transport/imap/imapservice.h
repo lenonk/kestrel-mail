@@ -36,6 +36,8 @@ public:
 
     Q_INVOKABLE void initialize();
     Q_INVOKABLE void shutdown();
+    Q_INVOKABLE void openAttachmentUrl(const QString &url);
+    Q_INVOKABLE bool saveAttachmentUrl(const QString &url, const QString &suggestedFileName = QString());
 
 signals:
     void syncFinished(bool ok, const QString &message);

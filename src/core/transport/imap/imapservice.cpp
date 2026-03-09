@@ -12,10 +12,14 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
+#include <QDesktopServices>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QJsonObject>
+#include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSet>
@@ -112,6 +116,51 @@ ImapService::shutdown() {
 
     // Allow in-flight async watchers to settle before object teardown.
     waitForActiveWatchers(2000);
+}
+
+void
+ImapService::openAttachmentUrl(const QString &url) {
+    const QUrl qurl = QUrl::fromUserInput(url.trimmed());
+    if (!qurl.isValid() || qurl.isEmpty())
+        return;
+    QDesktopServices::openUrl(qurl);
+}
+
+bool
+ImapService::saveAttachmentUrl(const QString &url, const QString &suggestedFileName) {
+    const QUrl qurl = QUrl::fromUserInput(url.trimmed());
+    if (!qurl.isValid() || qurl.isEmpty())
+        return false;
+
+    QString defaultName = suggestedFileName.trimmed();
+    if (defaultName.isEmpty())
+        defaultName = QFileInfo(qurl.path()).fileName();
+    if (defaultName.isEmpty())
+        defaultName = QStringLiteral("attachment");
+
+    const QString outPath = QFileDialog::getSaveFileName(nullptr, QStringLiteral("Save Attachment"), defaultName);
+    if (outPath.isEmpty())
+        return false;
+
+    QNetworkAccessManager nam;
+    QNetworkRequest req(qurl);
+    QNetworkReply *reply = nam.get(req);
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    const QByteArray data = reply->readAll();
+    const bool okReply = (reply->error() == QNetworkReply::NoError) && !data.isEmpty();
+    reply->deleteLater();
+    if (!okReply)
+        return false;
+
+    QFile f(outPath);
+    if (!f.open(QIODevice::WriteOnly))
+        return false;
+    const auto written = f.write(data);
+    f.close();
+    return written == data.size();
 }
 
 void
