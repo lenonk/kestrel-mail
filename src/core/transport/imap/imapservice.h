@@ -28,7 +28,7 @@ public:
     ~ImapService() override;
 
     Q_INVOKABLE void syncAll(bool announce = true);
-    static bool withPooledConnection(const QString &host, int port,
+    static bool getConnection(const QString &host, int port,
                                      const QString &email, const QString &accessToken,
                                      const QString &folderName, int timeoutMs,
                                      const std::function<void(Imap::Connection&)> &work);

@@ -57,10 +57,10 @@ struct PooledConnSlot {
 QMutex g_poolMutex;
 QWaitCondition g_poolWait;
 QVector<PooledConnSlot> g_poolSlots;
-constexpr int kOperationalPoolMax = 1; // Separate from IDLE connection.
+constexpr int kOperationalPoolMax = 3; // Separate from IDLE connection.
 }
 
-bool ImapService::withPooledConnection(const QString &host, const int port,
+bool ImapService::getConnection(const QString &host, const int port,
                                        const QString &email, const QString &accessToken,
                                        const QString &folderName, const int timeoutMs,
                                        const std::function<void(Imap::Connection&)> &work) {
@@ -68,7 +68,7 @@ bool ImapService::withPooledConnection(const QString &host, const int port,
         return false;
 
     int slotIndex = -1;
-    qint64 deadline = QDateTime::currentMSecsSinceEpoch() + qMax(1, timeoutMs);
+    const auto deadline = QDateTime::currentMSecsSinceEpoch() + qMax(1, timeoutMs);
 
     {
         QMutexLocker lock(&g_poolMutex);
@@ -487,7 +487,7 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
         if (token.isEmpty())
             return;
 
-        const bool pooledOk = ImapService::withPooledConnection(host, port, accountEmail, token, folderName, 3500,
+        const bool pooledOk = ImapService::getConnection(host, port, accountEmail, token, folderName, 3500,
             [this, &accountEmail, &uid, &toFetch](Imap::Connection &cxn) {
                 const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                                         + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
@@ -601,7 +601,7 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
         if (token.isEmpty())
             return;
 
-        const bool pooledOk = ImapService::withPooledConnection(host, port, accountEmail, token, folderName, 3500,
+        const bool pooledOk = ImapService::getConnection(host, port, accountEmail, token, folderName, 3500,
             [this, &accountEmail, &uid, &toFetch](Imap::Connection &cxn) {
                 const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                                         + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
