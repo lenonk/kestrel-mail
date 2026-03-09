@@ -451,7 +451,6 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     }
 
     if (kImapVerboseLogEnabled) {
-        qInfo().noquote() << "----------------------------------------";
     }
 
     // Attachment metadata from BODYSTRUCTURE — stored in DB so the UI needs no IMAP round-trip.

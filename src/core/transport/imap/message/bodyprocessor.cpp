@@ -485,7 +485,6 @@ extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw) {
         return QStringLiteral("<html><body style=\"white-space:normal;\">%1</body></html>").arg(escaped);
     }
 
-    qWarning().noquote() << "[mime] mailio_extract_failed (attachment-only or unrecognised structure)";
     return QStringLiteral(
         "<html><body style=\"font-family:sans-serif;padding:1.5em;color:#aaa;\">"
         "<p style=\"margin:0;\">(This message has no text content — it may contain only attachments.)</p>"

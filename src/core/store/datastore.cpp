@@ -18,6 +18,8 @@
 #include <QColor>
 #include <limits>
 
+#include "src/core/transport/imap/sync/kestreltimer.h"
+
 using namespace Qt::Literals::StringLiterals;
 
 QString extractFirstEmail(const QString &raw)
@@ -253,9 +255,6 @@ void logTagProjectionInvariants(QSqlDatabase &database)
     int labelsMissingTagMap = -1;
     if (q2.exec() && q2.next()) labelsMissingTagMap = q2.value(0).toInt();
 
-    qInfo().noquote() << "[invariant-tag-projection]"
-                      << "labelsMissingTag=" << labelsMissingTag
-                      << "labelsMissingTagMap=" << labelsMissingTagMap;
 }
 
 QPair<int,int> repairLabelEdgeInvariants(QSqlDatabase &database)
@@ -344,9 +343,6 @@ void logLabelEdgeInvariants(QSqlDatabase &database)
     int edgesMissingLabel = -1;
     if (q2.exec() && q2.next()) edgesMissingLabel = q2.value(0).toInt();
 
-    qInfo().noquote() << "[invariant-label-edge]"
-                      << "labelsMissingEdge=" << labelsMissingEdge
-                      << "edgesMissingLabel=" << edgesMissingLabel;
 }
 
 QString logicalMessageKey(const QString &accountEmail,
@@ -956,19 +952,11 @@ void DataStore::upsertHeaders(const QVariantList &headers)
             return ok && v == 1;
         }();
 
-        if (repairLabelEdgeEnabled) {
-            const auto repaired = repairLabelEdgeInvariants(database);
-            qInfo().noquote() << "[invariant-label-edge-repair]"
-                              << "insertedEdges=" << repaired.first
-                              << "insertedLabels=" << repaired.second;
-        }
+        if (repairLabelEdgeEnabled)
+            (void)repairLabelEdgeInvariants(database);
 
-        if (repairTagProjectionEnabled) {
-            const auto repaired = repairTagProjectionInvariants(database);
-            qInfo().noquote() << "[invariant-tag-projection-repair]"
-                              << "insertedTags=" << repaired.first
-                              << "insertedTagMaps=" << repaired.second;
-        }
+        if (repairTagProjectionEnabled)
+            (void)repairTagProjectionInvariants(database);
     }
 }
 
@@ -1920,6 +1908,7 @@ void DataStore::markMessageRead(const QString &accountEmail, const QString &uid)
     // Mark unread=0 across ALL folder edges for this message, identified by any uid.
     // Gmail assigns per-folder UIDs (INBOX uid ≠ All Mail uid ≠ category uid), so we
     // fan out via message_id to cover every edge the display might pick as "preferred".
+
     QSqlQuery qMap(database);
     qMap.prepare(
         "UPDATE message_folder_map SET unread=0 "
@@ -1946,6 +1935,7 @@ void DataStore::markMessageRead(const QString &accountEmail, const QString &uid)
                       << "edgesUpdated=" << qMap.numRowsAffected();
     emit messageMarkedRead(acc, uid);
     reloadInbox();
+
 }
 
 void DataStore::reconcileReadFlags(const QString &accountEmail, const QString &folder,
