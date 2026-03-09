@@ -97,6 +97,7 @@ Rectangle {
 
             function showDebugHoverPopup(payload, globalX, globalY) {
                 debugHoverPayload = payload
+                debugHoverPopup.toolTipText = payload
                 debugHoverPopup.preferredX = globalX + 12
                 debugHoverPopup.preferredY = globalY + 12
                 debugHoverPopup.show()
