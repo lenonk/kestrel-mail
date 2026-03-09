@@ -1335,13 +1335,18 @@ ImapService::syncAll(bool announce) {
                     QString fetchStatus;
                     const auto folderHeaders = fetchFolderHeaders(host, port, email, accessToken,
                         &fetchStatus, folderTarget, onHeader, minUid, false, budget);
-                    if (announce && !folderHeaders.isEmpty()) {
-                        const auto toast = QStringLiteral("%1 synced %2 messages.")
-                                               .arg(folderTarget).arg(folderHeaders.size());
-                        QMetaObject::invokeMethod(this, [this, toast]() {
+
+                    const auto toast = QStringLiteral("%1 synced %2 messages.")
+                                           .arg(folderTarget).arg(folderHeaders.size());
+                    QMetaObject::invokeMethod(this, [this, announce, toast, fetchStatus]() {
+                        if (announce) {
                             emit syncFinished(true, toast);
-                        }, Qt::QueuedConnection);
-                    }
+                        } else {
+                            const bool ok = !fetchStatus.contains("failed"_L1, Qt::CaseInsensitive)
+                                         && !fetchStatus.contains("error"_L1, Qt::CaseInsensitive);
+                            emit realtimeStatus(ok, toast);
+                        }
+                    }, Qt::QueuedConnection);
                 }
             }
 
