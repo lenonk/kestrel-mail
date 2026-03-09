@@ -170,6 +170,15 @@ ImapService::saveAttachmentUrl(const QString &url, const QString &suggestedFileN
 QVariantList
 ImapService::attachmentsForMessage(const QString &accountEmail, const QString &folderName, const QString &uid) {
     QVariantList out;
+    const QString cacheKey = accountEmail.trimmed().toLower() + "|"_L1
+                           + folderName.trimmed().toLower() + "|"_L1
+                           + uid.trimmed();
+    {
+        QMutexLocker lock(&m_attachmentCacheMutex);
+        if (m_attachmentCache.contains(cacheKey))
+            return m_attachmentCache.value(cacheKey);
+    }
+
     if (!m_accounts)
         return out;
 
@@ -200,14 +209,35 @@ ImapService::attachmentsForMessage(const QString &accountEmail, const QString &f
     const QString resp = cxn->execute(QStringLiteral("UID FETCH %1 (BODYSTRUCTURE)").arg(uid));
     const auto parts = Imap::BodyProcessor::parsePreferredTextParts(resp);
 
+    // Best-effort filename extraction directly from BODYSTRUCTURE response.
+    QStringList filenamePool;
+    {
+        static const QRegularExpression fnRe(QStringLiteral("(?:\"filename\"|\"name\")\\s+\"([^\"]+)\""),
+                                             QRegularExpression::CaseInsensitiveOption);
+        auto it = fnRe.globalMatch(resp);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            const auto fn = m.captured(1).trimmed();
+            if (!fn.isEmpty())
+                filenamePool.push_back(fn);
+        }
+    }
+    int filenameIdx = 0;
+
     for (const auto &p : parts) {
         const bool attachmentLike = p.isAttachment
                                  || p.type.compare("TEXT"_L1, Qt::CaseInsensitive) != 0;
         if (!attachmentLike)
             continue;
+        QString resolvedName = p.filename.trimmed();
+        if (resolvedName.isEmpty() && filenameIdx < filenamePool.size())
+            resolvedName = filenamePool.at(filenameIdx++);
+        if (resolvedName.isEmpty())
+            resolvedName = QStringLiteral("Attachment");
+
         QVariantMap row;
         row.insert("partId"_L1, p.partId);
-        row.insert("name"_L1, p.filename.isEmpty() ? QStringLiteral("Attachment") : p.filename);
+        row.insert("name"_L1, resolvedName);
         row.insert("mimeType"_L1, QStringLiteral("%1/%2").arg(p.type.toLower(), p.subtype.toLower()));
         row.insert("encoding"_L1, p.encoding);
         row.insert("bytes"_L1, p.bytes);
@@ -215,6 +245,10 @@ ImapService::attachmentsForMessage(const QString &accountEmail, const QString &f
         out.push_back(row);
     }
 
+    {
+        QMutexLocker lock(&m_attachmentCacheMutex);
+        m_attachmentCache.insert(cacheKey, out);
+    }
     return out;
 }
 

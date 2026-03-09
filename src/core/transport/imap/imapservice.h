@@ -147,4 +147,7 @@ private:
                                     const QString &folderName,
                                     const QString &uid,
                                     bool userInitiated);
+
+    mutable QMutex m_attachmentCacheMutex;
+    mutable QHash<QString, QVariantList> m_attachmentCache;
 };
