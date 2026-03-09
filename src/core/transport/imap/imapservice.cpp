@@ -461,8 +461,20 @@ ImapService::backgroundListFolders(const QVariantMap &account, const QString &em
     QStringList out;
     out.reserve(folders.size());
     for (const QVariant &f : folders) {
-        if (const QString name = f.toMap().value("name"_L1).toString().trimmed(); !name.isEmpty())
-            out.push_back(name);
+        const auto row = f.toMap();
+        const QString name = row.value("name"_L1).toString().trimmed();
+        const QString flags = row.value("flags"_L1).toString().toLower();
+
+        const bool isNoSelect = flags.contains("\\noselect"_L1);
+        const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
+        const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
+                                  || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0
+                                  || name.compare("Mailspring"_L1, Qt::CaseInsensitive) == 0;
+
+        if (name.isEmpty() || isNoSelect || isCategory || isContainerRoot)
+            continue;
+
+        out.push_back(name);
     }
 
     return out;
@@ -477,6 +489,8 @@ ImapService::backgroundShouldSyncFolder(const QVariantMap &, const QString &, co
 
     // Skip synthetic/container folders that are not message-bearing.
     if (name.startsWith('[') && name.endsWith(']'))
+        return false;
+    if (name.compare("Mailspring"_L1, Qt::CaseInsensitive) == 0)
         return false;
 
     return true;
