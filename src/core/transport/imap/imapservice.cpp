@@ -7,6 +7,8 @@
 #include "sync/syncutils.h"
 #include "sync/syncengine.h"
 #include "message/messagehydrator.h"
+#include "message/bodyprocessor.h"
+#include "parser/responseparser.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -28,8 +30,10 @@
 #include <QTimer>
 #include <QUrlQuery>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QFutureWatcher>
+#include <QMimeDatabase>
 #include <QtConcurrentRun>
 
 #include "sync/idlewatcher.h"
@@ -161,6 +165,159 @@ ImapService::saveAttachmentUrl(const QString &url, const QString &suggestedFileN
     const auto written = f.write(data);
     f.close();
     return written == data.size();
+}
+
+QVariantList
+ImapService::attachmentsForMessage(const QString &accountEmail, const QString &folderName, const QString &uid) {
+    QVariantList out;
+    if (!m_accounts)
+        return out;
+
+    QVariantMap account;
+    for (const auto &a : m_accounts->accounts()) {
+        const auto row = a.toMap();
+        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
+            account = row;
+            break;
+        }
+    }
+    if (account.isEmpty())
+        return out;
+
+    const QString host = account.value("imapHost"_L1).toString();
+    const int port = account.value("imapPort"_L1).toInt();
+    const QString token = refreshAccessToken(account, accountEmail);
+    if (host.isEmpty() || port <= 0 || token.isEmpty())
+        return out;
+
+    auto cxn = std::make_shared<Imap::Connection>();
+    if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
+        return out;
+    const auto selectResult = cxn->select(folderName);
+    if (!std::get<0>(selectResult))
+        return out;
+
+    const QString resp = cxn->execute(QStringLiteral("UID FETCH %1 (BODYSTRUCTURE)").arg(uid));
+    const auto parts = Imap::BodyProcessor::parsePreferredTextParts(resp);
+
+    for (const auto &p : parts) {
+        const bool attachmentLike = p.isAttachment
+                                 || p.type.compare("TEXT"_L1, Qt::CaseInsensitive) != 0;
+        if (!attachmentLike)
+            continue;
+        QVariantMap row;
+        row.insert("partId"_L1, p.partId);
+        row.insert("name"_L1, p.filename.isEmpty() ? QStringLiteral("Attachment") : p.filename);
+        row.insert("mimeType"_L1, QStringLiteral("%1/%2").arg(p.type.toLower(), p.subtype.toLower()));
+        row.insert("encoding"_L1, p.encoding);
+        row.insert("bytes"_L1, p.bytes);
+        row.insert("canPreview"_L1, p.type.compare("IMAGE"_L1, Qt::CaseInsensitive) == 0);
+        out.push_back(row);
+    }
+
+    return out;
+}
+
+static QByteArray
+fetchAttachmentBytesForPart(Imap::Connection &cxn, const QString &uid, const QString &partId) {
+    const QString resp = cxn.execute(QStringLiteral("UID FETCH %1 (BODY.PEEK[%2])").arg(uid, partId));
+    const QByteArray literal = Imap::Parser::extractLastLiteralBytesFromFetch(resp.toUtf8());
+    return Imap::BodyProcessor::decodeTransferEncoded(literal);
+}
+
+void
+ImapService::openAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
+                            const QString &partId, const QString &fileName, const QString &) {
+    if (!m_accounts)
+        return;
+
+    QVariantMap account;
+    for (const auto &a : m_accounts->accounts()) {
+        const auto row = a.toMap();
+        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
+            account = row;
+            break;
+        }
+    }
+    if (account.isEmpty())
+        return;
+
+    const QString host = account.value("imapHost"_L1).toString();
+    const int port = account.value("imapPort"_L1).toInt();
+    const QString token = refreshAccessToken(account, accountEmail);
+    if (host.isEmpty() || port <= 0 || token.isEmpty())
+        return;
+
+    auto cxn = std::make_shared<Imap::Connection>();
+    if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
+        return;
+    const auto selectResult = cxn->select(folderName);
+    if (!std::get<0>(selectResult))
+        return;
+
+    const QByteArray data = fetchAttachmentBytesForPart(*cxn, uid, partId);
+    if (data.isEmpty())
+        return;
+
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QDir().mkpath(dir);
+    const QString path = dir + "/kestrel-" + QString::number(QDateTime::currentMSecsSinceEpoch())
+                       + "-" + (fileName.isEmpty() ? QStringLiteral("attachment") : fileName);
+
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+        return;
+    f.write(data);
+    if (!f.commit())
+        return;
+
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+bool
+ImapService::saveAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
+                            const QString &partId, const QString &fileName, const QString &) {
+    if (!m_accounts)
+        return false;
+
+    QVariantMap account;
+    for (const auto &a : m_accounts->accounts()) {
+        const auto row = a.toMap();
+        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
+            account = row;
+            break;
+        }
+    }
+    if (account.isEmpty())
+        return false;
+
+    const QString host = account.value("imapHost"_L1).toString();
+    const int port = account.value("imapPort"_L1).toInt();
+    const QString token = refreshAccessToken(account, accountEmail);
+    if (host.isEmpty() || port <= 0 || token.isEmpty())
+        return false;
+
+    auto cxn = std::make_shared<Imap::Connection>();
+    if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
+        return false;
+    const auto selectResult = cxn->select(folderName);
+    if (!std::get<0>(selectResult))
+        return false;
+
+    const QByteArray data = fetchAttachmentBytesForPart(*cxn, uid, partId);
+    if (data.isEmpty())
+        return false;
+
+    const QString outPath = QFileDialog::getSaveFileName(nullptr, QStringLiteral("Save Attachment"),
+                                                         fileName.isEmpty() ? QStringLiteral("attachment") : fileName);
+    if (outPath.isEmpty())
+        return false;
+
+    QSaveFile f(outPath);
+    if (!f.open(QIODevice::WriteOnly))
+        return false;
+    f.write(data);
+    return f.commit();
 }
 
 void

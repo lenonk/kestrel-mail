@@ -38,6 +38,11 @@ public:
     Q_INVOKABLE void shutdown();
     Q_INVOKABLE void openAttachmentUrl(const QString &url);
     Q_INVOKABLE bool saveAttachmentUrl(const QString &url, const QString &suggestedFileName = QString());
+    Q_INVOKABLE QVariantList attachmentsForMessage(const QString &accountEmail, const QString &folderName, const QString &uid);
+    Q_INVOKABLE void openAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
+                                    const QString &partId, const QString &fileName, const QString &encoding);
+    Q_INVOKABLE bool saveAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
+                                    const QString &partId, const QString &fileName, const QString &encoding);
 
 signals:
     void syncFinished(bool ok, const QString &message);

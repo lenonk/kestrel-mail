@@ -146,6 +146,7 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
 
     // params, id, desc, encoding, size, ...
     QString charset;
+    QString filename;
     skipWs();
 
     if (m_i < m_text.size() && m_text[m_i] == '(') {
@@ -161,9 +162,12 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
         const auto paramsRaw = m_text.mid(start, m_i - start).toLower();
 
         static const QRegularExpression re(QStringLiteral("charset\\s*\\\"?\\s*([a-z0-9._-]+)"));
+        static const QRegularExpression filenameRe(QStringLiteral("(?:name|filename)\\s*\\\"?\\s*([^\\\"\\)]+)"));
 
         if (const auto mm = re.match(paramsRaw); mm.hasMatch())
             charset = mm.captured(1).trimmed();
+        if (const auto fm = filenameRe.match(paramsRaw); fm.hasMatch())
+            filename = fm.captured(1).trimmed();
     }
     else {
         skipAny();
@@ -175,7 +179,7 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
     const auto encoding = parseAtomOrQuoted().toLower();
     const auto sizeToken = parseAtomOrQuoted();
 
-    if (type == QStringLiteral("TEXT")) {
+    {
         const auto pid = partPrefix.isEmpty() ? QStringLiteral("1") : partPrefix;
         BodyPart part;
 
@@ -184,6 +188,10 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
         part.subtype = subtype;
         part.encoding = encoding;
         part.charset = charset.isEmpty() ? QStringLiteral("utf-8") : charset;
+        part.filename = filename;
+
+        if (!part.filename.isEmpty())
+            part.isAttachment = true;
 
         auto okBytes = false;
         part.bytes = sizeToken.toInt(&okBytes);
@@ -192,21 +200,23 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
             part.bytes = 0;
 
         int score = 0;
-        if (subtype == QStringLiteral("PLAIN"))
-            score += 300;
-        else if (subtype == QStringLiteral("HTML"))
-            score += 200;
-        else
-            score += 100;
+        if (type == QStringLiteral("TEXT")) {
+            if (subtype == QStringLiteral("PLAIN"))
+                score += 300;
+            else if (subtype == QStringLiteral("HTML"))
+                score += 200;
+            else
+                score += 100;
 
-        if (!part.isAttachment)
-            score += 50;
+            if (!part.isAttachment)
+                score += 50;
 
-        if (part.charset == QStringLiteral("utf-8"))
-            score += 20;
+            if (part.charset == QStringLiteral("utf-8"))
+                score += 20;
 
-        if (encoding == QStringLiteral("quoted-printable") || encoding == QStringLiteral("7bit") || encoding == QStringLiteral("8bit"))
-            score += 10;
+            if (encoding == QStringLiteral("quoted-printable") || encoding == QStringLiteral("7bit") || encoding == QStringLiteral("8bit"))
+                score += 10;
+        }
 
         part.score = score;
         out.push_back(part);

@@ -12,13 +12,13 @@ Rectangle {
         gesturePolicy: TapHandler.ReleaseWithinBounds
         onTapped: function(eventPoint) {
             if (!attachmentFlow.visible) {
-                root.selectedAttachmentUrl = ""
+                root.selectedAttachmentKey = ""
                 return
             }
             const p = root.mapToItem(attachmentFlow, eventPoint.position.x, eventPoint.position.y)
             const insideAttachments = p.x >= 0 && p.y >= 0 && p.x <= attachmentFlow.width && p.y <= attachmentFlow.height
             if (!insideAttachments)
-                root.selectedAttachmentUrl = ""
+                root.selectedAttachmentKey = ""
         }
     }
 
@@ -79,7 +79,7 @@ Rectangle {
 
     property bool imagesAllowed: false
     property bool trackingAllowed: false
-    property string selectedAttachmentUrl: ""
+    property string selectedAttachmentKey: ""
 
     // Read domain directly from messageData.sender to avoid transient binding lag
     // through senderText/senderEmail during selection updates.
@@ -190,7 +190,16 @@ Rectangle {
         return out
     }
 
-    readonly property var attachmentItems: extractAttachmentItemsFromHtml(root.messageBodyHtml)
+    readonly property var attachmentItems: {
+        if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
+            return []
+        const account = (root.messageData.accountEmail || "").toString()
+        const folder = (root.messageData.folder || "").toString()
+        const uid = (root.messageData.uid || "").toString()
+        if (!account.length || !folder.length || !uid.length)
+            return []
+        return appRoot.imapServiceObj.attachmentsForMessage(account, folder, uid)
+    }
 
     // Tracking pixel detection: scans for 1×1 external <img> tags to confirm tracking is
     // present, then determines the vendor using headers before falling back to the pixel URL.
@@ -245,7 +254,7 @@ Rectangle {
     }
 
     onMessageDataChanged: {
-        root.selectedAttachmentUrl = ""
+        root.selectedAttachmentKey = ""
         // Read messageData directly — derived bindings (isTrustedSender, senderDomain, etc.)
         // may not have re-evaluated yet when this handler fires.
         const senderVal = (messageData && messageData.sender) ? messageData.sender.toString() : ""
@@ -1100,7 +1109,7 @@ Rectangle {
                 delegate: Rectangle {
                     id: attachmentCard
                     required property var modelData
-                    readonly property bool selected: root.selectedAttachmentUrl === attachmentCard.modelData.url
+                    readonly property bool selected: root.selectedAttachmentKey === attachmentCard.modelData.url
                     radius: 8
                     color: selected ? root.systemPalette.highlight : Qt.lighter(Kirigami.Theme.backgroundColor, 1.08)
                     border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
@@ -1138,12 +1147,22 @@ Rectangle {
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onClicked: function(mouse) {
                             if (mouse.button === Qt.LeftButton) {
-                                root.selectedAttachmentUrl = attachmentCard.modelData.url
-                                appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
+                                root.selectedAttachmentKey = attachmentCard.modelData.partId
                             } else if (mouse.button === Qt.RightButton) {
-                                root.selectedAttachmentUrl = attachmentCard.modelData.url
+                                root.selectedAttachmentKey = attachmentCard.modelData.partId
                                 attachmentMenu.popup()
                             }
+                        }
+                        onDoubleClicked: function(mouse) {
+                            if (mouse.button !== Qt.LeftButton)
+                                return
+                            appRoot.imapServiceObj.openAttachment(
+                                root.messageData.accountEmail,
+                                root.messageData.folder,
+                                root.messageData.uid,
+                                attachmentCard.modelData.partId,
+                                attachmentCard.modelData.name,
+                                attachmentCard.modelData.encoding)
                         }
                     }
 
@@ -1151,11 +1170,23 @@ Rectangle {
                         id: attachmentMenu
                         QQC2.MenuItem {
                             text: i18n("Open")
-                            onTriggered: appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
+                            onTriggered: appRoot.imapServiceObj.openAttachment(
+                                             root.messageData.accountEmail,
+                                             root.messageData.folder,
+                                             root.messageData.uid,
+                                             attachmentCard.modelData.partId,
+                                             attachmentCard.modelData.name,
+                                             attachmentCard.modelData.encoding)
                         }
                         QQC2.MenuItem {
                             text: i18n("Save as…")
-                            onTriggered: appRoot.imapServiceObj.saveAttachmentUrl(attachmentCard.modelData.url, attachmentCard.modelData.name)
+                            onTriggered: appRoot.imapServiceObj.saveAttachment(
+                                             root.messageData.accountEmail,
+                                             root.messageData.folder,
+                                             root.messageData.uid,
+                                             attachmentCard.modelData.partId,
+                                             attachmentCard.modelData.name,
+                                             attachmentCard.modelData.encoding)
                         }
                     }
 
@@ -1164,13 +1195,25 @@ Rectangle {
                         anchorItem: attachmentCard
                         targetHovered: attachmentHover.hovered
                         titleText: attachmentCard.modelData.name
-                        subtitleText: attachmentCard.modelData.url
+                        subtitleText: (attachmentCard.modelData.mimeType || "") + " • " + (attachmentCard.modelData.bytes || 0) + " bytes"
                         avatarText: ""
-                        avatarSources: attachmentCard.modelData.canPreview ? [attachmentCard.modelData.url] : []
+                        avatarSources: []
                         primaryButtonText: i18n("Open")
                         secondaryButtonText: i18n("Save")
-                        onPrimaryTriggered: appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
-                        onSecondaryTriggered: appRoot.imapServiceObj.saveAttachmentUrl(attachmentCard.modelData.url, attachmentCard.modelData.name)
+                        onPrimaryTriggered: appRoot.imapServiceObj.openAttachment(
+                                             root.messageData.accountEmail,
+                                             root.messageData.folder,
+                                             root.messageData.uid,
+                                             attachmentCard.modelData.partId,
+                                             attachmentCard.modelData.name,
+                                             attachmentCard.modelData.encoding)
+                        onSecondaryTriggered: appRoot.imapServiceObj.saveAttachment(
+                                               root.messageData.accountEmail,
+                                               root.messageData.folder,
+                                               root.messageData.uid,
+                                               attachmentCard.modelData.partId,
+                                               attachmentCard.modelData.name,
+                                               attachmentCard.modelData.encoding)
                     }
                 }
             }

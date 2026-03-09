@@ -13,6 +13,7 @@ struct BodyPart {
     QString subtype;       // e.g., "PLAIN", "HTML"
     QString encoding;      // e.g., "quoted-printable", "base64"
     QString charset;       // e.g., "utf-8", "iso-8859-1"
+    QString filename;      // attachment/display filename when present
     int bytes = 0;
     bool isAttachment = false;
     int score = 0;         // Higher score = better for snippet extraction
