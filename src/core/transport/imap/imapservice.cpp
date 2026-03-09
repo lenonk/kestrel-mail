@@ -1273,9 +1273,16 @@ ImapService::syncAll(bool announce) {
                 QSet<QString> seen  = { "inbox"_L1 };
 
                 for (const auto &fv : folders) {
-                    const auto name = fv.toMap().value("name"_L1).toString().trimmed();
+                    const auto row = fv.toMap();
+                    const auto name = row.value("name"_L1).toString().trimmed();
+                    const auto flags = row.value("flags"_L1).toString().toLower();
 
-                    if (name.isEmpty() || name.contains("/Categories/"_L1, Qt::CaseInsensitive))
+                    const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
+                    const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
+                                              || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0;
+                    const bool isNoSelect = flags.contains("\\noselect"_L1);
+
+                    if (name.isEmpty() || isCategory || isContainerRoot || isNoSelect)
                         continue;
 
                     if (const QString key = name.toLower(); !seen.contains(key)) {
