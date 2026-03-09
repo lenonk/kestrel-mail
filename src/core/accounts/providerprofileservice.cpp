@@ -20,39 +20,6 @@ QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const
 {
     const QString domain = email.section('@', 1, 1).trimmed().toLower();
 
-    // Hard-coded safety net for the two first-class OAuth providers.
-    if (domain == QStringLiteral("gmail.com") || domain == QStringLiteral("googlemail.com")) {
-        QVariantMap gmail;
-        gmail.insert("id", "gmail");
-        gmail.insert("displayName", "Gmail");
-        gmail.insert("imapHost", "imap.gmail.com");
-        gmail.insert("imapPort", 993);
-        gmail.insert("smtpHost", "smtp.gmail.com");
-        gmail.insert("smtpPort", 587);
-        gmail.insert("supportsOAuth2", true);
-        gmail.insert("oauthAuthUrl", "https://accounts.google.com/o/oauth2/v2/auth");
-        gmail.insert("oauthTokenUrl", "https://oauth2.googleapis.com/token");
-        gmail.insert("oauthScopes", "https://mail.google.com/ https://www.googleapis.com/auth/contacts.readonly");
-        gmail.insert("oauthClientId", "");
-        gmail.insert("oauthClientSecret", "");
-        return gmail;
-    }
-
-    if (domain == QStringLiteral("outlook.com") || domain == QStringLiteral("hotmail.com")
-        || domain == QStringLiteral("live.com") || domain == QStringLiteral("office365.com")) {
-        QVariantMap ms;
-        ms.insert("id", "microsoft365");
-        ms.insert("displayName", "Microsoft 365 / Outlook");
-        ms.insert("imapHost", "outlook.office365.com");
-        ms.insert("imapPort", 993);
-        ms.insert("smtpHost", "smtp.office365.com");
-        ms.insert("smtpPort", 587);
-        ms.insert("supportsOAuth2", true);
-        ms.insert("oauthAuthUrl", "https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
-        ms.insert("oauthTokenUrl", "https://login.microsoftonline.com/common/oauth2/v2.0/token");
-        ms.insert("oauthScopes", "offline_access IMAP.AccessAsUser.All SMTP.Send");
-        return ms;
-    }
 
     for (const QVariant &entry : m_providers) {
         const QVariantMap map = entry.toMap();
