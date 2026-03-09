@@ -7,6 +7,21 @@ import org.kde.kirigami as Kirigami
 Rectangle {
     id: root
 
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        gesturePolicy: TapHandler.ReleaseWithinBounds
+        onTapped: function(eventPoint) {
+            if (!attachmentFlow.visible) {
+                root.selectedAttachmentUrl = ""
+                return
+            }
+            const p = root.mapToItem(attachmentFlow, eventPoint.position.x, eventPoint.position.y)
+            const insideAttachments = p.x >= 0 && p.y >= 0 && p.x <= attachmentFlow.width && p.y <= attachmentFlow.height
+            if (!insideAttachments)
+                root.selectedAttachmentUrl = ""
+        }
+    }
+
     required property var appRoot
     required property var systemPalette
 
@@ -64,6 +79,7 @@ Rectangle {
 
     property bool imagesAllowed: false
     property bool trackingAllowed: false
+    property string selectedAttachmentUrl: ""
 
     // Read domain directly from messageData.sender to avoid transient binding lag
     // through senderText/senderEmail during selection updates.
@@ -224,6 +240,7 @@ Rectangle {
     }
 
     onMessageDataChanged: {
+        root.selectedAttachmentUrl = ""
         // Read messageData directly — derived bindings (isTrustedSender, senderDomain, etc.)
         // may not have re-evaluated yet when this handler fires.
         const senderVal = (messageData && messageData.sender) ? messageData.sender.toString() : ""
@@ -1078,9 +1095,9 @@ Rectangle {
                 delegate: Rectangle {
                     id: attachmentCard
                     required property var modelData
-                    property bool pressed: false
+                    readonly property bool selected: root.selectedAttachmentUrl === attachmentCard.modelData.url
                     radius: 8
-                    color: pressed ? root.systemPalette.highlight : Qt.lighter(Kirigami.Theme.backgroundColor, 1.08)
+                    color: selected ? root.systemPalette.highlight : Qt.lighter(Kirigami.Theme.backgroundColor, 1.08)
                     border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
                     border.width: 1
                     height: 34
@@ -1114,18 +1131,14 @@ Rectangle {
                     MouseArea {
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onPressed: function(mouse) {
-                            attachmentCard.pressed = (mouse.button === Qt.LeftButton)
-                        }
-                        onReleased: function() {
-                            attachmentCard.pressed = false
-                        }
-                        onCanceled: attachmentCard.pressed = false
                         onClicked: function(mouse) {
-                            if (mouse.button === Qt.LeftButton)
+                            if (mouse.button === Qt.LeftButton) {
+                                root.selectedAttachmentUrl = attachmentCard.modelData.url
                                 appRoot.imapServiceObj.openAttachmentUrl(attachmentCard.modelData.url)
-                            else if (mouse.button === Qt.RightButton)
+                            } else if (mouse.button === Qt.RightButton) {
+                                root.selectedAttachmentUrl = attachmentCard.modelData.url
                                 attachmentMenu.popup()
+                            }
                         }
                     }
 
