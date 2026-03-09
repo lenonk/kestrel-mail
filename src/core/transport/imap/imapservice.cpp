@@ -1721,7 +1721,15 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
                 folderLabel = "Inbox"_L1;
 
-            const int syncedCount = r.headers.size();
+            QSet<QString> uniqueUids;
+            uniqueUids.reserve(r.headers.size());
+            for (const QVariant &hv : r.headers) {
+                const QString uid = hv.toMap().value("uid"_L1).toString();
+                if (!uid.isEmpty())
+                    uniqueUids.insert(uid);
+            }
+            const int syncedCount = uniqueUids.isEmpty() ? r.headers.size() : uniqueUids.size();
+
             if (announce) {
                 if (!r.ok)
                     emit syncFinished(false, r.message);
