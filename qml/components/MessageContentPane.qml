@@ -376,6 +376,10 @@ Rectangle {
         // scripts that time out) and is correct security hygiene for email HTML.
         html = html.replace(/<script\b[^>]*\bsrc\s*=[^>]*>[\s\S]*?<\/script>/gi, "")
 
+        // Strip external stylesheet links (especially web fonts) to avoid render stalls
+        // waiting on third-party CSS/font hosts.
+        html = html.replace(/<link\b[^>]*\brel\s*=\s*["']?stylesheet["']?[^>]*>/gi, "")
+
         // Rewrite known tracking redirect links to their real destination URLs.
         html = sanitizeTrackingLinks(html)
 
