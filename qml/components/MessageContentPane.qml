@@ -127,6 +127,9 @@ Rectangle {
         // Reading root.trackingAllowed here makes this binding reactive to that property.
         if (!root.trackingAllowed)
             sanitized = root.neutralizeTrackingPixels(sanitized);
+        // Keep inline local images renderable while external images remain blocked.
+        if (!root.imagesAllowed)
+            sanitized = root.neutralizeExternalImages(sanitized);
         // Inject a baseline background so plain-text and unstyled messages use the
         // theme background. No !important — emails with their own explicit backgrounds
         // will still override this. Reading the property here keeps the binding reactive.
@@ -486,6 +489,23 @@ Rectangle {
             return false;
         const senderSld = senderParts[senderParts.length - 2];
         return urlSld === senderSld;
+    }
+
+    // Replace external image sources with a transparent placeholder while preserving file://,
+    // data:, and cid: sources (so inline local images can still render).
+    function neutralizeExternalImages(html) {
+        const blank = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+        return html.replace(/<img\b[^>]*>/gi, function (tag) {
+            const srcM = tag.match(/\bsrc\s*=\s*(["'])([^"']+)\1/i);
+            if (!srcM)
+                return tag;
+            const src = srcM[2] || "";
+            if (/^(file:|data:|cid:)/i.test(src))
+                return tag;
+            if (!/^https?:/i.test(src))
+                return tag;
+            return tag.replace(/(\bsrc\s*=\s*)(["'])[^"']+\2/i, '$1"' + blank + '"');
+        });
     }
 
     // Replace the src of any 1×1 external third-party tracking pixel with a transparent data
@@ -1598,7 +1618,7 @@ Rectangle {
 
                 anchors.fill: parent
                 opacity: htmlContainer.bodyOpacity
-                settings.autoLoadImages: root.imagesAllowed
+                settings.autoLoadImages: true
                 settings.errorPageEnabled: true
                 settings.localContentCanAccessRemoteUrls: true
                 settings.localContentCanAccessFileUrls: true
