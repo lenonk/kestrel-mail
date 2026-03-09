@@ -98,8 +98,8 @@ Rectangle {
             function showDebugHoverPopup(payload, globalX, globalY) {
                 debugHoverPayload = payload
                 debugHoverPopup.toolTipText = payload
-                debugHoverPopup.preferredX = globalX + 12
-                debugHoverPopup.preferredY = globalY + 12
+                debugHoverPopup.preferredX = globalX
+                debugHoverPopup.preferredY = globalY
                 debugHoverPopup.show()
             }
 
@@ -179,11 +179,30 @@ Rectangle {
                             copyBuffer.copy()
                         }
                     }
+
+                    HoverHandler {
+                        id: debugPopupHover
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onHoveredChanged: {
+                            if (!hovered)
+                                debugPopupHideTimer.start()
+                        }
+                    }
                 }
 
                 TextEdit {
                     id: copyBuffer
                     visible: false
+                }
+            }
+
+            Timer {
+                id: debugPopupHideTimer
+                interval: 250
+                repeat: false
+                onTriggered: {
+                    if (!debugPopupHover.hovered)
+                        groupedMessageList.hideDebugHoverPopup()
                 }
             }
 
@@ -304,24 +323,32 @@ Rectangle {
                                  ? Qt.lighter(root.systemPalette.highlight, 1.18) : "transparent"
                         border.color: "transparent"
 
+                        HoverHandler {
+                            id: rowHover
+                            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                            onHoveredChanged: {
+                                if (hovered) {
+                                    debugPopupHideTimer.stop()
+                                    const payload = "messageKey=" + (messageCard.messageKeyValue || "") + "\n"
+                                                  + "accountEmail=" + (accountEmail || "") + "\n"
+                                                  + "folder=" + (folder || "") + "\n"
+                                                  + "uid=" + (uid || "") + "\n"
+                                                  + "receivedAt=" + (receivedAt || "") + "\n"
+                                                  + "sender=" + (sender || "") + "\n"
+                                                  + "subject=" + (subject || "")
+                                    const overlay = QQC2.Overlay.overlay
+                                    const p = messageCard.mapToItem(overlay, messageCard.width - 4, 8)
+                                    groupedMessageList.showDebugHoverPopup(payload, p.x, p.y)
+                                } else {
+                                    debugPopupHideTimer.start()
+                                }
+                            }
+                        }
+
                         MouseArea {
                             id: messageMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
-
-                            onEntered: {
-                                const payload = "messageKey=" + (messageCard.messageKeyValue || "") + "\n"
-                                              + "accountEmail=" + (accountEmail || "") + "\n"
-                                              + "folder=" + (folder || "") + "\n"
-                                              + "uid=" + (uid || "") + "\n"
-                                              + "receivedAt=" + (receivedAt || "") + "\n"
-                                              + "sender=" + (sender || "") + "\n"
-                                              + "subject=" + (subject || "")
-                                const p = messageMouseArea.mapToItem(null, mouseX, mouseY)
-                                groupedMessageList.showDebugHoverPopup(payload, p.x, p.y)
-                            }
-
-                            onExited: groupedMessageList.hideDebugHoverPopup()
 
                             onClicked: function(mouse) {
                                 if (mouse.modifiers & Qt.ShiftModifier
@@ -390,7 +417,7 @@ Rectangle {
                                     Layout.alignment: Qt.AlignHCenter
                                     Layout.preferredWidth: 16
                                     Layout.preferredHeight: 16
-                                    visible: messageMouseArea.containsMouse
+                                    visible: rowHover.hovered
 
                                     Kirigami.Icon {
                                         anchors.fill: parent
@@ -468,7 +495,7 @@ Rectangle {
                                     Layout.alignment: Qt.AlignHCenter
                                     Layout.preferredWidth: 16
                                     Layout.preferredHeight: 16
-                                    visible: messageMouseArea.containsMouse
+                                    visible: rowHover.hovered
 
                                     Kirigami.Icon {
                                         anchors.fill: parent

@@ -10,6 +10,7 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] Ensure message list pane never changes scroll position during updates (verify/follow up after current fix in `MessageListPane.qml`).
 - [ ] On folder switch (new folder selection), auto-scroll message list to top.
 - [ ] Tags section should auto-refresh on startup: ensure tag data appears without manual collapse/expand, and default Tags group expanded state remains correct.
+- [ ] Window close via X no longer exits app reliably (regression after shutdown/crash fix) — restore normal close behavior without reintroducing thread-destroy crash.
 
 ## Sync / Parity / Correctness
 
