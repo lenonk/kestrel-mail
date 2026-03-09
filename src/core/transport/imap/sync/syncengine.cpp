@@ -428,23 +428,9 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
         const QString gmMsgId       = h.value("gmMsgId"_L1).toString().trimmed();
         const QString msgIdHeader   = h.value("messageIdHeader"_L1).toString();
 
-        qInfo().noquote() << "[imap-category]"
-                          << "uid=" << uid
-                          << "gmMsgId=" << gmMsgId
-                          << "labels=" << rawLabels
-                          << "inferred=" << (inferredCategoryFolder.isEmpty()
-                                             ? QStringLiteral("<none>") : inferredCategoryFolder)
-                          << "subject=" << h.value("subject"_L1).toString().left(120);
 
         const bool fullAddressCheck = (debugPrefix == "inbox"_L1 || debugPrefix == "inbox-inc"_L1);
         if (fullAddressCheck) {
-            qInfo().noquote() << "[imap-address]"
-                              << "uid=" << uid
-                              << "messageId=" << msgIdHeader.left(120)
-                              << "hasFrom=" << hasFrom
-                              << "hasSender=" << hasSender
-                              << "hasReplyTo=" << hasReplyTo
-                              << "hasReturnPath=" << hasReturnPath;
 
             if (!hasFrom && !hasSender && !hasReplyTo && !hasReturnPath) {
                 qWarning().noquote() << "[imap-address-miss-critical]"
@@ -466,14 +452,6 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
 
     if (kImapVerboseLogEnabled) {
         qInfo().noquote() << "----------------------------------------";
-        qInfo().noquote() << "[imap-debug]" << debugPrefix
-                          << "uid=" << uid
-                          << "rawFetchMs=" << rawFetchMs
-                          << "enrichMs=" << enrichMs
-                          << "fetchMs=" << totalFetchMs
-                          << "sender=" << h.value("sender"_L1).toString()
-                          << "subject=" << h.value("subject"_L1).toString()
-                          << "snippet=" << h.value("snippet"_L1).toString().left(120);
     }
 
     // Attachment metadata from BODYSTRUCTURE — stored in DB so the UI needs no IMAP round-trip.

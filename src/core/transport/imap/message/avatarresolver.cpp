@@ -253,7 +253,6 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     if (!reply->isFinished()) reply->abort();
     reply->deleteLater();
     cache.insert(e, found);
-    qInfo().noquote() << "[avatar-people]" << "email=" << e << "result=" << outcome;
 
     return found;
 }
@@ -439,11 +438,6 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
 
     cache.insert(d, found);
     if (!timedOut) {
-        qInfo().noquote() << "[avatar-bimi-doh]" << "domain=" << d
-                         << "result=" << (!found.isEmpty() ? "hit" : "miss")
-                         << "stats:" << "cache" << cacheHits << "/" << cacheMisses
-                         << "network" << networkQueries << "err" << networkErrors << "timeout" << networkTimeouts
-                         << "logos" << logoHits;
     }
 
     return found;
@@ -482,7 +476,6 @@ resolveGravatarUrl(const QString &email) {
         : QStringLiteral("data:%1;base64,%2").arg(result.mime, QString::fromLatin1(result.bytes.toBase64()));
 
     cache.insert(e, found);
-    qInfo().noquote() << "[avatar-gravatar]" << "email=" << e << "result=" << (!found.isEmpty() ? "hit" : "miss");
     return found;
 }
 
@@ -571,8 +564,6 @@ resolveFaviconLogoUrl(const QString &domain) {
     }
 
     cache.insert(d0, found);
-    qInfo().noquote() << "[avatar-favicon]" << "domain=" << d0
-                      << "result=" << (!found.isEmpty() ? "hit" : "miss");
     return found;
 }*/
 
@@ -619,7 +610,6 @@ resolveFaviconLogoUrl(const QString &domain) {
     }
 
     cache.insert(d, found);
-    qInfo().noquote() << "[avatar-favicon]" << "domain=" << d << "result=" << (!found.isEmpty() ? "hit" : "miss");
 
     return found;
 }

@@ -39,7 +39,6 @@ Rectangle {
                 continue;
             const candidateSrc = srcM[1];
             if (isFirstPartyUrl(candidateSrc, senderDom)) {
-                console.log("[tracking] skipped first-party pixel src=" + candidateSrc.substring(0, 80));
                 continue;
             }
             pixelSrc = candidateSrc;
@@ -385,7 +384,6 @@ Rectangle {
             }
         }
 
-        console.log("[mailto] intercepted", "to=", address, "subjectLen=", subject.length, "cc=", cc.length > 0, "bcc=", bcc.length > 0);
 
         if (address.length)
             appRoot.composeDraftTo = address;
@@ -533,32 +531,27 @@ Rectangle {
                 return c.indexOf(lowerName) >= 0 || c.indexOf(encodedName) >= 0;
             });
             if (alreadyByCid) {
-                console.log("[inline-image] skip already present by cid", "name=", name);
                 continue;
             }
 
             if (inlineImageAlreadyPresent(baseHtml, name)) {
-                console.log("[inline-image] skip already present in body", "name=", name);
                 continue;
             }
 
             const partId = (a.partId || "").toString();
             const localPath = (root.attachmentLocalPaths && partId.length) ? (root.attachmentLocalPaths[partId] || "") : "";
             if (!localPath || !localPath.length) {
-                console.log("[inline-image] missing local path", "partId=", partId, "name=", name, "folder=", root.messageData ? root.messageData.folder : "");
                 continue;
             }
 
             if (dataHashes.length > 0 && appRoot && appRoot.imapServiceObj && appRoot.imapServiceObj.fileSha256) {
                 const fileHash = appRoot.imapServiceObj.fileSha256(localPath);
                 if (fileHash && fileHash.length && dataHashes.indexOf(fileHash) >= 0) {
-                    console.log("[inline-image] skip already present by data-hash", "name=", name, "partId=", partId);
                     continue;
                 }
             }
 
             const src = fileUrlFromLocalPath(localPath);
-            console.log("[inline-image] include", "partId=", partId, "name=", name, "localPath=", localPath, "src=", src);
             const alt = (name || i18n("Image attachment")).replace(/"/g, "&quot;");
             images.push("<img src=\"" + src + "\" alt=\"" + alt + "\" style=\"display:block;max-width:100%;height:auto;margin:8px auto 0 auto;\" />");
         }
@@ -658,15 +651,12 @@ Rectangle {
             const srcM = tag.match(/\bsrc\s*=\s*["']([^"']+)/i);
             const src = srcM ? srcM[1] : "(unknown)";
             if (isFirstPartyUrl(src, senderDom)) {
-                console.log("[tracking] neutralize skipped first-party pixel src=" + src.substring(0, 80));
                 return tag;
             }
             const vendor = root.trackerVendor || "unknown";
-            console.log("[tracking] neutralized pixel #" + (++count) + " vendor=" + vendor + " src=" + src.substring(0, 120));
             return tag.replace(/(\bsrc\s*=\s*(["']))([^"']+)\2/i, '$1' + blank + '$2');
         });
         if (count === 0)
-            console.log("[tracking] neutralizeTrackingPixels called but no 1×1 pixels found");
         return result;
     }
     function reloadAttachmentsForCurrentMessage() {
@@ -894,7 +884,6 @@ Rectangle {
         return html.replace(/(<a\b[^>]*\bhref\s*=\s*)(["'])(https?:\/\/[^"']{20,})\2/gi, function (match, pre, quote, href) {
             const dest = extractTrackingRedirectUrl(href);
             if (dest) {
-                console.log("[link-sanitize]", href.substring(0, 100), "→", dest.substring(0, 100));
                 return pre + quote + dest + quote;
             }
             return match;
@@ -1003,13 +992,10 @@ Rectangle {
 
         if (explicitTrust) {
             imagesAllowed = true;
-            console.log("[images] autoload sender=" + domain + " reason=explicit-whitelist");
         } else if (dkimPass) {
             imagesAllowed = true;
-            console.log("[images] autoload sender=" + domain + " reason=dkim-pass signing-domain=" + (dkimDomain || "unknown"));
         } else {
             imagesAllowed = false;
-            console.log("[images] blocked sender=" + (domain || "(unknown)") + " reason=not-in-whitelist dkim-pass=" + dkimPass);
         }
 
         trackingAllowed = false;
@@ -1771,11 +1757,9 @@ Rectangle {
                         const tDone = Date.now();
                         const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
-                        console.log("[html-load] status=", st, "errorCode=", req.errorCode, "errorDomain=", req.errorDomain, "errorString=", req.errorString || "",
                                     "reason=", htmlContainer.pendingLoadReason, "loadMs=", loadMs, "totalMs=", totalMs);
 
                         htmlView.runJavaScript("(function(){try{var out=[];var root=document.querySelector('[data-kestrel-inline-attachments]');if(!root)return JSON.stringify({count:0,imgs:[]});var imgs=root.querySelectorAll('img');for(var i=0;i<imgs.length;i++){var im=imgs[i];out.push({src:im.currentSrc||im.src,complete:!!im.complete,naturalWidth:im.naturalWidth||0,naturalHeight:im.naturalHeight||0});}return JSON.stringify({count:imgs.length,imgs:out});}catch(e){return JSON.stringify({error:String(e)});}})();", function(result) {
-                            console.log("[inline-image] dom-inspect", result || "");
                         });
 
                         htmlContainer.pendingHtml = "";
@@ -1792,7 +1776,6 @@ Rectangle {
                     if (url.toLowerCase().startsWith("mailto:")) {
                         request.action = WebEngineNavigationRequest.IgnoreRequest;
                         if (!root.handleMailtoUrl(url)) {
-                            console.warn("[mailto] failed to handle; opening externally");
                             Qt.openUrlExternally(url);
                         }
                         return;
@@ -1916,11 +1899,6 @@ Rectangle {
         target: appRoot ? appRoot.imapServiceObj : null
 
         function onAttachmentReady(accountEmail, uid, partId, localPath) {
-            console.log("[attachment-progress] ready",
-                        "account=", accountEmail,
-                        "uid=", uid,
-                        "partId=", partId,
-                        "path=", localPath)
 
             if (!root.messageData) return;
             if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid) return;
