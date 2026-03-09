@@ -898,13 +898,12 @@ Kirigami.ApplicationWindow {
                                  || lower.indexOf("gstatic.com") >= 0
                                  || lower.indexOf("ggpht.com") >= 0
 
-        const isGmailFavicon = lower.indexOf("google.com/s2/favicons") >= 0
-                            && (senderDomainValue === "gmail.com" || senderDomainValue === "googlemail.com")
+        const isGoogleS2Favicon = lower.indexOf("google.com/s2/favicons") >= 0
 
         // Guardrails:
         // - suppress google profile/default avatar surfaces that may resolve to placeholders
-        // - suppress gmail favicon for consumer senders (prefer initials fallback)
-        if (isGoogleProfileish || isGmailFavicon)
+        // - suppress Google S2 favicon URLs (often tiny/placeholder or visually blank)
+        if (isGoogleProfileish || isGoogleS2Favicon)
             return []
 
         return [normalized]
