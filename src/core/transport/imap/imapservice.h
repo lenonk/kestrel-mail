@@ -76,7 +76,7 @@ private:
     DataStore         *m_store      = nullptr;
     TokenVault        *m_vault      = nullptr;
 
-    bool              m_syncInProgress = false;
+    std::atomic_int   m_syncInProgress { 0 };
     std::atomic_bool  m_cancelRequested { false };
     std::atomic_bool  m_destroying      { false };
 

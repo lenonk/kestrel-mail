@@ -759,8 +759,9 @@ ImapService::drainPendingSync() {
 void
 ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const SyncResult&)> onDone) {
     m_cancelRequested.store(false);
-    m_syncInProgress = true;
-    emit syncActivityChanged(true);
+    const int prev = m_syncInProgress.fetch_add(1);
+    if (prev == 0)
+        emit syncActivityChanged(true);
 
     auto *watcher = new QFutureWatcher<SyncResult>(this);
     registerWatcher(watcher);
@@ -771,13 +772,13 @@ ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const
         if (!m_destroying && onDone)
             onDone(r);
 
-        m_syncInProgress = false;
-        emit syncActivityChanged(false);
+        const int now = m_syncInProgress.fetch_sub(1) - 1;
+        if (now <= 0)
+            emit syncActivityChanged(false);
 
         unregisterWatcher(watcher);
         watcher->deleteLater();
 
-        drainPendingSync();
     });
     watcher->setFuture(QtConcurrent::run(std::move(work)));
 }
@@ -1346,11 +1347,6 @@ ImapService::refreshFolderList(bool announce) {
     if (m_destroying)
         return;
 
-    if (m_syncInProgress) {
-        if (announce)
-            emit syncFinished(false, "Sync already in progress.");
-        return;
-    }
 
     if (!m_accounts || !m_store) {
         if (announce)
@@ -1664,24 +1660,6 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
         return;
     }
 
-    if (m_syncInProgress) {
-        // Announced (user-initiated) requests cancel the active run; background ones queue silently.
-        if (announce)
-            m_cancelRequested.store(true);
-
-        {
-            QMutexLocker l(&m_pendingSyncMutex);
-            // Don't let a background single-folder request replace a pending full sync —
-            // the full sync will cover this folder anyway.
-            if (!m_pendingFullSync || announce) {
-                m_pendingFullSync   = false;
-                m_pendingFolderSync = target;
-                m_pendingAnnounce   = announce;
-            }
-        }
-
-        return;
-    }
 
     if (!m_accounts || !m_store) {
         if (announce)
@@ -1772,22 +1750,6 @@ ImapService::syncAll(bool announce) {
     if (m_destroying)
         return;
 
-    if (m_syncInProgress) {
-        if (announce)
-            m_cancelRequested.store(true);
-
-        {
-            QMutexLocker l(&m_pendingSyncMutex);
-            m_pendingFullSync   = true;
-            m_pendingFolderSync.clear();
-            m_pendingAnnounce   = announce;
-        }
-
-        if (announce)
-            emit syncFinished(false, "Refreshing…");
-
-        return;
-    }
 
     if (!m_accounts || !m_store) {
         if (announce)
