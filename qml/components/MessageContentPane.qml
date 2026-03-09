@@ -1024,6 +1024,11 @@ Rectangle {
 
             property real flickVelocityY: 0
             property string lastLoadedHtmlKey: ""
+            property real bodyOpacity: 1.0
+
+            Behavior on bodyOpacity {
+                NumberAnimation { duration: 250; easing.type: Easing.InOutQuad }
+            }
 
             function loadHtmlIfChanged(reason) {
                 if (!root.renderedHtml.length)
@@ -1034,6 +1039,7 @@ Rectangle {
                     return
 
                 lastLoadedHtmlKey = key
+                bodyOpacity = 0.0
                 if (root.perfLogEnabled)
                     console.log("[perf-content] loadHtml reason=" + reason + " chars=" + root.renderedHtml.length)
                 htmlView.loadHtml(root.renderedHtml, "http://kestrel.local/")
@@ -1050,6 +1056,7 @@ Rectangle {
                 id: htmlView
                 anchors.fill: parent
                 visible: root.hasUsableBodyHtml
+                opacity: htmlContainer.bodyOpacity
                 settings.localContentCanAccessRemoteUrls: true
                 settings.autoLoadImages: root.imagesAllowed
                 settings.errorPageEnabled: true
@@ -1085,9 +1092,13 @@ Rectangle {
                 }
 
                 onLoadingChanged: function(req) {
+                    const st = req.status
+                    if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus)
+                        htmlContainer.bodyOpacity = 1.0
+
                     if (!root.perfLogEnabled)
                         return
-                    const st = req.status
+
                     if (st === WebEngineLoadingInfo.LoadStartedStatus)
                         console.log("[perf-content] webview load started")
                     else if (st === WebEngineLoadingInfo.LoadSucceededStatus)
