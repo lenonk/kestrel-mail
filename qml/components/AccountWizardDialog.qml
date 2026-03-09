@@ -69,8 +69,9 @@ Window {
 
         if (!accountSetupObj) return
 
-        // OAuth starts only when Finish is pressed.
-        if (!accountSetupObj.oauthReady) {
+        // Always (re)start OAuth on Finish for OAuth providers.
+        const supportsOAuth = !!(accountSetupObj.selectedProvider && accountSetupObj.selectedProvider.supportsOAuth2)
+        if (supportsOAuth) {
             // Be defensive: provider discovery can be stale/empty after UI navigation.
             if (!accountSetupObj.selectedProvider || !accountSetupObj.selectedProvider.id) {
                 accountSetupObj.discoverProvider()
