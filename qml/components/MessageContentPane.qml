@@ -1297,11 +1297,7 @@ Rectangle {
                     readonly property bool selected: root.selectedAttachmentKey === attachmentCard.modelData.partId
                     readonly property string sizeText: root.formatAttachmentSize(attachmentCard.modelData.bytes)
                     readonly property string localPath: (root.attachmentLocalPaths && root.attachmentLocalPaths[attachmentCard.modelData.partId]) ? root.attachmentLocalPaths[attachmentCard.modelData.partId] : ""
-                    readonly property bool hasImagePreview: {
-                        const mt = (attachmentCard.modelData.mimeType || "").toString().toLowerCase();
-                        return localPath.length > 0 && mt.indexOf("image/") === 0;
-                    }
-                    readonly property string previewSource: hasImagePreview ? ("file://" + localPath) : ""
+                    readonly property string previewSource: localPath
 
                     border.color: selected ? root.systemPalette.highlight : Qt.lighter(Kirigami.Theme.backgroundColor, 1.35)
                     border.width: 1
@@ -1440,6 +1436,7 @@ Rectangle {
                         anchorItem: attachmentCard
                         targetHovered: attachmentHover.hovered || attachmentCard.selected
                         previewSource: attachmentCard.previewSource
+                        previewMimeType: (attachmentCard.modelData.mimeType || "")
                         fallbackIcon: root.iconForAttachment(attachmentCard.modelData.mimeType, attachmentCard.modelData.name)
                         arrowLeftPx: Math.max(24, attachmentCard.width * 0.25)
                         openButtonText: i18n("Open")

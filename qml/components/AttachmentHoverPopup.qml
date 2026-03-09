@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
+import QtWebEngine
 import org.kde.kirigami as Kirigami
 
 Item {
@@ -9,6 +10,7 @@ Item {
     property Item anchorItem: null
     property bool targetHovered: false
     property string previewSource: ""
+    property string previewMimeType: ""
     property string fallbackIcon: "mail-attachment"
     property string openButtonText: i18n("Open")
     property string saveButtonText: i18n("Save")
@@ -17,8 +19,18 @@ Item {
     property real arrowHeight: 8
     property real arrowWidth: 18
     property real arrowLeftPx: 70
-    property int previewWidth: 220
-    property int previewHeight: 206
+    property int previewWidth: 112
+    property int previewHeight: 112
+
+    readonly property string previewLower: (previewSource || "").toLowerCase()
+    readonly property string previewUrl: previewSource.length > 0 ? ("file://" + encodeURI(previewSource)) : ""
+    readonly property bool isImagePreview: previewMimeType.toLowerCase().indexOf("image/") === 0
+    readonly property bool isWebPreview: !isImagePreview && (previewMimeType.toLowerCase().indexOf("pdf") >= 0
+                                                              || previewLower.endsWith(".pdf")
+                                                              || previewLower.endsWith(".txt")
+                                                              || previewLower.endsWith(".md")
+                                                              || previewLower.endsWith(".html")
+                                                              || previewLower.endsWith(".htm"))
 
     signal openTriggered()
     signal saveTriggered()
@@ -48,7 +60,7 @@ Item {
     onArrowWidthChanged: backgroundCanvas.requestPaint()
     onArrowHeightChanged: backgroundCanvas.requestPaint()
 
-    implicitWidth: 560
+    implicitWidth: 258
     implicitHeight: content.implicitHeight + 20 + arrowHeight
     width: implicitWidth
     height: implicitHeight
@@ -119,7 +131,7 @@ Item {
         anchors.rightMargin: 10
         anchors.topMargin: arrowHeight + 10
         anchors.bottomMargin: 10
-        spacing: 20
+        spacing: 10
         z: 1
 
         Rectangle {
@@ -128,32 +140,46 @@ Item {
             color: Qt.darker(Kirigami.Theme.backgroundColor, 1.08)
             border.width: 1
             border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.35)
+            clip: true
 
             Image {
                 id: previewImg
                 anchors.fill: parent
                 anchors.margins: 2
-                source: root.previewSource
+                source: root.isImagePreview ? root.previewUrl : ""
                 fillMode: Image.PreserveAspectFit
                 horizontalAlignment: Image.AlignLeft
                 verticalAlignment: Image.AlignVCenter
                 asynchronous: true
                 cache: false
-                visible: source.length > 0
+                visible: root.isImagePreview && status === Image.Ready
+            }
+
+            WebEngineView {
+                id: previewWeb
+                anchors.fill: parent
+                anchors.margins: 2
+                visible: root.isWebPreview
+                url: root.isWebPreview ? root.previewUrl : ""
+                settings.pluginsEnabled: true
+                settings.pdfViewerEnabled: true
+                settings.javascriptEnabled: false
+                settings.localContentCanAccessFileUrls: true
+                backgroundColor: "transparent"
             }
 
             Kirigami.Icon {
                 anchors.centerIn: parent
-                width: 48
-                height: 48
+                width: 32
+                height: 32
                 source: root.fallbackIcon
-                opacity: 0.6
-                visible: !previewImg.visible
+                opacity: 0.7
+                visible: !previewImg.visible && !previewWeb.visible
             }
         }
 
         ColumnLayout {
-            spacing: 10
+            spacing: 8
             Layout.alignment: Qt.AlignTop
 
             QQC2.Button {
@@ -161,22 +187,22 @@ Item {
                 text: root.openButtonText
                 icon.name: "document-open"
                 flat: true
-                leftPadding: 10
-                rightPadding: 12
-                topPadding: 6
-                bottomPadding: 6
+                leftPadding: 8
+                rightPadding: 10
+                topPadding: 4
+                bottomPadding: 4
                 onClicked: root.openTriggered()
                 contentItem: RowLayout {
                     spacing: 8
                     Kirigami.Icon {
                         source: openBtn.icon.name
-                        Layout.preferredWidth: 20
-                        Layout.preferredHeight: 20
+                        Layout.preferredWidth: 16
+                        Layout.preferredHeight: 16
                     }
                     QQC2.Label {
                         text: openBtn.text
                         color: Kirigami.Theme.textColor
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 8
+                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
                     }
                 }
                 background: Rectangle {
@@ -194,22 +220,22 @@ Item {
                 text: root.saveButtonText
                 icon.name: "document-save"
                 flat: true
-                leftPadding: 10
-                rightPadding: 12
-                topPadding: 6
-                bottomPadding: 6
+                leftPadding: 8
+                rightPadding: 10
+                topPadding: 4
+                bottomPadding: 4
                 onClicked: root.saveTriggered()
                 contentItem: RowLayout {
                     spacing: 8
                     Kirigami.Icon {
                         source: saveBtn.icon.name
-                        Layout.preferredWidth: 20
-                        Layout.preferredHeight: 20
+                        Layout.preferredWidth: 16
+                        Layout.preferredHeight: 16
                     }
                     QQC2.Label {
                         text: saveBtn.text
                         color: Kirigami.Theme.textColor
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 8
+                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
                     }
                 }
                 background: Rectangle {
