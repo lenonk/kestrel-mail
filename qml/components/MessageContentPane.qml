@@ -452,11 +452,16 @@ Rectangle {
         const imgTagRe = /<img\b[^>]*>/gi;
         let m;
         while ((m = imgTagRe.exec(html)) !== null) {
-            const tag = m[0];
-            const srcM = tag.match(/\bsrc\s*=\s*(["'])([^"']+)\1/i);
+            const tag = (m[0] || "").toString();
+            const tagLower = tag.toLowerCase();
+            // Some clients store attachment hints in non-src attrs (alt/title/data-*).
+            if (tagLower.indexOf(lowerName) >= 0 || tagLower.indexOf(encodedName) >= 0)
+                return true;
+
+            const srcM = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
             if (!srcM)
                 continue;
-            const src = (srcM[2] || "").toString();
+            const src = (srcM[1] || srcM[2] || srcM[3] || "").toString();
             const srcLower = src.toLowerCase();
             let decodedLower = srcLower;
             try {
@@ -477,6 +482,11 @@ Rectangle {
         const cidNames = bodyCidImageNames(baseHtml);
 
         console.log("[cid-compare]", cidNames);
+        if (cidNames.length === 0) {
+            const sampleImgs = ((baseHtml || "").toString().match(/<img\b[^>]*>/gi) || []).slice(0, 3);
+            if (sampleImgs.length > 0)
+                console.log("[inline-image] img-tag-sample", sampleImgs.join(" || "));
+        }
 
         const images = [];
         for (let i = 0; i < root.attachmentItems.length; i++) {
