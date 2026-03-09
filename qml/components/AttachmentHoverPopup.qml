@@ -44,7 +44,8 @@ Item {
     function borderForTheme() {
         const c = Kirigami.Theme.backgroundColor;
         const luminance = (0.2126 * c.r) + (0.7152 * c.g) + (0.0722 * c.b);
-        return luminance < 0.5 ? Qt.lighter(c, 1.6) : Qt.darker(c, 2.0);
+        // In dark themes, force a clearly visible light border.
+        return luminance < 0.5 ? Qt.rgba(1, 1, 1, 0.42) : Qt.darker(c, 2.0);
     }
 
     signal openTriggered()
@@ -119,7 +120,7 @@ Item {
             ctx.lineTo(ax + root.arrowWidth, root.arrowHeight)
             ctx.closePath()
             ctx.lineWidth = 1
-            ctx.strokeStyle = cssColor(Qt.lighter(Kirigami.Theme.backgroundColor, 1.35))
+            ctx.strokeStyle = cssColor(root.borderForTheme())
             ctx.stroke()
         }
 
@@ -183,8 +184,8 @@ Item {
                     anchors.margins: 0
                     source: root.isImagePreview ? root.previewUrl : ""
                     fillMode: Image.PreserveAspectFit
-                    horizontalAlignment: Image.AlignLeft
-                    verticalAlignment: Image.AlignVCenter
+                    horizontalAlignment: Image.AlignHCenter
+                    verticalAlignment: Image.AlignTop
                     asynchronous: true
                     cache: false
                     visible: root.isImagePreview && status === Image.Ready
@@ -202,6 +203,8 @@ Item {
                     document: pdfDoc
                     currentFrame: 0
                     fillMode: Image.PreserveAspectFit
+                    horizontalAlignment: Image.AlignHCenter
+                    verticalAlignment: Image.AlignTop
                     asynchronous: true
                     visible: root.isPdfPreview && status === Image.Ready
                 }
@@ -259,7 +262,7 @@ Item {
                                           : (openBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
                                                              : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
                         border.width: 1
-                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
+                        border.color: root.borderForTheme()
                         radius: 0
                     }
                 }
@@ -292,7 +295,7 @@ Item {
                                           : (saveBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
                                                              : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
                         border.width: 1
-                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
+                        border.color: root.borderForTheme()
                         radius: 0
                     }
                 }
