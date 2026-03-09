@@ -422,10 +422,13 @@ Rectangle {
 
             const partId = (a.partId || "").toString();
             const localPath = (root.attachmentLocalPaths && partId.length) ? (root.attachmentLocalPaths[partId] || "") : "";
-            if (!localPath || !localPath.length)
+            if (!localPath || !localPath.length) {
+                console.log("[inline-image] missing local path", "partId=", partId, "name=", name, "folder=", root.messageData ? root.messageData.folder : "");
                 continue;
+            }
 
             const src = fileUrlFromLocalPath(localPath);
+            console.log("[inline-image] include", "partId=", partId, "name=", name, "localPath=", localPath, "src=", src);
             const alt = (name || i18n("Image attachment")).replace(/"/g, "&quot;");
             images.push("<img src=\"" + src + "\" alt=\"" + alt + "\" style=\"display:block;max-width:100%;height:auto;margin:8px auto 0 auto;\" />");
         }
@@ -1610,6 +1613,12 @@ Rectangle {
                 onLoadingChanged: function (req) {
                     const st = req.status;
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
+                        console.log("[html-load] status=", st, "errorCode=", req.errorCode, "errorDomain=", req.errorDomain, "errorString=", req.errorString || "");
+
+                        htmlView.runJavaScript("(function(){try{var out=[];var root=document.querySelector('[data-kestrel-inline-attachments]');if(!root)return JSON.stringify({count:0,imgs:[]});var imgs=root.querySelectorAll('img');for(var i=0;i<imgs.length;i++){var im=imgs[i];out.push({src:im.currentSrc||im.src,complete:!!im.complete,naturalWidth:im.naturalWidth||0,naturalHeight:im.naturalHeight||0});}return JSON.stringify({count:imgs.length,imgs:out});}catch(e){return JSON.stringify({error:String(e)});}})();", function(result) {
+                            console.log("[inline-image] dom-inspect", result || "");
+                        });
+
                         htmlContainer.pendingHtml = "";
                         htmlContainer.bodyOpacity = 1.0;
                     }
