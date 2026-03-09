@@ -480,6 +480,17 @@ Rectangle {
             return "";
 
         const cidNames = bodyCidImageNames(baseHtml);
+        const htmlLower = (baseHtml || "").toString().toLowerCase();
+        const hasDataInlineImage = /<img\b[^>]*\bsrc\s*=\s*(?:"|')data:image\//i.test(baseHtml || "");
+
+        let imageAttachmentCount = 0;
+        for (let i = 0; i < root.attachmentItems.length; i++) {
+            const a0 = root.attachmentItems[i] || {};
+            const mt0 = (a0.mimeType || "").toString().toLowerCase();
+            const nm0 = (a0.name || "").toString();
+            if (mt0.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(nm0))
+                imageAttachmentCount++;
+        }
 
         console.log("[cid-compare]", cidNames);
         if (cidNames.length === 0) {
@@ -510,6 +521,11 @@ Rectangle {
 
             if (inlineImageAlreadyPresent(baseHtml, name)) {
                 console.log("[inline-image] skip already present in body", "name=", name);
+                continue;
+            }
+
+            if (hasDataInlineImage && imageAttachmentCount === 1) {
+                console.log("[inline-image] skip single attachment append: body already has data:image", "name=", name);
                 continue;
             }
 
