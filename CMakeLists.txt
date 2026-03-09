@@ -28,9 +28,9 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 set(QT_DEFAULT_MAJOR_VERSION 6)
 
-# Default to Release for single-config generators unless explicitly overridden.
+# Default to RelWithDebInfo for single-config generators unless explicitly overridden.
 if (NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
 # Ensure release builds use aggressive optimization.
