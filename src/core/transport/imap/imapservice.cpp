@@ -291,12 +291,13 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
                 continue; // already cached by a concurrent call
             }
 
-            emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 5);
             const QByteArray data = fetchAttachmentPartById(cxn, uid, partId, encoding);
             if (data.isEmpty()) {
                 emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
                 continue;
             }
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 60);
 
             // Use a per-part subdirectory so the file has a clean user-visible name.
             const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
