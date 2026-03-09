@@ -1302,53 +1302,61 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
         return {};
     }
 
-    auto cxn = std::make_shared<Imap::Connection>();
-    if (const auto result = cxn->connectAndAuth(host, port, email, accessToken); !result.success) {
-        if (statusOut) *statusOut = result.message;
+    Imap::SyncResult syncResult;
+    bool ran = false;
+    const bool pooledOk = ImapService::withPooledConnection(host, port, email, accessToken, folderName, 5000,
+        [&](Imap::Connection &pooled) {
+            auto cxn = std::shared_ptr<Imap::Connection>(&pooled, [](Imap::Connection*) {});
+
+            // ── Build context and delegate to SyncEngine ─────────────────────────────
+            Imap::SyncContext ctx;
+            ctx.cxn                     = cxn;
+            ctx.folderName              = folderName;
+            ctx.minUidExclusive         = minUidExclusive;
+            ctx.reconcileDeletes        = reconcileDeletes;
+            ctx.fetchBudget             = fetchBudget;
+            ctx.cancelRequested         = &m_cancelRequested;
+            ctx.onHeader                = onHeader;
+
+            ctx.avatarShouldRefresh = [this](const QString &senderEmail, int ttlSecs, int maxFailures) -> bool {
+                bool result = true;
+                QMetaObject::invokeMethod(this, [this, &result, senderEmail, ttlSecs, maxFailures]() {
+                    if (m_store) result = m_store->avatarShouldRefresh(senderEmail, ttlSecs, maxFailures);
+                }, Qt::BlockingQueuedConnection);
+                return result;
+            };
+
+            ctx.getFolderUids = [this](const QString &acctEmail, const QString &folder) -> QStringList {
+                QStringList result;
+                QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
+                    if (m_store) result = m_store->folderUids(acctEmail, folder);
+                }, Qt::BlockingQueuedConnection);
+                return result;
+            };
+
+            ctx.removeUids = [this](const QString &acctEmail, const QStringList &uids) {
+                QMetaObject::invokeMethod(this, [this, acctEmail, uids]() {
+                    if (m_store) m_store->removeAccountUidsEverywhere(acctEmail, uids);
+                }, Qt::QueuedConnection);
+            };
+
+            ctx.onFlagsReconciled = [this](const QString &acctEmail, const QString &folder,
+                                            const QStringList &readUids) {
+                QMetaObject::invokeMethod(this, [this, acctEmail, folder, readUids]() {
+                    if (m_store) m_store->reconcileReadFlags(acctEmail, folder, readUids);
+                }, Qt::QueuedConnection);
+            };
+
+            // SyncEngine::execute() handles SELECT internally.
+            syncResult = Imap::SyncEngine{}.execute(ctx);
+            ran = true;
+        });
+
+    if (!pooledOk || !ran) {
+        if (statusOut)
+            *statusOut = "Operational IMAP pool timeout."_L1;
         return {};
     }
-
-    // ── Build context and delegate to SyncEngine ─────────────────────────────
-    Imap::SyncContext ctx;
-    ctx.cxn                     = cxn;
-    ctx.folderName              = folderName;
-    ctx.minUidExclusive         = minUidExclusive;
-    ctx.reconcileDeletes        = reconcileDeletes;
-    ctx.fetchBudget             = fetchBudget;
-    ctx.cancelRequested         = &m_cancelRequested;
-    ctx.onHeader                = onHeader;
-
-    ctx.avatarShouldRefresh = [this](const QString &senderEmail, int ttlSecs, int maxFailures) -> bool {
-        bool result = true;
-        QMetaObject::invokeMethod(this, [this, &result, senderEmail, ttlSecs, maxFailures]() {
-            if (m_store) result = m_store->avatarShouldRefresh(senderEmail, ttlSecs, maxFailures);
-        }, Qt::BlockingQueuedConnection);
-        return result;
-    };
-
-    ctx.getFolderUids = [this](const QString &acctEmail, const QString &folder) -> QStringList {
-        QStringList result;
-        QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
-            if (m_store) result = m_store->folderUids(acctEmail, folder);
-        }, Qt::BlockingQueuedConnection);
-        return result;
-    };
-
-    ctx.removeUids = [this](const QString &acctEmail, const QStringList &uids) {
-        QMetaObject::invokeMethod(this, [this, acctEmail, uids]() {
-            if (m_store) m_store->removeAccountUidsEverywhere(acctEmail, uids);
-        }, Qt::QueuedConnection);
-    };
-
-    ctx.onFlagsReconciled = [this](const QString &acctEmail, const QString &folder,
-                                    const QStringList &readUids) {
-        QMetaObject::invokeMethod(this, [this, acctEmail, folder, readUids]() {
-            if (m_store) m_store->reconcileReadFlags(acctEmail, folder, readUids);
-        }, Qt::QueuedConnection);
-    };
-
-    // SyncEngine::execute() handles SELECT internally.
-    const Imap::SyncResult syncResult = Imap::SyncEngine{}.execute(ctx);
 
     if (statusOut)
         *statusOut = syncResult.statusMessage;
