@@ -190,15 +190,24 @@ Rectangle {
         return out
     }
 
-    readonly property var attachmentItems: {
-        if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
-            return []
+    property var attachmentItems: []
+
+    function reloadAttachmentsForCurrentMessage() {
+        if (!root.messageData || !appRoot || !appRoot.imapServiceObj) {
+            root.attachmentItems = []
+            return
+        }
+
         const account = (root.messageData.accountEmail || "").toString()
         const folder = (root.messageData.folder || "").toString()
         const uid = (root.messageData.uid || "").toString()
-        if (!account.length || !folder.length || !uid.length)
-            return []
-        return appRoot.imapServiceObj.attachmentsForMessage(account, folder, uid)
+        if (!account.length || !folder.length || !uid.length) {
+            root.attachmentItems = []
+            return
+        }
+
+        // Single-shot lookup per message selection; avoid heavy reevaluation via bindings.
+        root.attachmentItems = appRoot.imapServiceObj.attachmentsForMessage(account, folder, uid)
     }
 
     // Tracking pixel detection: scans for 1×1 external <img> tags to confirm tracking is
@@ -255,6 +264,7 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = ""
+        root.reloadAttachmentsForCurrentMessage()
         // Read messageData directly — derived bindings (isTrustedSender, senderDomain, etc.)
         // may not have re-evaluated yet when this handler fires.
         const senderVal = (messageData && messageData.sender) ? messageData.sender.toString() : ""

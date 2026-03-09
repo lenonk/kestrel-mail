@@ -245,6 +245,24 @@ ImapService::attachmentsForMessage(const QString &accountEmail, const QString &f
         out.push_back(row);
     }
 
+    // Ensure display names are unique per message for UI clarity.
+    {
+        QHash<QString, int> seenNames;
+        for (int i = 0; i < out.size(); ++i) {
+            auto row = out[i].toMap();
+            const QString base = row.value("name"_L1).toString().trimmed().isEmpty()
+                ? QStringLiteral("Attachment")
+                : row.value("name"_L1).toString().trimmed();
+            const int count = seenNames.value(base, 0) + 1;
+            seenNames.insert(base, count);
+            if (count > 1)
+                row.insert("name"_L1, QStringLiteral("%1 (%2)").arg(base).arg(count));
+            else
+                row.insert("name"_L1, base);
+            out[i] = row;
+        }
+    }
+
     {
         QMutexLocker lock(&m_attachmentCacheMutex);
         m_attachmentCache.insert(cacheKey, out);
