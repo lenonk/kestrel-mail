@@ -30,7 +30,6 @@ public:
 
     Q_INVOKABLE void syncAll(bool announce = true);
     std::shared_ptr<Imap::Connection> getPooledConnection();
-    void releasePooledConnection();
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true);
     Q_INVOKABLE void refreshFolderList(bool announce = true);
     Q_INVOKABLE void hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid);

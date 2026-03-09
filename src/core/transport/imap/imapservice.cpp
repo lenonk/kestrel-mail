@@ -59,15 +59,10 @@ QWaitCondition g_poolWait;
 QVector<PooledConnSlot> g_poolSlots;
 std::atomic_bool g_poolPrewarmed{false};
 constexpr int kOperationalPoolMax = 3; // Separate from IDLE connection.
-thread_local int g_tlsPoolSlotIndex = -1;
 constexpr int kPoolAcquireTimeoutMs = 3500;
 }
 
 std::shared_ptr<Imap::Connection> ImapService::getPooledConnection() {
-    if (g_tlsPoolSlotIndex >= 0 && g_tlsPoolSlotIndex < g_poolSlots.size()) {
-        return std::shared_ptr<Imap::Connection>(g_poolSlots[g_tlsPoolSlotIndex].conn.get(), [](Imap::Connection*) {});
-    }
-
     int slotIndex = -1;
     const auto deadline = QDateTime::currentMSecsSinceEpoch() + kPoolAcquireTimeoutMs;
 
@@ -91,17 +86,14 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection() {
         g_poolWait.wait(&g_poolMutex, remaining);
     }
 
-    g_tlsPoolSlotIndex = slotIndex;
-    return std::shared_ptr<Imap::Connection>(g_poolSlots[slotIndex].conn.get(), [](Imap::Connection*) {});
-}
-
-void ImapService::releasePooledConnection() {
-    QMutexLocker lock(&g_poolMutex);
-    if (g_tlsPoolSlotIndex >= 0 && g_tlsPoolSlotIndex < g_poolSlots.size()) {
-        g_poolSlots[g_tlsPoolSlotIndex].busy = false;
-        g_tlsPoolSlotIndex = -1;
-        g_poolWait.wakeOne();
-    }
+    Imap::Connection *raw = g_poolSlots[slotIndex].conn.get();
+    return std::shared_ptr<Imap::Connection>(raw, [slotIndex](Imap::Connection *) {
+        QMutexLocker rel(&g_poolMutex);
+        if (slotIndex >= 0 && slotIndex < g_poolSlots.size()) {
+            g_poolSlots[slotIndex].busy = false;
+            g_poolWait.wakeOne();
+        }
+    });
 }
 
 ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
@@ -453,20 +445,16 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
             return;
         }
-        const auto release = [this]() { releasePooledConnection(); };
-
         const bool needsConnect = !cxn->isConnected()
                                || cxn->host().compare(host, Qt::CaseInsensitive) != 0
                                || cxn->email().compare(accountEmail, Qt::CaseInsensitive) != 0;
         if (needsConnect && !cxn->connectAndAuth(host, port, accountEmail, token).success) {
-            release();
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
             const auto [ok, _] = cxn->select(folderName);
             if (!ok) {
-                release();
-                return;
+                    return;
             }
         }
 
@@ -536,8 +524,6 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             emit attachmentReady(accountEmail, uid, partId, localPath);
             clearInFlight();
         }
-
-        release();
     });
 }
 
@@ -585,20 +571,16 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
             return;
         }
-        const auto release = [this]() { releasePooledConnection(); };
-
         const bool needsConnect = !cxn->isConnected()
                                || cxn->host().compare(host, Qt::CaseInsensitive) != 0
                                || cxn->email().compare(accountEmail, Qt::CaseInsensitive) != 0;
         if (needsConnect && !cxn->connectAndAuth(host, port, accountEmail, token).success) {
-            release();
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
             const auto [ok, _] = cxn->select(folderName);
             if (!ok) {
-                release();
-                return;
+                    return;
             }
         }
 
@@ -668,8 +650,6 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
             emit attachmentReady(accountEmail, uid, partId, localPath);
             clearInFlight();
         }
-
-        release();
     });
 }
 
@@ -1318,13 +1298,11 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
             *statusOut = "Operational IMAP pool timeout."_L1;
         return {};
     }
-    const auto release = [this]() { releasePooledConnection(); };
 
     const bool needsConnect = !pooled->isConnected()
                            || pooled->host().compare(host, Qt::CaseInsensitive) != 0
                            || pooled->email().compare(email, Qt::CaseInsensitive) != 0;
     if (needsConnect && !pooled->connectAndAuth(host, port, email, accessToken).success) {
-        release();
         if (statusOut) *statusOut = "IMAP connect/auth failed."_L1;
         return {};
     }
@@ -1332,7 +1310,6 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
     if (!folderName.isEmpty() && pooled->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
         const auto [ok, _] = pooled->select(folderName);
         if (!ok) {
-            release();
             if (statusOut) *statusOut = "IMAP select failed."_L1;
             return {};
         }
@@ -1377,7 +1354,6 @@ ImapService::fetchFolderHeaders(const QString &host, int port, const QString &em
     };
 
     const Imap::SyncResult syncResult = Imap::SyncEngine{}.execute(ctx);
-    release();
 
     if (statusOut)
         *statusOut = syncResult.statusMessage;
@@ -1700,7 +1676,6 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         return;
     if (!m_accounts) return;
 
-    // 1. Snapshot message_id/unread before removing the source edge from the DB.
     qint64 messageId = -1;
     int    unreadVal = 0;
     if (m_store) {
@@ -1708,9 +1683,6 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         messageId = edge.value("messageId"_L1, -1LL).toLongLong();
         unreadVal = edge.value("unread"_L1, 0).toInt();
 
-        // Optimistic removal: vanish from UI immediately.
-        // Moving to trash → remove all non-trash edges (INBOX, All Mail, …).
-        // Moving from trash → only remove the specific source edge.
         const QString tgt = targetFolder.trimmed().toLower();
         const bool movingToTrash = tgt == QLatin1String("trash")
                                 || tgt == QLatin1String("[gmail]/trash")
@@ -1722,9 +1694,6 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
             m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
     }
 
-    // 2. UID MOVE on a background thread. Parse COPYUID to get the new UID in the target folder,
-    //    then immediately insert the new folder edge so the message appears in the target folder
-    //    without waiting for the IDLE watcher to sync.
     const QVariantList accounts = m_accounts->accounts();
 
     const auto retval = QtConcurrent::run([this, accounts, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
@@ -1735,37 +1704,29 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
 
             auto cxn = getPooledConnection();
             if (!cxn) return;
-            const auto release = [this]() { releasePooledConnection(); };
 
             const bool needsConnect = !cxn->isConnected()
                                    || cxn->host().compare(host, Qt::CaseInsensitive) != 0
                                    || cxn->email().compare(email, Qt::CaseInsensitive) != 0;
-            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success) {
-                release();
+            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success)
                 return;
-            }
+
             if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
                 const auto [ok, _] = cxn->select(folder);
-                if (!ok) {
-                    release();
-                    return;
-                }
+                if (!ok) return;
             }
 
-            // UID MOVE (RFC 6851) — atomic copy+expunge in one round-trip.
-            const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
+            const QString resp = cxn->execute("UID MOVE %1 "%2""_L1.arg(uid, targetFolder));
 
             qInfo().noquote() << "[move-message]"
                               << "uid=" << uid << "from=" << folder
                               << "to=" << targetFolder << "resp=" << resp.simplified().left(120);
 
-            // Parse new UID from: OK [COPYUID <uidvalidity> <source-uid(s)> <dest-uid(s)>]
             static const QRegularExpression kCopyUidRe(
                 R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
                 QRegularExpression::CaseInsensitiveOption);
             const QRegularExpressionMatch m = kCopyUidRe.match(resp);
             if (m.hasMatch() && messageId > 0) {
-                // Server told us the new UID — update DB immediately.
                 const QString newUid = m.captured(1);
                 QMetaObject::invokeMethod(this,
                     [this, accountEmail, targetFolder, newUid, messageId, unreadVal]() {
@@ -1774,15 +1735,12 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
                                                       targetFolder, newUid, unreadVal);
                     }, Qt::QueuedConnection);
             } else if (messageId > 0) {
-                // Server gave no COPYUID (bad IMAP server). Purge any remaining edges so the
-                // UI is clean; the IDLE watcher will re-add the message when the server notifies.
                 QMetaObject::invokeMethod(this,
                     [this, accountEmail, messageId]() {
                         if (!m_destroying.load() && m_store)
                             m_store->removeAllEdgesForMessageId(accountEmail, messageId);
                     }, Qt::QueuedConnection);
             }
-            release();
             return;
         }
     });
@@ -1793,11 +1751,9 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
                               const QString &uid) {
     if (m_destroying || accountEmail.isEmpty() || uid.isEmpty()) return;
 
-    // 1. Update DB immediately.
     if (m_store)
         m_store->markMessageRead(accountEmail, uid);
 
-    // 2. Send UID STORE +FLAGS (\Seen) on a background thread.
     if (!m_accounts) return;
     const QVariantList accounts = m_accounts->accounts();
 
@@ -1809,26 +1765,20 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
 
             auto cxn = getPooledConnection();
             if (!cxn) return;
-            const auto release = [this]() { releasePooledConnection(); };
 
             const bool needsConnect = !cxn->isConnected()
                                    || cxn->host().compare(host, Qt::CaseInsensitive) != 0
                                    || cxn->email().compare(email, Qt::CaseInsensitive) != 0;
-            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success) {
-                release();
+            if (needsConnect && !cxn->connectAndAuth(host, port, email, accessToken).success)
                 return;
-            }
+
             if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
                 const auto [ok, _] = cxn->select(folder);
-                if (!ok) {
-                    release();
-                    return;
-                }
+                if (!ok) return;
             }
 
-            const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
+            const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\Seen)").arg(uid));
             Q_UNUSED(result);
-            release();
 
             qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
             return;
