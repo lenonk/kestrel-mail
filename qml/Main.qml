@@ -888,8 +888,18 @@ Kirigami.ApplicationWindow {
             return []
 
         const lower = normalized.toLowerCase()
-        const isUrlLike = lower.startsWith("https://") || lower.startsWith("http://") || lower.startsWith("data:image/")
-        if (!isUrlLike)
+        const isHttpUrl = lower.startsWith("https://") || lower.startsWith("http://")
+        const isDataImage = lower.startsWith("data:image/")
+        const isSupportedDataImage = isDataImage && (
+            lower.startsWith("data:image/png")
+            || lower.startsWith("data:image/jpeg")
+            || lower.startsWith("data:image/jpg")
+            || lower.startsWith("data:image/gif")
+            || lower.startsWith("data:image/webp")
+            || lower.startsWith("data:image/svg+xml")
+        )
+
+        if (!(isHttpUrl || isSupportedDataImage))
             return []
 
         const senderDomainValue = email.indexOf("@") >= 0 ? email.split("@")[1].toLowerCase() : ""
