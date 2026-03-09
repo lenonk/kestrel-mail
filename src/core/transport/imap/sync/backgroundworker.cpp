@@ -174,10 +174,11 @@ BackgroundWorker::start() {
             const auto email = m_activeEmail;
             const auto token = m_activeAccessToken;
             const auto folderCopy = folder;
-            QtConcurrent::run([this, account, email, token, folderCopy]() {
+            const auto dispatched = QtConcurrent::run([this, account, email, token, folderCopy]() {
                 emit syncHeadersAndFlagsRequested(account, email, folderCopy, token);
                 emit fetchBodiesRequested(account, email, folderCopy, token);
             });
+            Q_UNUSED(dispatched);
         }
 
         emit idleLiveUpdateRequested(m_activeAccount, m_activeEmail);
