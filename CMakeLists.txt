@@ -127,24 +127,6 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
 )
 
 set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json")
-set(KESTREL_PROVIDERS_KEY_FILE "$ENV{HOME}/.config/kestrel/providers.key" CACHE FILEPATH "Path to local key file for decrypting data/providers.json.enc")
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json.enc")
-    set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/providers.json")
-    add_custom_command(
-        OUTPUT "${KESTREL_PROVIDERS_RESOURCE}"
-        COMMAND ${CMAKE_COMMAND}
-            -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json.enc
-            -DOUTPUT=${KESTREL_PROVIDERS_RESOURCE}
-            -DKEY_FILE=${KESTREL_PROVIDERS_KEY_FILE}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/decrypt_providers.cmake
-        DEPENDS
-            ${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json.enc
-            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/decrypt_providers.cmake
-        COMMENT "Decrypting providers.json for Qt resource embedding"
-        VERBATIM
-    )
-endif()
 
 set_source_files_properties(${KESTREL_PROVIDERS_RESOURCE}
     PROPERTIES
