@@ -93,9 +93,12 @@ Rectangle {
             property real preservedContentY: 0
             property bool restorePending: false
 
+            property bool debugHoverPopupEnabled: false
             property string debugHoverPayload: ""
 
             function showDebugHoverPopup(payload, globalX, globalY) {
+                if (!debugHoverPopupEnabled)
+                    return
                 debugHoverPayload = payload
                 debugHoverPopup.toolTipText = payload
                 debugHoverPopup.preferredX = globalX + 4
