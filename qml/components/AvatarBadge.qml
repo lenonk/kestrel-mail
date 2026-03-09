@@ -108,7 +108,8 @@ Item {
         // Scale from theme font, anchored to Kirigami icon sizing.
         // medium avatar ~= default font; larger/smaller avatars track proportionally.
         readonly property real _sizeScale: root.size / Kirigami.Units.iconSizes.medium
-        font.pixelSize: Math.max(Kirigami.Theme.defaultFont.pixelSize,
-                                 Math.round(Kirigami.Theme.defaultFont.pixelSize * _sizeScale))
+        font.pixelSize: Math.max(10,
+                                 Math.max(Kirigami.Theme.defaultFont.pixelSize,
+                                          Math.round(Kirigami.Theme.defaultFont.pixelSize * _sizeScale)))
     }
 }
