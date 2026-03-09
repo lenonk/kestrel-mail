@@ -286,12 +286,17 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             const QString name     = am.value("name"_L1).toString();
 
             const QString key = attachmentCacheKey(accountEmail, uid, partId);
-            if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty())
+            if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
                 continue; // already cached by a concurrent call
+            }
 
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
             const QByteArray data = fetchAttachmentPartById(cxn, uid, partId, encoding);
-            if (data.isEmpty())
+            if (data.isEmpty()) {
+                emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
                 continue;
+            }
 
             // Use a per-part subdirectory so the file has a clean user-visible name.
             const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
@@ -309,6 +314,7 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
                 continue;
 
             attachmentCacheInsert(key, localPath);
+            emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
             emit attachmentReady(accountEmail, uid, partId, localPath);
         }
     });
@@ -346,103 +352,31 @@ fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid, const QString
 }
 
 void
-ImapService::openAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
-                            const QString &partId, const QString &fileName, const QString &encoding) {
-    // Fast path: use prefetched cache file if available.
+ImapService::openAttachment(const QString &accountEmail, const QString &, const QString &uid,
+                            const QString &partId, const QString &, const QString &) {
     const QString cached = cachedAttachmentPath(accountEmail, uid, partId);
     if (!cached.isEmpty() && QFile::exists(cached)) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(cached));
         return;
     }
 
-    if (!m_accounts)
-        return;
-
-    QVariantMap account;
-    for (const auto &a : m_accounts->accounts()) {
-        const auto row = a.toMap();
-        if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
-            account = row;
-            break;
-        }
-    }
-    if (account.isEmpty())
-        return;
-
-    const QString host = account.value("imapHost"_L1).toString();
-    const int port = account.value("imapPort"_L1).toInt();
-    const QString token = refreshAccessToken(account, accountEmail);
-    if (host.isEmpty() || port <= 0 || token.isEmpty())
-        return;
-
-    auto cxn = std::make_shared<Imap::Connection>();
-    if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
-        return;
-    const auto selectResult = cxn->select(folderName);
-    if (!std::get<0>(selectResult))
-        return;
-
-    const QByteArray data = fetchAttachmentPartById(*cxn, uid, partId, encoding);
-    if (data.isEmpty())
-        return;
-
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    QDir().mkpath(dir);
-    const QString path = dir + "/kestrel-"_L1 + QString::number(QDateTime::currentMSecsSinceEpoch())
-                       + "-"_L1 + (fileName.isEmpty() ? QStringLiteral("attachment") : fileName);
-
-    QSaveFile f(path);
-    if (!f.open(QIODevice::WriteOnly))
-        return;
-    f.write(data);
-    if (!f.commit())
-        return;
-
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    emit realtimeStatus(false, QStringLiteral("Attachment is still downloading. Please try again shortly."));
 }
 
 bool
-ImapService::saveAttachment(const QString &accountEmail, const QString &folderName, const QString &uid,
-                            const QString &partId, const QString &fileName, const QString &encoding) {
-    // Acquire data — from cache if available, otherwise via IMAP.
-    QByteArray data;
+ImapService::saveAttachment(const QString &accountEmail, const QString &, const QString &uid,
+                            const QString &partId, const QString &fileName, const QString &) {
     const QString cached = cachedAttachmentPath(accountEmail, uid, partId);
-    if (!cached.isEmpty() && QFile::exists(cached)) {
-        QFile f(cached);
-        if (f.open(QIODevice::ReadOnly))
-            data = f.readAll();
+    if (cached.isEmpty() || !QFile::exists(cached)) {
+        emit realtimeStatus(false, QStringLiteral("Attachment is still downloading. Please try again shortly."));
+        return false;
     }
 
-    if (data.isEmpty()) {
-        if (!m_accounts)
-            return false;
-
-        QVariantMap account;
-        for (const auto &a : m_accounts->accounts()) {
-            const auto row = a.toMap();
-            if (row.value("email"_L1).toString().compare(accountEmail, Qt::CaseInsensitive) == 0) {
-                account = row;
-                break;
-            }
-        }
-        if (account.isEmpty())
-            return false;
-
-        const QString host = account.value("imapHost"_L1).toString();
-        const int port = account.value("imapPort"_L1).toInt();
-        const QString token = refreshAccessToken(account, accountEmail);
-        if (host.isEmpty() || port <= 0 || token.isEmpty())
-            return false;
-
-        auto cxn = std::make_shared<Imap::Connection>();
-        if (!cxn->connectAndAuth(host, port, accountEmail, token).success)
-            return false;
-        const auto selectResult = cxn->select(folderName);
-        if (!std::get<0>(selectResult))
-            return false;
-
-        data = fetchAttachmentPartById(*cxn, uid, partId, encoding);
-    }
+    QFile in(cached);
+    if (!in.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray data = in.readAll();
+    in.close();
 
     if (data.isEmpty())
         return false;

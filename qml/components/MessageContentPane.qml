@@ -67,6 +67,7 @@ Rectangle {
     required property var appRoot
     property var attachmentItems: []
     property var attachmentLocalPaths: ({})
+    property var attachmentProgress: ({})
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
@@ -669,6 +670,7 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
+        root.attachmentProgress = ({});
         root.reloadAttachmentsForCurrentMessage();
         // Read messageData directly — derived bindings (isTrustedSender, senderDomain, etc.)
         // may not have re-evaluated yet when this handler fires.
@@ -1290,6 +1292,26 @@ Rectangle {
                             visible: attachmentCard.sizeText.length > 0
                         }
                     }
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        height: 2
+                        radius: 1
+                        color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
+                        visible: Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0) > 0
+                              && Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0) < 100
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            height: parent.height
+                            radius: 1
+                            color: root.systemPalette.highlight
+                            width: parent.width * (Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0) / 100.0)
+                        }
+                    }
+
                     MouseArea {
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         anchors.fill: parent
@@ -1554,6 +1576,18 @@ Rectangle {
             const updated = Object.assign({}, root.attachmentLocalPaths);
             updated[partId] = localPath;
             root.attachmentLocalPaths = updated;
+
+            const p = Object.assign({}, root.attachmentProgress);
+            p[partId] = 100;
+            root.attachmentProgress = p;
+        }
+
+        function onAttachmentDownloadProgress(accountEmail, uid, partId, progressPercent) {
+            if (!root.messageData) return;
+            if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid) return;
+            const p = Object.assign({}, root.attachmentProgress);
+            p[partId] = progressPercent;
+            root.attachmentProgress = p;
         }
     }
     QQC2.Dialog {

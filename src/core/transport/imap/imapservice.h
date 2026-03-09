@@ -52,6 +52,7 @@ signals:
     void hydrateStatus(bool ok, const QString &message);
     void realtimeStatus(bool ok, const QString &message);
     void attachmentReady(const QString &accountEmail, const QString &uid, const QString &partId, const QString &localPath);
+    void attachmentDownloadProgress(const QString &accountEmail, const QString &uid, const QString &partId, int progressPercent);
 
 private:
     // Internal result type for async sync work lambdas.
