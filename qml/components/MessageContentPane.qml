@@ -502,10 +502,17 @@ Rectangle {
             root.attachmentLocalPaths = paths;
             root.attachmentProgress = progress;
             root.attachmentDownloading = downloading;
-
-            // Kick off background download for any not-yet-cached parts.
-            appRoot.imapServiceObj.prefetchAttachments(account, folder, uid);
         }
+    }
+    function startAttachmentPrefetchForCurrentMessage() {
+        if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
+            return;
+        const account = (root.messageData.accountEmail || "").toString();
+        const folder = (root.messageData.folder || "").toString();
+        const uid = (root.messageData.uid || "").toString();
+        if (!account.length || !folder.length || !uid.length)
+            return;
+        appRoot.imapServiceObj.prefetchAttachments(account, folder, uid);
     }
     function removeTagByName(name) {
         const tags = activeTags.filter(function (t) {
@@ -1297,7 +1304,15 @@ Rectangle {
                     readonly property bool selected: root.selectedAttachmentKey === attachmentCard.modelData.partId
                     readonly property string sizeText: root.formatAttachmentSize(attachmentCard.modelData.bytes)
                     readonly property string localPath: (root.attachmentLocalPaths && root.attachmentLocalPaths[attachmentCard.modelData.partId]) ? root.attachmentLocalPaths[attachmentCard.modelData.partId] : ""
-                    readonly property string previewSource: localPath
+                    readonly property string previewSource: {
+                        if (!localPath.length || !root.messageData || !appRoot || !appRoot.imapServiceObj)
+                            return "";
+                        return appRoot.imapServiceObj.attachmentPreviewPath(root.messageData.accountEmail,
+                                                                            root.messageData.uid,
+                                                                            attachmentCard.modelData.partId,
+                                                                            attachmentCard.modelData.name,
+                                                                            attachmentCard.modelData.mimeType || "");
+                    }
 
                     border.color: selected ? root.systemPalette.highlight : Qt.lighter(Kirigami.Theme.backgroundColor, 1.35)
                     border.width: 1
@@ -1376,6 +1391,7 @@ Rectangle {
 
                     HoverHandler {
                         id: attachmentHover
+                        onHoveredChanged: if (hovered) root.startAttachmentPrefetchForCurrentMessage()
                     }
 
                     MouseArea {
@@ -1384,6 +1400,7 @@ Rectangle {
                         cursorShape: Qt.PointingHandCursor
 
                         onClicked: function (mouse) {
+                            root.startAttachmentPrefetchForCurrentMessage();
                             if (mouse.button === Qt.LeftButton) {
                                 root.selectedAttachmentKey = attachmentCard.modelData.partId;
                             } else if (mouse.button === Qt.RightButton) {
@@ -1394,6 +1411,7 @@ Rectangle {
                         onDoubleClicked: function (mouse) {
                             if (mouse.button !== Qt.LeftButton)
                                 return;
+                            root.startAttachmentPrefetchForCurrentMessage();
                             appRoot.imapServiceObj.openAttachment(root.messageData.accountEmail, root.messageData.folder, root.messageData.uid, attachmentCard.modelData.partId, attachmentCard.modelData.name, attachmentCard.modelData.encoding);
                         }
                     }
@@ -1438,6 +1456,8 @@ Rectangle {
                         previewSource: attachmentCard.previewSource
                         previewMimeType: (attachmentCard.modelData.mimeType || "")
                         fallbackIcon: root.iconForAttachment(attachmentCard.modelData.mimeType, attachmentCard.modelData.name)
+                        downloadProgress: Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0)
+                        downloadComplete: Number(root.attachmentProgress[attachmentCard.modelData.partId] || 0) >= 100
                         arrowLeftPx: Math.max(24, attachmentCard.width * 0.25)
                         openButtonText: i18n("Open")
                         saveButtonText: i18n("Save")

@@ -15,6 +15,9 @@ Item {
     property string fallbackIcon: "mail-attachment"
     property string openButtonText: i18n("Open")
     property string saveButtonText: i18n("Save")
+    property int downloadProgress: 0
+    property bool downloadComplete: false
+
     property real edgeMargin: 6
     property real anchorGap: Kirigami.Units.smallSpacing
     property real arrowHeight: 8
@@ -59,12 +62,6 @@ Item {
         return Math.max(minX, Math.min(desired, maxX))
     }
     y: anchorPos.y + (anchorItem ? anchorItem.height : 0) + anchorGap
-
-    onWidthChanged: backgroundCanvas.requestPaint()
-    onHeightChanged: backgroundCanvas.requestPaint()
-    onArrowLeftPxChanged: backgroundCanvas.requestPaint()
-    onArrowWidthChanged: backgroundCanvas.requestPaint()
-    onArrowHeightChanged: backgroundCanvas.requestPaint()
 
     implicitWidth: 258
     implicitHeight: content.implicitHeight + 20 + arrowHeight
@@ -128,7 +125,7 @@ Item {
         margin: Math.max(0, root.anchorGap)
     }
 
-    RowLayout {
+    ColumnLayout {
         id: content
         anchors.left: parent.left
         anchors.right: parent.right
@@ -137,134 +134,161 @@ Item {
         anchors.rightMargin: 10
         anchors.topMargin: arrowHeight + 10
         anchors.bottomMargin: 10
-        spacing: 10
+        spacing: 8
         z: 1
 
         Rectangle {
-            Layout.preferredWidth: root.previewWidth
-            Layout.preferredHeight: root.previewHeight
-            color: Qt.darker(Kirigami.Theme.backgroundColor, 1.08)
-            border.width: 1
-            border.color: root.borderForTheme()
-            clip: true
+            Layout.fillWidth: true
+            height: 5
+            radius: 2
+            color: Qt.darker(Kirigami.Theme.backgroundColor, 1.25)
+            visible: !root.downloadComplete
 
-            Image {
-                id: previewImg
-                anchors.fill: parent
-                anchors.margins: 2
-                source: root.isImagePreview ? root.previewUrl : ""
-                fillMode: Image.PreserveAspectFit
-                horizontalAlignment: Image.AlignLeft
-                verticalAlignment: Image.AlignVCenter
-                asynchronous: true
-                cache: false
-                visible: root.isImagePreview && status === Image.Ready
-            }
-
-            PdfDocument {
-                id: pdfDoc
-                source: root.isPdfPreview ? root.previewUrl : ""
-            }
-
-            PdfPageImage {
-                id: pdfPreview
-                anchors.fill: parent
-                anchors.margins: 2
-                document: pdfDoc
-                currentFrame: 0
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                visible: root.isPdfPreview && status === Image.Ready
-            }
-
-            WebEngineView {
-                id: previewWeb
-                anchors.fill: parent
-                anchors.margins: 2
-                visible: root.isWebPreview
-                url: root.isWebPreview ? root.previewUrl : ""
-                settings.javascriptEnabled: false
-                settings.localContentCanAccessFileUrls: true
-                backgroundColor: "transparent"
-            }
-
-            Kirigami.Icon {
-                anchors.centerIn: parent
-                width: 32
-                height: 32
-                source: root.fallbackIcon
-                opacity: 0.7
-                visible: !previewImg.visible && !pdfPreview.visible && !previewWeb.visible
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: parent.width * (Math.max(0, Math.min(100, root.downloadProgress)) / 100.0)
+                radius: 2
+                color: Kirigami.Theme.highlightColor
             }
         }
 
-        ColumnLayout {
-            spacing: 8
-            Layout.alignment: Qt.AlignTop
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            opacity: root.downloadComplete ? 1.0 : 0.0
 
-            QQC2.Button {
-                id: openBtn
-                text: root.openButtonText
-                icon.name: "document-open"
-                flat: true
-                leftPadding: 8
-                rightPadding: 10
-                topPadding: 4
-                bottomPadding: 4
-                onClicked: root.openTriggered()
-                contentItem: RowLayout {
-                    spacing: 8
-                    Kirigami.Icon {
-                        source: openBtn.icon.name
-                        Layout.preferredWidth: 16
-                        Layout.preferredHeight: 16
-                    }
-                    QQC2.Label {
-                        text: openBtn.text
-                        color: Kirigami.Theme.textColor
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
-                    }
+            Behavior on opacity {
+                NumberAnimation { duration: 180 }
+            }
+
+            Rectangle {
+                Layout.preferredWidth: root.previewWidth
+                Layout.preferredHeight: root.previewHeight
+                color: Qt.darker(Kirigami.Theme.backgroundColor, 1.08)
+                border.width: 1
+                border.color: root.borderForTheme()
+                clip: true
+
+                Image {
+                    id: previewImg
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    source: root.isImagePreview ? root.previewUrl : ""
+                    fillMode: Image.PreserveAspectFit
+                    horizontalAlignment: Image.AlignLeft
+                    verticalAlignment: Image.AlignVCenter
+                    asynchronous: true
+                    cache: false
+                    visible: root.isImagePreview && status === Image.Ready
                 }
-                background: Rectangle {
-                    color: openBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
-                                      : (openBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
-                                                         : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
-                    border.width: 1
-                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
-                    radius: 0
+
+                PdfDocument {
+                    id: pdfDoc
+                    source: root.isPdfPreview ? root.previewUrl : ""
+                }
+
+                PdfPageImage {
+                    id: pdfPreview
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    document: pdfDoc
+                    currentFrame: 0
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    visible: root.isPdfPreview && status === Image.Ready
+                }
+
+                WebEngineView {
+                    id: previewWeb
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    visible: root.isWebPreview
+                    url: root.isWebPreview ? root.previewUrl : ""
+                    settings.javascriptEnabled: false
+                    settings.localContentCanAccessFileUrls: true
+                    backgroundColor: "transparent"
+                }
+
+                Kirigami.Icon {
+                    anchors.centerIn: parent
+                    width: 32
+                    height: 32
+                    source: root.fallbackIcon
+                    opacity: 0.7
+                    visible: !previewImg.visible && !pdfPreview.visible && !previewWeb.visible
                 }
             }
 
-            QQC2.Button {
-                id: saveBtn
-                text: root.saveButtonText
-                icon.name: "document-save"
-                flat: true
-                leftPadding: 8
-                rightPadding: 10
-                topPadding: 4
-                bottomPadding: 4
-                onClicked: root.saveTriggered()
-                contentItem: RowLayout {
-                    spacing: 8
-                    Kirigami.Icon {
-                        source: saveBtn.icon.name
-                        Layout.preferredWidth: 16
-                        Layout.preferredHeight: 16
+            ColumnLayout {
+                spacing: 8
+                Layout.alignment: Qt.AlignTop
+
+                QQC2.Button {
+                    id: openBtn
+                    text: root.openButtonText
+                    icon.name: "document-open"
+                    flat: true
+                    leftPadding: 8
+                    rightPadding: 10
+                    topPadding: 4
+                    bottomPadding: 4
+                    onClicked: root.openTriggered()
+                    contentItem: RowLayout {
+                        spacing: 8
+                        Kirigami.Icon {
+                            source: openBtn.icon.name
+                            Layout.preferredWidth: 16
+                            Layout.preferredHeight: 16
+                        }
+                        QQC2.Label {
+                            text: openBtn.text
+                            color: Kirigami.Theme.textColor
+                            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
+                        }
                     }
-                    QQC2.Label {
-                        text: saveBtn.text
-                        color: Kirigami.Theme.textColor
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
+                    background: Rectangle {
+                        color: openBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
+                                          : (openBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
+                                                             : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
+                        border.width: 1
+                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
+                        radius: 0
                     }
                 }
-                background: Rectangle {
-                    color: saveBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
-                                      : (saveBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
-                                                         : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
-                    border.width: 1
-                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
-                    radius: 0
+
+                QQC2.Button {
+                    id: saveBtn
+                    text: root.saveButtonText
+                    icon.name: "document-save"
+                    flat: true
+                    leftPadding: 8
+                    rightPadding: 10
+                    topPadding: 4
+                    bottomPadding: 4
+                    onClicked: root.saveTriggered()
+                    contentItem: RowLayout {
+                        spacing: 8
+                        Kirigami.Icon {
+                            source: saveBtn.icon.name
+                            Layout.preferredWidth: 16
+                            Layout.preferredHeight: 16
+                        }
+                        QQC2.Label {
+                            text: saveBtn.text
+                            color: Kirigami.Theme.textColor
+                            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
+                        }
+                    }
+                    background: Rectangle {
+                        color: saveBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
+                                          : (saveBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
+                                                             : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
+                        border.width: 1
+                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
+                        radius: 0
+                    }
                 }
             }
         }

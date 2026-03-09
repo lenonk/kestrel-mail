@@ -35,6 +35,7 @@
 #include <QStandardPaths>
 #include <QFutureWatcher>
 #include <QMimeDatabase>
+#include <QProcess>
 #include <QtConcurrentRun>
 
 #include "sync/idlewatcher.h"
@@ -192,6 +193,67 @@ ImapService::cachedAttachmentPath(const QString &accountEmail, const QString &ui
         return {};
     }
     return it->localPath;
+}
+
+QString
+ImapService::attachmentPreviewPath(const QString &accountEmail, const QString &uid, const QString &partId,
+                                   const QString &fileName, const QString &mimeType) {
+    const QString localPath = cachedAttachmentPath(accountEmail, uid, partId);
+    if (localPath.isEmpty() || !QFile::exists(localPath))
+        return {};
+
+    const QString mt = mimeType.trimmed().toLower();
+    const QString lowerName = fileName.trimmed().toLower();
+    if (mt.startsWith("image/"_L1) || mt.contains("pdf"_L1)
+        || lowerName.endsWith(".pdf"_L1) || lowerName.endsWith(".png"_L1)
+        || lowerName.endsWith(".jpg"_L1) || lowerName.endsWith(".jpeg"_L1)
+        || lowerName.endsWith(".webp"_L1) || lowerName.endsWith(".gif"_L1)
+        || lowerName.endsWith(".bmp"_L1) || lowerName.endsWith(".txt"_L1)
+        || lowerName.endsWith(".md"_L1) || lowerName.endsWith(".html"_L1)
+        || lowerName.endsWith(".htm"_L1)) {
+        return localPath;
+    }
+
+    const bool officeLike = mt.contains("officedocument"_L1)
+                         || mt.contains("msword"_L1)
+                         || mt.contains("vnd.ms"_L1)
+                         || lowerName.endsWith(".doc"_L1)
+                         || lowerName.endsWith(".docx"_L1)
+                         || lowerName.endsWith(".odt"_L1)
+                         || lowerName.endsWith(".ppt"_L1)
+                         || lowerName.endsWith(".pptx"_L1)
+                         || lowerName.endsWith(".xls"_L1)
+                         || lowerName.endsWith(".xlsx"_L1);
+    if (!officeLike)
+        return {};
+
+    if (QStandardPaths::findExecutable("libreoffice").isEmpty())
+        return {};
+
+    const QString previewDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                             + "/attachment-previews/"_L1 + accountEmail + "/"_L1 + uid + "/"_L1 + partId;
+    QDir().mkpath(previewDir);
+
+    const QFileInfo inInfo(localPath);
+    const QString expected = previewDir + "/"_L1 + inInfo.completeBaseName() + ".png"_L1;
+    if (QFile::exists(expected))
+        return expected;
+
+    QProcess p;
+    p.setProgram("libreoffice"_L1);
+    p.setArguments({"--headless"_L1, "--convert-to"_L1, "png"_L1, "--outdir"_L1, previewDir, localPath});
+    p.start();
+    if (!p.waitForFinished(8000) || p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0)
+        return {};
+
+    if (QFile::exists(expected))
+        return expected;
+
+    const QStringList generated = QDir(previewDir).entryList({"*.png"}, QDir::Files, QDir::Name);
+    if (!generated.isEmpty())
+        return previewDir + "/"_L1 + generated.first();
+
+    return {};
 }
 
 void
