@@ -67,10 +67,21 @@ Rectangle {
     // Temporary perf instrumentation flag for content pane optimization pass.
     property bool perfLogEnabled: true
 
+    // Read domain directly from messageData.sender to avoid transient binding lag
+    // through senderText/senderEmail during selection updates.
     readonly property string senderDomain: {
-        const email = (root.senderEmail || "").toLowerCase()
+        const senderVal = (root.messageData && root.messageData.sender)
+                          ? root.messageData.sender.toString() : ""
+        if (!senderVal)
+            return ""
+
+        let email = senderVal
+        const angleMatch = senderVal.match(/<([^>]+@[^>]+)>/)
+        if (angleMatch)
+            email = angleMatch[1]
+
         const at = email.lastIndexOf('@')
-        return at >= 0 ? email.slice(at + 1) : ""
+        return at >= 0 ? email.slice(at + 1).trim().toLowerCase() : ""
     }
     // Reads directly from messageData.sender so it updates atomically with the message,
     // avoiding the senderDomain → senderEmail → senderText binding chain lag.
