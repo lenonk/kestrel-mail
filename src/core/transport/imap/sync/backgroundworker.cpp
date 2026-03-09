@@ -31,16 +31,10 @@ BackgroundWorker::resolveAccount() {
     emit requestRefreshAccessToken(target.account, target.email, &accessToken);
 
     if (accessToken.isEmpty()) {
-        const bool sameActive = m_activeEmail.compare(target.email, Qt::CaseInsensitive) == 0;
-        if (sameActive && !m_activeAccessToken.isEmpty()) {
+        // Don't fail the worker loop solely on refresh miss; pooled connections may
+        // still be valid, and we may have a previously usable token.
+        if (!m_activeAccessToken.isEmpty() && m_activeEmail.compare(target.email, Qt::CaseInsensitive) == 0)
             accessToken = m_activeAccessToken;
-        } else {
-            constexpr auto err = "Realtime sync: auth refresh failed; retrying."_L1;
-            SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
-                                     m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                     consecutiveFailures, err, 15, &m_running);
-            return {false, err};
-        }
     }
 
     m_activeAccount = target.account;
