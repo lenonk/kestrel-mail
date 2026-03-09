@@ -404,11 +404,26 @@ Rectangle {
         return "file://" + encodeURI(p);
     }
 
-    function hasEmbeddedCidImage(baseHtml) {
+    function bodyCidImageNames(baseHtml) {
         const html = (baseHtml || "").toString();
+        const out = [];
         if (!html.length)
-            return false;
-        return /<img\b[^>]*\bsrc\s*=\s*["']cid:[^"']+["'][^>]*>/i.test(html);
+            return out;
+
+        const imgTagRe = /<img\b[^>]*\bsrc\s*=\s*(["'])cid:([^"']+)\1[^>]*>/gi;
+        let m;
+        while ((m = imgTagRe.exec(html)) !== null) {
+            const cidRaw = (m[2] || "").toString();
+            if (!cidRaw.length)
+                continue;
+            let cid = cidRaw.toLowerCase();
+            try {
+                cid = decodeURIComponent(cidRaw).toLowerCase();
+            } catch (_) {
+            }
+            out.push(cid);
+        }
+        return out;
     }
 
     function inlineImageAlreadyPresent(baseHtml, attachmentName) {
@@ -444,13 +459,7 @@ Rectangle {
         if (!root.attachmentItems || root.attachmentItems.length === 0)
             return "";
 
-        // If body already uses CID-embedded images, those are usually the same attachments.
-        // Avoid appending a second inline copy at the bottom.
-        if (hasEmbeddedCidImage(baseHtml)) {
-            console.log("[inline-image] skip append: cid images already present in body");
-            return "";
-        }
-
+        const cidNames = bodyCidImageNames(baseHtml);
         const images = [];
         for (let i = 0; i < root.attachmentItems.length; i++) {
             const a = root.attachmentItems[i] || {};
@@ -459,6 +468,16 @@ Rectangle {
             const isImage = mt.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name);
             if (!isImage)
                 continue;
+
+            const lowerName = name.toLowerCase();
+            const encodedName = encodeURIComponent(name).toLowerCase();
+            const alreadyByCid = cidNames.some(function (c) {
+                return c.indexOf(lowerName) >= 0 || c.indexOf(encodedName) >= 0;
+            });
+            if (alreadyByCid) {
+                console.log("[inline-image] skip already present by cid", "name=", name);
+                continue;
+            }
 
             if (inlineImageAlreadyPresent(baseHtml, name)) {
                 console.log("[inline-image] skip already present in body", "name=", name);
