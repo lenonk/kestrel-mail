@@ -23,8 +23,8 @@ Item {
     property real arrowHeight: 8
     property real arrowWidth: 18
     property real arrowLeftPx: 70
-    property int previewWidth: 112
-    property int previewHeight: 112
+    property int maxPreviewWidth: 112
+    property int maxPreviewHeight: 112
 
     readonly property string previewLower: (previewSource || "").toLowerCase()
     readonly property string previewUrl: previewSource.length > 0 ? ("file://" + encodeURI(previewSource)) : ""
@@ -171,8 +171,20 @@ Item {
             }
 
             Rectangle {
-                Layout.preferredWidth: root.previewWidth
-                Layout.preferredHeight: root.previewHeight
+                Layout.preferredWidth: {
+                    if (previewImg.visible)
+                        return Math.min(root.maxPreviewWidth, Math.max(24, previewImg.paintedWidth + 2));
+                    if (pdfPreview.visible)
+                        return Math.min(root.maxPreviewWidth, Math.max(24, pdfPreview.paintedWidth + 2));
+                    return root.maxPreviewWidth;
+                }
+                Layout.preferredHeight: {
+                    if (previewImg.visible)
+                        return Math.min(root.maxPreviewHeight, Math.max(24, previewImg.paintedHeight + 2));
+                    if (pdfPreview.visible)
+                        return Math.min(root.maxPreviewHeight, Math.max(24, pdfPreview.paintedHeight + 2));
+                    return root.maxPreviewHeight;
+                }
                 color: Qt.darker(Kirigami.Theme.backgroundColor, 1.08)
                 border.width: 1
                 border.color: root.borderForTheme()
@@ -183,7 +195,9 @@ Item {
                     anchors.fill: parent
                     anchors.margins: parent.border.width
                     source: root.isImagePreview ? root.previewUrl : ""
-                    fillMode: Image.PreserveAspectCrop
+                    fillMode: Image.PreserveAspectFit
+                    sourceSize.width: root.maxPreviewWidth
+                    sourceSize.height: root.maxPreviewHeight
                     horizontalAlignment: Image.AlignHCenter
                     verticalAlignment: Image.AlignVCenter
                     asynchronous: true
@@ -202,7 +216,7 @@ Item {
                     anchors.margins: parent.border.width
                     document: pdfDoc
                     currentFrame: 0
-                    fillMode: Image.PreserveAspectCrop
+                    fillMode: Image.PreserveAspectFit
                     horizontalAlignment: Image.AlignHCenter
                     verticalAlignment: Image.AlignVCenter
                     asynchronous: true
@@ -233,6 +247,7 @@ Item {
             ColumnLayout {
                 spacing: 8
                 Layout.alignment: Qt.AlignTop
+                Layout.leftMargin: 6
 
                 QQC2.Button {
                     id: openBtn
