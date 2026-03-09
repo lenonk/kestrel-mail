@@ -404,6 +404,29 @@ Rectangle {
         return "file://" + encodeURI(p);
     }
 
+    function bodyDataImageHashes(baseHtml) {
+        const html = (baseHtml || "").toString();
+        const out = [];
+        if (!html.length || !appRoot || !appRoot.imapServiceObj || !appRoot.imapServiceObj.dataUriSha256)
+            return out;
+
+        const imgTagRe = /<img\b[^>]*>/gi;
+        let m;
+        while ((m = imgTagRe.exec(html)) !== null) {
+            const tag = (m[0] || "").toString();
+            const srcM = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+            if (!srcM)
+                continue;
+            const src = (srcM[1] || srcM[2] || srcM[3] || "").toString().trim();
+            if (!/^data:image\//i.test(src))
+                continue;
+            const h = appRoot.imapServiceObj.dataUriSha256(src);
+            if (h && h.length)
+                out.push(h);
+        }
+        return out;
+    }
+
     function bodyCidImageNames(baseHtml) {
         const html = (baseHtml || "").toString();
         const out = [];
@@ -480,17 +503,7 @@ Rectangle {
             return "";
 
         const cidNames = bodyCidImageNames(baseHtml);
-        const htmlLower = (baseHtml || "").toString().toLowerCase();
-        const hasDataInlineImage = /<img\b[^>]*\bsrc\s*=\s*(?:"|')data:image\//i.test(baseHtml || "");
-
-        let imageAttachmentCount = 0;
-        for (let i = 0; i < root.attachmentItems.length; i++) {
-            const a0 = root.attachmentItems[i] || {};
-            const mt0 = (a0.mimeType || "").toString().toLowerCase();
-            const nm0 = (a0.name || "").toString();
-            if (mt0.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(nm0))
-                imageAttachmentCount++;
-        }
+        const dataHashes = bodyDataImageHashes(baseHtml);
 
         console.log("[cid-compare]", cidNames);
         if (cidNames.length === 0) {
@@ -524,16 +537,19 @@ Rectangle {
                 continue;
             }
 
-            if (hasDataInlineImage && imageAttachmentCount === 1) {
-                console.log("[inline-image] skip single attachment append: body already has data:image", "name=", name);
-                continue;
-            }
-
             const partId = (a.partId || "").toString();
             const localPath = (root.attachmentLocalPaths && partId.length) ? (root.attachmentLocalPaths[partId] || "") : "";
             if (!localPath || !localPath.length) {
                 console.log("[inline-image] missing local path", "partId=", partId, "name=", name, "folder=", root.messageData ? root.messageData.folder : "");
                 continue;
+            }
+
+            if (dataHashes.length > 0 && appRoot && appRoot.imapServiceObj && appRoot.imapServiceObj.fileSha256) {
+                const fileHash = appRoot.imapServiceObj.fileSha256(localPath);
+                if (fileHash && fileHash.length && dataHashes.indexOf(fileHash) >= 0) {
+                    console.log("[inline-image] skip already present by data-hash", "name=", name, "partId=", partId);
+                    continue;
+                }
             }
 
             const src = fileUrlFromLocalPath(localPath);

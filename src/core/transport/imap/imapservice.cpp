@@ -12,6 +12,7 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDateTime>
 #include <QDebug>
@@ -193,6 +194,49 @@ ImapService::cachedAttachmentPath(const QString &accountEmail, const QString &ui
         return {};
     }
     return it->localPath;
+}
+
+QString
+ImapService::fileSha256(const QString &localPath) const {
+    const QString path = localPath.trimmed();
+    if (path.isEmpty())
+        return {};
+
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return {};
+
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!hash.addData(&f))
+        return {};
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+QString
+ImapService::dataUriSha256(const QString &dataUri) const {
+    const QString src = dataUri.trimmed();
+    if (!src.startsWith("data:"_L1, Qt::CaseInsensitive))
+        return {};
+
+    const int comma = src.indexOf(',');
+    if (comma <= 0)
+        return {};
+
+    const QString meta = src.left(comma).toLower();
+    const QString payload = src.mid(comma + 1);
+
+    QByteArray raw;
+    if (meta.contains(";base64"_L1)) {
+        raw = QByteArray::fromBase64(payload.toUtf8());
+    } else {
+        raw = QUrl::fromPercentEncoding(payload.toUtf8()).toUtf8();
+    }
+
+    if (raw.isEmpty())
+        return {};
+
+    const QByteArray digest = QCryptographicHash::hash(raw, QCryptographicHash::Sha256);
+    return QString::fromLatin1(digest.toHex());
 }
 
 QString
