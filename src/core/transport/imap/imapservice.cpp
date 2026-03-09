@@ -445,15 +445,6 @@ ImapService::backgroundLoginSessionStartup(const QVariantMap &account, const QSt
             m_store->upsertFolder(folder);
     }
 
-    const bool ok = !folders.isEmpty();
-    const QString message = ok
-        ? QStringLiteral("Login/session startup complete for %1 (%2 folders).")
-              .arg(email)
-              .arg(folders.size())
-        : QStringLiteral("Login/session startup found no folders for %1.").arg(email);
-
-    workerEmitRealtimeStatus(ok, message);
-
     if (!status.trimmed().isEmpty()) {
         const bool statusOk = !status.contains("failed"_L1, Qt::CaseInsensitive)
                            && !status.contains("error"_L1, Qt::CaseInsensitive);
@@ -780,7 +771,8 @@ ImapService::refreshFolderList(bool announce) {
             return r;
         },
         [this, announce](const SyncResult &r) {
-            if (announce) emit syncFinished(r.ok, r.message);
+            if (announce && !r.ok)
+                emit syncFinished(r.ok, r.message);
         }
     );
 }
@@ -1336,8 +1328,26 @@ ImapService::syncAll(bool announce) {
                     const auto folderHeaders = fetchFolderHeaders(host, port, email, accessToken,
                         &fetchStatus, folderTarget, onHeader, minUid, false, budget);
 
+                    QSet<QString> uniqueUids;
+                    for (const auto &hv : folderHeaders) {
+                        const auto u = hv.toMap().value("uid"_L1).toString().trimmed();
+                        if (!u.isEmpty())
+                            uniqueUids.insert(u);
+                    }
+                    const int syncedCount = uniqueUids.size();
+                    if (syncedCount <= 0)
+                        continue;
+
+                    QString folderLabel = folderTarget;
+                    if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
+                        folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
+                    if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
+                        folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
+                    if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
+                        folderLabel = "Inbox"_L1;
+
                     const auto toast = QStringLiteral("%1 synced %2 messages.")
-                                           .arg(folderTarget).arg(folderHeaders.size());
+                                           .arg(folderLabel).arg(syncedCount);
                     QMetaObject::invokeMethod(this, [this, announce, toast, fetchStatus]() {
                         if (announce) {
                             emit syncFinished(true, toast);
