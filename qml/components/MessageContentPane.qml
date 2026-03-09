@@ -69,6 +69,7 @@ Rectangle {
     property var attachmentLocalPaths: ({})
     property var attachmentProgress: ({})
     property var attachmentDownloading: ({})
+    property string lastAttachmentMessageKey: ""
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
@@ -671,9 +672,23 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
-        root.attachmentProgress = ({});
-        root.attachmentDownloading = ({});
-        root.reloadAttachmentsForCurrentMessage();
+
+        const account = (messageData && messageData.accountEmail) ? messageData.accountEmail.toString() : "";
+        const folder = (messageData && messageData.folder) ? messageData.folder.toString() : "";
+        const uid = (messageData && messageData.uid) ? messageData.uid.toString() : "";
+        const messageKey = account + "|" + folder + "|" + uid;
+        const isSameMessage = (messageKey.length > 2 && messageKey === root.lastAttachmentMessageKey);
+
+        if (!isSameMessage) {
+            root.lastAttachmentMessageKey = messageKey;
+            root.attachmentProgress = ({});
+            root.attachmentDownloading = ({});
+            root.reloadAttachmentsForCurrentMessage();
+        } else if (root.attachmentItems.length === 0) {
+            // Allow a retry if the first lookup raced DB hydration.
+            root.reloadAttachmentsForCurrentMessage();
+        }
+
         // Read messageData directly — derived bindings (isTrustedSender, senderDomain, etc.)
         // may not have re-evaluated yet when this handler fires.
         const senderVal = (messageData && messageData.sender) ? messageData.sender.toString() : "";

@@ -237,7 +237,7 @@ Connection::fetchMimePartWithProgress(const QString &uid,
     QByteArray acc;
     QByteArray literal;
     qint64 literalLen = -1;
-    qint64 literalRead = 0;
+    qint64 payloadStart = -1;
     bool haveLiteral = false;
     int lastPercent = -1;
     const int step = qBound(1, progressStepPercent, 100);
@@ -248,29 +248,27 @@ Connection::fetchMimePartWithProgress(const QString &uid,
         acc += m_socket->readAll();
 
         if (!haveLiteral) {
-            const QString accText = QString::fromUtf8(acc);
+            const QString accText = QString::fromLatin1(acc);
             const auto m = literalRe.match(accText);
             if (m.hasMatch()) {
                 literalLen = m.captured(1).toLongLong();
-                const int payloadStart = m.capturedEnd(0);
-                if (payloadStart < acc.size()) {
-                    const qint64 take = qMin<qint64>(literalLen, acc.size() - payloadStart);
-                    literal = acc.mid(payloadStart, static_cast<int>(take));
-                    literalRead = literal.size();
-                }
-                haveLiteral = true;
+                payloadStart = m.capturedEnd(0);
+                haveLiteral = (literalLen >= 0 && payloadStart >= 0);
             }
-        } else if (literalRead < literalLen) {
-            // Consume any bytes not yet captured from the accumulator tail.
-            const qint64 missing = literalLen - literalRead;
-            const qint64 take = qMin<qint64>(missing, acc.size());
-            if (take > 0) {
-                literal += acc.right(static_cast<int>(take));
-                literalRead = literal.size();
+        }
+
+        if (haveLiteral && literalLen >= 0 && payloadStart >= 0) {
+            const qint64 available = qMax<qint64>(0, acc.size() - payloadStart);
+            const qint64 desired = qMin<qint64>(literalLen, available);
+            if (desired > literal.size()) {
+                const qint64 appendFrom = payloadStart + literal.size();
+                const qint64 appendLen = desired - literal.size();
+                literal += acc.mid(static_cast<int>(appendFrom), static_cast<int>(appendLen));
             }
         }
 
         if (haveLiteral && literalLen > 0 && onProgress) {
+            const qint64 literalRead = literal.size();
             const int percent = qBound(0, static_cast<int>((literalRead * 100) / literalLen), 100);
             const bool crossedStep = (lastPercent < 0) || (percent - lastPercent >= step);
             const bool reachedEnd = (percent == 100) && (lastPercent < 100);
