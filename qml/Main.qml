@@ -883,12 +883,21 @@ Kirigami.ApplicationWindow {
                 ? (root.dataStoreObj.avatarForEmail(email) || "")
                 : ""
 
-        if (identityCached.startsWith("https://") || identityCached.startsWith("http://") || identityCached.startsWith("data:image/")) {
-            // console.log("[qml-avatar] resolved", email, identityCached.slice(0, 96))
-            return [identityCached]
-        }
-        // console.log("[qml-avatar] initials-fallback", email)
-        return []
+        const normalized = identityCached.toString().trim()
+        if (!normalized.length)
+            return []
+
+        const lower = normalized.toLowerCase()
+        const isUrlLike = lower.startsWith("https://") || lower.startsWith("http://") || lower.startsWith("data:image/")
+        if (!isUrlLike)
+            return []
+
+        // Guardrail: Google profile avatar URLs have produced default/placeholder images
+        // in some cases. Prefer deterministic initials fallback over incorrect avatars.
+        if (lower.indexOf("googleusercontent.com") >= 0 || lower.indexOf("people.googleapis.com") >= 0)
+            return []
+
+        return [normalized]
     }
 
     function avatarSourceLabel(urlValue) {

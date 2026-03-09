@@ -103,6 +103,8 @@ Item {
         anchors.centerIn: parent
         visible: avatarRaw.status !== Image.Ready
         text: root.computedInitials()
+        color: Kirigami.Theme.textColor
+        font.bold: true
         // Scale from theme font, anchored to Kirigami icon sizing.
         // medium avatar ~= default font; larger/smaller avatars track proportionally.
         readonly property real _sizeScale: root.size / Kirigami.Units.iconSizes.medium
