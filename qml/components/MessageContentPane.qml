@@ -1025,6 +1025,8 @@ Rectangle {
             property real flickVelocityY: 0
             property string lastLoadedHtmlKey: ""
             property real bodyOpacity: 1.0
+            property string pendingHtml: ""
+            property string pendingLoadReason: ""
 
             Behavior on bodyOpacity {
                 NumberAnimation { duration: 250; easing.type: Easing.InOutQuad }
@@ -1039,10 +1041,10 @@ Rectangle {
                     return
 
                 lastLoadedHtmlKey = key
+                pendingHtml = root.renderedHtml
+                pendingLoadReason = reason
                 bodyOpacity = 0.0
-                if (root.perfLogEnabled)
-                    console.log("[perf-content] loadHtml reason=" + reason + " chars=" + root.renderedHtml.length)
-                htmlView.loadHtml(root.renderedHtml, "http://kestrel.local/")
+                fadeOutLoadTimer.restart()
             }
 
             function scrollHtmlBy(deltaY) {
@@ -1050,6 +1052,20 @@ Rectangle {
                 const amount = Number(deltaY)
                 if (!isFinite(amount) || Math.abs(amount) < 0.01) return
                 htmlView.runJavaScript("window.scrollBy(0," + Math.round(amount) + ");")
+            }
+
+            Timer {
+                id: fadeOutLoadTimer
+                interval: 250
+                repeat: false
+                onTriggered: {
+                    if (!htmlContainer.pendingHtml.length)
+                        return
+                    if (root.perfLogEnabled)
+                        console.log("[perf-content] loadHtml reason=" + htmlContainer.pendingLoadReason
+                                    + " chars=" + htmlContainer.pendingHtml.length)
+                    htmlView.loadHtml(htmlContainer.pendingHtml, "http://kestrel.local/")
+                }
             }
 
             WebEngineView {
@@ -1093,8 +1109,10 @@ Rectangle {
 
                 onLoadingChanged: function(req) {
                     const st = req.status
-                    if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus)
+                    if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
+                        htmlContainer.pendingHtml = ""
                         htmlContainer.bodyOpacity = 1.0
+                    }
 
                     if (!root.perfLogEnabled)
                         return
