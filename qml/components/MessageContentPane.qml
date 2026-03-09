@@ -521,7 +521,29 @@ Rectangle {
         }
 
         // Single-shot lookup per message selection; avoid heavy reevaluation via bindings.
-        root.attachmentItems = appRoot.imapServiceObj.attachmentsForMessage(account, folder, uid);
+        let items = appRoot.imapServiceObj.attachmentsForMessage(account, folder, uid);
+        let activeUid = uid;
+
+        // Fallback: selected edge may not be the one that carries attachment metadata
+        // in non-Inbox views. Try all known folder/uid edges for this logical message.
+        if ((!items || items.length === 0) && appRoot.dataStoreObj && appRoot.dataStoreObj.fetchCandidatesForMessageKey) {
+            const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
+            for (let i = 0; i < candidates.length; ++i) {
+                const c = candidates[i] || {};
+                const cf = (c.folder || "").toString();
+                const cu = (c.uid || "").toString();
+                if (!cf.length || !cu.length)
+                    continue;
+                const trial = appRoot.imapServiceObj.attachmentsForMessage(account, cf, cu);
+                if (trial && trial.length > 0) {
+                    items = trial;
+                    activeUid = cu;
+                    break;
+                }
+            }
+        }
+
+        root.attachmentItems = items || [];
 
         if (root.attachmentItems.length > 0) {
             // Pre-populate local paths from the 60-min prefetch cache (instant on revisit).
@@ -530,7 +552,7 @@ Rectangle {
             const downloading = {};
             for (let i = 0; i < root.attachmentItems.length; i++) {
                 const a = root.attachmentItems[i];
-                const lp = appRoot.imapServiceObj.cachedAttachmentPath(account, uid, a.partId);
+                const lp = appRoot.imapServiceObj.cachedAttachmentPath(account, activeUid, a.partId);
                 if (lp.length > 0) {
                     paths[a.partId] = lp;
                     progress[a.partId] = 100;
@@ -554,7 +576,19 @@ Rectangle {
         const uid = (root.messageData.uid || "").toString();
         if (!account.length || !folder.length || !uid.length)
             return;
+
         appRoot.imapServiceObj.prefetchImageAttachments(account, folder, uid);
+        if (appRoot.dataStoreObj && appRoot.dataStoreObj.fetchCandidatesForMessageKey) {
+            const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
+            for (let i = 0; i < candidates.length; ++i) {
+                const c = candidates[i] || {};
+                const cf = (c.folder || "").toString();
+                const cu = (c.uid || "").toString();
+                if (!cf.length || !cu.length || (cf === folder && cu === uid))
+                    continue;
+                appRoot.imapServiceObj.prefetchImageAttachments(account, cf, cu);
+            }
+        }
     }
 
     function startAllAttachmentPrefetchForCurrentMessage() {
@@ -565,7 +599,19 @@ Rectangle {
         const uid = (root.messageData.uid || "").toString();
         if (!account.length || !folder.length || !uid.length)
             return;
+
         appRoot.imapServiceObj.prefetchAttachments(account, folder, uid);
+        if (appRoot.dataStoreObj && appRoot.dataStoreObj.fetchCandidatesForMessageKey) {
+            const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
+            for (let i = 0; i < candidates.length; ++i) {
+                const c = candidates[i] || {};
+                const cf = (c.folder || "").toString();
+                const cu = (c.uid || "").toString();
+                if (!cf.length || !cu.length || (cf === folder && cu === uid))
+                    continue;
+                appRoot.imapServiceObj.prefetchAttachments(account, cf, cu);
+            }
+        }
     }
     function removeTagByName(name) {
         const tags = activeTags.filter(function (t) {
