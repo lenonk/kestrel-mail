@@ -684,17 +684,17 @@ Rectangle {
         root.selectedAttachmentKey = "";
 
         const account = (messageData && messageData.accountEmail) ? messageData.accountEmail.toString() : "";
-        const folder = (messageData && messageData.folder) ? messageData.folder.toString() : "";
         const uid = (messageData && messageData.uid) ? messageData.uid.toString() : "";
-        const messageKey = account + "|" + folder + "|" + uid;
-        const isSameMessage = (messageKey.length > 2 && messageKey === root.lastAttachmentMessageKey);
+        const hasIdentity = account.length > 0 && uid.length > 0;
+        const messageKey = hasIdentity ? (account + "|" + uid) : "";
+        const isSameMessage = hasIdentity && (messageKey === root.lastAttachmentMessageKey);
 
-        if (!isSameMessage) {
+        if (hasIdentity && !isSameMessage) {
             root.lastAttachmentMessageKey = messageKey;
             root.attachmentProgress = ({});
             root.attachmentDownloading = ({});
             root.reloadAttachmentsForCurrentMessage();
-        } else if (root.attachmentItems.length === 0) {
+        } else if (hasIdentity && root.attachmentItems.length === 0) {
             // Allow a retry if the first lookup raced DB hydration.
             root.reloadAttachmentsForCurrentMessage();
         }
