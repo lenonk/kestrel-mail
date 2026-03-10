@@ -175,10 +175,6 @@ BackgroundWorker::start() {
             const auto folderCopy = folder;
             const auto dispatched = QtConcurrent::run([this, account, email, token, folderCopy]() {
                 emit syncHeadersAndFlagsRequested(account, email, folderCopy, token);
-                qWarning().noquote() << "[bg-hydrate-flow] signal-sent"
-                                     << "account=" << email
-                                     << "folder=" << folderCopy;
-                emit fetchBodiesRequested(account, email, folderCopy, token);
             });
             Q_UNUSED(dispatched);
         }
