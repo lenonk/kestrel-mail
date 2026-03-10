@@ -1440,40 +1440,9 @@ ImapService::refreshFolderList(bool announce) {
 
 bool
 bodyAlreadyFetched(const DataStore *store, const QString& accountEmail, const QString &folderName, const QString &uid) {
-    auto isUsableBodyHtml = [](const QString &value) {
-        const auto html = value.trimmed();
-        if (html.isEmpty())
-            return false;
-
-        const auto lower = html.toLower();
-        if (lower.contains("ok success [throttled]"_L1))
-            return false;
-
-        if (lower.contains("authenticationfailed"_L1))
-            return false;
-
-        static const QRegularExpression htmlRe("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
-            QRegularExpression::CaseInsensitiveOption);
-
-        return htmlRe.match(html).hasMatch();
-    };
-
-    // Find the existing body_html for this message if it exists
-    QVariantMap baseRow;
-    for (const auto rows = store->inbox(); const QVariant &v : rows) {
-        if (const auto r = v.toMap(); r.value("accountEmail"_L1).toString() == accountEmail &&
-                                      r.value("folder"_L1).toString() == folderName &&
-                                      r.value("uid"_L1).toString() == uid) {
-            baseRow = r;
-            break;
-                                      }
-    }
-
-    if (baseRow.isEmpty() || !isUsableBodyHtml(baseRow.value("bodyHtml"_L1).toString())) {
+    if (!store)
         return false;
-    }
-
-    return true;
+    return store->hasUsableBodyForEdge(accountEmail, folderName, uid);
 }
 
 void

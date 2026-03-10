@@ -2261,6 +2261,42 @@ QVariantList DataStore::fetchCandidatesForMessageKey(const QString &accountEmail
     return out;
 }
 
+bool DataStore::hasUsableBodyForEdge(const QString &accountEmail, const QString &folder, const QString &uid) const
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return false;
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        SELECT m.body_html
+        FROM message_folder_map mfm
+        JOIN messages m ON m.id = mfm.message_id
+        WHERE mfm.account_email=:account_email
+          AND lower(mfm.folder)=lower(:folder)
+          AND mfm.uid=:uid
+        LIMIT 1
+    )"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"), folder.trimmed());
+    q.bindValue(QStringLiteral(":uid"), uid.trimmed());
+
+    if (!q.exec() || !q.next())
+        return false;
+
+    const QString html = q.value(0).toString();
+    if (html.trimmed().isEmpty())
+        return false;
+
+    const QString lower = html.toLower();
+    if (lower.contains("ok success [throttled]"_L1) || lower.contains("authenticationfailed"_L1))
+        return false;
+
+    static const QRegularExpression htmlRe("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
+        QRegularExpression::CaseInsensitiveOption);
+    return htmlRe.match(html).hasMatch();
+}
+
 QVariantMap DataStore::messageByKey(const QString &accountEmail, const QString &folder, const QString &uid) const
 {
     QVariantMap row;
