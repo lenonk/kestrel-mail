@@ -1935,6 +1935,17 @@ ImapService::syncAll(bool announce) {
                 }
 
                 // Build ordered sync target list (INBOX first, then all non-category folders)
+                auto canonicalFolderKey = [](const QString &folderName) {
+                    QString k = folderName.trimmed().toLower();
+                    if (k.startsWith("[gmail]/"_L1))
+                        k = k.mid(QStringLiteral("[gmail]/").size());
+                    else if (k.startsWith("[google mail]/"_L1))
+                        k = k.mid(QStringLiteral("[google mail]/").size());
+                    if (k == "inbox"_L1)
+                        return QStringLiteral("inbox");
+                    return k;
+                };
+
                 QStringList targets = { "INBOX"_L1 };
                 QSet<QString> seen  = { "inbox"_L1 };
 
@@ -1951,6 +1962,7 @@ ImapService::syncAll(bool announce) {
                     const auto name = row.value("name"_L1).toString().trimmed();
                     const auto flags = row.value("flags"_L1).toString().toLower();
                     const auto lowerName = name.toLower();
+                    const auto canonName = canonicalFolderKey(name);
 
                     const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
                     const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
@@ -1961,8 +1973,8 @@ ImapService::syncAll(bool announce) {
                     if (name.isEmpty() || isCategory || isContainerRoot || isNoSelect || isParentContainer)
                         continue;
 
-                    if (!seen.contains(lowerName)) {
-                        seen.insert(lowerName); targets << name;
+                    if (!seen.contains(canonName)) {
+                        seen.insert(canonName); targets << name;
                     }
                 }
 

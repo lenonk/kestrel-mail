@@ -965,7 +965,7 @@ Rectangle {
     color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
 
     onMessageDataChanged: {
-        console.log("[pane-state] message-changed", "to=", root.renderMessageKey)
+        console.log("[pane-state] message-changed", "to=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey)
         root.selectedAttachmentKey = "";
         htmlContainer.pendingHtml = "";
         htmlContainer.pendingMessageKey = "";
@@ -1030,6 +1030,10 @@ Rectangle {
         }
 
         trackingAllowed = false;
+
+        // Force a load attempt on explicit selection changes; relying only on
+        // renderedHtml binding changes can miss transitions when data races.
+        htmlContainer.loadHtmlIfChanged("messageDataChanged");
     }
 
     TapHandler {
@@ -1726,13 +1730,19 @@ Rectangle {
 
             function loadHtmlIfChanged(reason) {
                 const t0 = Date.now();
-                if (!root.renderedHtml.length)
+                if (!root.renderedHtml.length) {
+                    console.log("[pane-state] skip-load", "reason=empty-html", "trigger=", reason, "render=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey);
                     return;
-                if (root.selectedMessageEdgeKey.length > 0 && root.renderMessageKey !== root.selectedMessageEdgeKey)
+                }
+                if (root.selectedMessageEdgeKey.length > 0 && root.renderMessageKey !== root.selectedMessageEdgeKey) {
+                    console.log("[pane-state] skip-load", "reason=key-mismatch", "trigger=", reason, "render=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey);
                     return;
+                }
                 const key = root.renderMessageKey + "|" + (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml;
-                if (key === lastLoadedHtmlKey)
+                if (key === lastLoadedHtmlKey) {
+                    console.log("[pane-state] skip-load", "reason=same-key", "trigger=", reason, "key=", root.renderMessageKey);
                     return;
+                }
                 lastLoadedHtmlKey = key;
                 pendingHtml = root.renderedHtml;
                 pendingLoadReason = reason;
