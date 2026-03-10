@@ -1817,6 +1817,10 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
                 (void)syncFolderInternal(AccountInfo{email, host, accessToken, port}, target, SyncFolderOptions{announce},
                                            seqNum, inboxInserted, pendingHeaders, result.headers,
                                            flushTimer, flush);
+
+                QMetaObject::invokeMethod(this, [this, email, target]() {
+                    backgroundFetchBodies({}, email, target, {});
+                }, Qt::QueuedConnection);
             }
 
             flush();

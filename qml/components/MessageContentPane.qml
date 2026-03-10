@@ -1846,11 +1846,11 @@ Rectangle {
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
                         const loadedForCurrent = !htmlContainer.activeLoadMessageKey.length
                                               || htmlContainer.activeLoadMessageKey === root.selectedMessageEdgeKey;
+                        const hasNewerPending = htmlContainer.pendingMessageKey.length > 0
+                                              && htmlContainer.pendingMessageKey !== htmlContainer.activeLoadMessageKey;
 
-                        if (!loadedForCurrent) {
-                            // Stale load completion for previous message selection; ignore visual commit.
-                            htmlContainer.pendingHtml = "";
-                            htmlContainer.pendingMessageKey = "";
+                        if (!loadedForCurrent || hasNewerPending) {
+                            // Ignore visual commit for stale completion or when a newer message is already queued.
                             htmlContainer.activeLoadMessageKey = "";
                             htmlContainer.pendingLoadReason = "";
                             htmlContainer.pendingLoadQueuedAtMs = 0;
