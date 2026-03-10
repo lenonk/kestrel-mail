@@ -2198,6 +2198,58 @@ QStringList DataStore::bodyFetchCandidates(const QString &accountEmail, const QS
     return out;
 }
 
+QVariantList DataStore::bodyFetchCandidatesByAccount(const QString &accountEmail, const int limit) const
+{
+    QVariantList out;
+
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return out;
+
+    const int boundedLimit = qBound(1, limit, 100);
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        SELECT m.id AS message_id, mfm.folder, mfm.uid
+        FROM message_folder_map mfm
+        JOIN messages m ON m.id = mfm.message_id
+        WHERE mfm.account_email=:account_email
+          AND (
+              m.body_html IS NULL
+              OR trim(m.body_html) = ''
+              OR lower(m.body_html) LIKE '%ok success [throttled]%'
+              OR lower(m.body_html) LIKE '%authenticationfailed%'
+          )
+          AND datetime(m.received_at) >= datetime('now', '-3 months')
+        ORDER BY CASE WHEN lower(mfm.folder)='inbox' THEN 0 ELSE 1 END,
+                 datetime(m.received_at) DESC,
+                 m.id DESC
+    )"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+
+    if (!q.exec())
+        return out;
+
+    QSet<qint64> seenMessageIds;
+    while (q.next()) {
+        const qint64 messageId = q.value(0).toLongLong();
+        if (seenMessageIds.contains(messageId))
+            continue;
+        seenMessageIds.insert(messageId);
+
+        QVariantMap row;
+        row.insert(QStringLiteral("messageId"), messageId);
+        row.insert(QStringLiteral("folder"), q.value(1).toString());
+        row.insert(QStringLiteral("uid"), q.value(2).toString());
+        out.push_back(row);
+
+        if (out.size() >= boundedLimit)
+            break;
+    }
+
+    return out;
+}
+
 QVariantList DataStore::fetchCandidatesForMessageKey(const QString &accountEmail,
                                                       const QString &folder,
                                                       const QString &uid) const

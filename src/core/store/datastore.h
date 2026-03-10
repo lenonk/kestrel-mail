@@ -46,6 +46,8 @@ public:
                                             qint64 uidNext, qint64 highestModSeq, qint64 messages);
     Q_INVOKABLE QStringList bodyFetchCandidates(const QString &accountEmail, const QString &folder,
                                                 int limit = 10) const;
+    Q_INVOKABLE QVariantList bodyFetchCandidatesByAccount(const QString &accountEmail,
+                                                          int limit = 10) const;
     Q_INVOKABLE QVariantList fetchCandidatesForMessageKey(const QString &accountEmail,
                                                            const QString &folder,
                                                            const QString &uid) const;

@@ -1069,6 +1069,7 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     if (!m_store)
         return;
 
+    // Trigger one account-wide background hydrate pass from Inbox loop only.
     const QString f = folder.trimmed().toLower();
     if (f != "inbox"_L1)
         return;
@@ -1077,22 +1078,28 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     const int configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
     const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
 
-    QStringList candidates;
+    QVariantList candidates;
     if (QThread::currentThread() == thread()) {
-        candidates = m_store->bodyFetchCandidates(email, folder, limit);
+        candidates = m_store->bodyFetchCandidatesByAccount(email, limit);
     } else {
-        QMetaObject::invokeMethod(this, [this, &candidates, email, folder, limit]() {
+        QMetaObject::invokeMethod(this, [this, &candidates, email, limit]() {
             if (m_store)
-                candidates = m_store->bodyFetchCandidates(email, folder, limit);
+                candidates = m_store->bodyFetchCandidatesByAccount(email, limit);
         }, Qt::BlockingQueuedConnection);
     }
 
-    for (const auto &uid : candidates) {
+    for (const QVariant &v : candidates) {
+        const auto row = v.toMap();
+        const QString folderName = row.value("folder"_L1).toString();
+        const QString uid = row.value("uid"_L1).toString();
+        if (folderName.trimmed().isEmpty() || uid.trimmed().isEmpty())
+            continue;
+
         qWarning().noquote() << "[bg-hydrate-start]"
                              << "account=" << email
-                             << "folder=" << folder
+                             << "folder=" << folderName
                              << "uid=" << uid;
-        hydrateMessageBodyInternal(email, folder, uid, false);
+        hydrateMessageBodyInternal(email, folderName, uid, false);
     }
 }
 
