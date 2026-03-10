@@ -1089,8 +1089,13 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
         }, Qt::BlockingQueuedConnection);
     }
 
-    for (const auto &uid : candidates)
+    for (const auto &uid : candidates) {
+        qWarning().noquote() << "[bg-hydrate-start]"
+                             << "account=" << email
+                             << "folder=" << folder
+                             << "uid=" << uid;
         hydrateMessageBodyInternal(email, folder, uid, false);
+    }
 }
 
 void

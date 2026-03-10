@@ -2178,6 +2178,7 @@ QStringList DataStore::bodyFetchCandidates(const QString &accountEmail, const QS
               OR lower(m.body_html) LIKE '%ok success [throttled]%'
               OR lower(m.body_html) LIKE '%authenticationfailed%'
           )
+          AND datetime(m.received_at) >= datetime('now', '-3 months')
         ORDER BY datetime(m.received_at) DESC, m.id DESC
         LIMIT :limit
     )"));
