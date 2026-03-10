@@ -892,11 +892,15 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
-        htmlContainer.pendingHtml = "";
-        htmlContainer.pendingMessageKey = "";
-        htmlContainer.pendingLoadReason = "";
-        htmlContainer.pendingLoadQueuedAtMs = 0;
-        htmlContainer.pendingLoadStartedAtMs = 0;
+        // Only wipe in-flight load state when switching to a different message.
+        // Background data updates for the current message must not cancel a pending fade.
+        if (htmlContainer.pendingMessageKey.length === 0 || htmlContainer.pendingMessageKey !== root.renderMessageKey) {
+            htmlContainer.pendingHtml = "";
+            htmlContainer.pendingMessageKey = "";
+            htmlContainer.pendingLoadReason = "";
+            htmlContainer.pendingLoadQueuedAtMs = 0;
+            htmlContainer.pendingLoadStartedAtMs = 0;
+        }
 
         const account = (messageData && messageData.accountEmail) ? messageData.accountEmail.toString() : "";
         const uid = (messageData && messageData.uid) ? messageData.uid.toString() : "";
