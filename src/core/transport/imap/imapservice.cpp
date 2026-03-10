@@ -8,22 +8,17 @@
 #include "sync/syncengine.h"
 #include "message/messagehydrator.h"
 #include "message/bodyprocessor.h"
-#include "parser/responseparser.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QCryptographicHash>
-#include <QDir>
 #include <QDateTime>
 #include <QDebug>
 #include <QDesktopServices>
-#include <QElapsedTimer>
 #include <QEventLoop>
-#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QJsonObject>
-#include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSet>
@@ -36,7 +31,6 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QFutureWatcher>
-#include <QMimeDatabase>
 #include <QProcess>
 #include <QtConcurrentRun>
 
@@ -61,7 +55,7 @@ QWaitCondition g_poolWait;
 std::vector<PooledConnSlot> g_poolSlots;
 std::atomic_bool g_poolInitialized{false};
 std::function<QString(const QString &email)> g_poolTokenRefresher;
-constexpr int kOperationalPoolMax = 5;
+constexpr int kOperationalPoolMax = 10;
 constexpr int kPoolAcquireTimeoutMs = 3500;
 
 static bool isBackgroundOwner(const QString &owner) {
@@ -1073,6 +1067,10 @@ void
 ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
                                    const QString &) {
     if (!m_store)
+        return;
+
+    const QString f = folder.trimmed().toLower();
+    if (f != "inbox"_L1)
         return;
 
     bool ok = false;
