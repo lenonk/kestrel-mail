@@ -1,9 +1,8 @@
 #include "messagehydrator.h"
 #include "bodyprocessor.h"
-#include "../connection/imapconnection.h"
 
 #include <QDebug>
-#include <memory>
+#include <QElapsedTimer>
 
 using namespace Qt::Literals::StringLiterals;
 using Imap::BodyProcessor::extractBodyHtmlFromFetch;
@@ -11,6 +10,9 @@ using Imap::BodyProcessor::extractBodyHtmlFromFetch;
 namespace Imap {
 
 QString MessageHydrator::execute(const Request &req) {
+    if (!req.cxn)
+        return {};
+
     // Build the ordered candidate list: primary folder+uid first, then extras.
     struct Candidate { QString folder; QString uid; };
     QVector<Candidate> candidates;
@@ -32,32 +34,67 @@ QString MessageHydrator::execute(const Request &req) {
         candidates.push_back({ft, ut});
     }
 
-    // ── Connect and authenticate ──────────────────────────────────────────────
-    auto cxn = std::make_unique<Connection>();
-    if (const auto cr = cxn->connectAndAuth(req.host, req.port, req.email, req.accessToken); !cr.success) {
-        return {};
-    }
-
     // ── Try each candidate in order ───────────────────────────────────────────
+    QElapsedTimer totalTimer;
+    totalTimer.start();
+
     for (const auto &[folder, uid] : candidates) {
-        const auto [selectOk, _] = cxn->select(folder);
+        QElapsedTimer step;
+        step.start();
+        const auto [selectOk, _] = req.cxn->select(folder);
+        const qint64 selectMs = step.elapsed();
 
-        if (!selectOk)
-            continue;
-
-        const auto raw = cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
-        const auto hasFetchData = raw.contains(" FETCH (") || raw.contains(" fetch (");
-
-        if (const bool hasLiteral = raw.contains('{'); !hasFetchData || !hasLiteral) {
+        if (!selectOk) {
+            qWarning().noquote() << "[perf-hydrate-exec]"
+                                 << "uid=" << uid
+                                 << "folder=" << folder
+                                 << "selectMs=" << selectMs
+                                 << "result=select-failed";
             continue;
         }
 
+        step.restart();
+        const auto raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
+        const qint64 fetchMs = step.elapsed();
+
+        const auto hasFetchData = raw.contains(" FETCH (") || raw.contains(" fetch (");
+        const bool hasLiteral = raw.contains('{');
+
+        if (!hasFetchData || !hasLiteral) {
+            qWarning().noquote() << "[perf-hydrate-exec]"
+                                 << "uid=" << uid
+                                 << "folder=" << folder
+                                 << "selectMs=" << selectMs
+                                 << "fetchMs=" << fetchMs
+                                 << "rawLen=" << raw.size()
+                                 << "hasFetch=" << hasFetchData
+                                 << "hasLiteral=" << hasLiteral
+                                 << "result=fetch-miss";
+            continue;
+        }
+
+        step.restart();
         const QString html = extractBodyHtmlFromFetch(raw).trimmed();
+        const qint64 parseMs = step.elapsed();
+
+        qWarning().noquote() << "[perf-hydrate-exec]"
+                             << "uid=" << uid
+                             << "folder=" << folder
+                             << "selectMs=" << selectMs
+                             << "fetchMs=" << fetchMs
+                             << "parseMs=" << parseMs
+                             << "rawLen=" << raw.size()
+                             << "htmlLen=" << html.size();
+
         if (!html.isEmpty())
             return html;
     }
 
-    qWarning().noquote() << "[hydrate] no-html-extracted" << "uid=" << req.uid;
+    qWarning().noquote() << "[perf-hydrate-exec]"
+                         << "uid=" << req.uid
+                         << "candidates=" << candidates.size()
+                         << "totalMs=" << totalTimer.elapsed()
+                         << "result=no-html";
     return {};
 }
 
