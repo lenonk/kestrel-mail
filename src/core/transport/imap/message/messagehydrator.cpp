@@ -58,11 +58,13 @@ QString MessageHydrator::execute(const Request &req) {
         }
 
         step.restart();
-        auto raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[TEXT]<0.96000>)"_L1.arg(uid));
+        // First try a bounded full-message window (includes headers + initial body)
+        // so mail parser still has RFC822 header context.
+        auto raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[]<0.131072>)"_L1.arg(uid));
         qint64 fetchMs = step.elapsed();
 
-        bool hasFetchData = raw.toLower().contains(" fetch (");
-        bool hasLiteral = raw.contains('{');
+        auto hasFetchData = raw.contains(" FETCH (") || raw.contains(" fetch (");
+        auto hasLiteral = raw.contains('{');
 
         if (!hasFetchData || !hasLiteral) {
             // Fallback for servers/messages where BODY[TEXT] window misses usable literal.
@@ -87,8 +89,22 @@ QString MessageHydrator::execute(const Request &req) {
         }
 
         step.restart();
-        const QString html = extractBodyHtmlFromFetch(raw).trimmed();
-        const qint64 parseMs = step.elapsed();
+        QString html = extractBodyHtmlFromFetch(raw).trimmed();
+        qint64 parseMs = step.elapsed();
+
+        // If bounded window produced suspiciously tiny HTML, retry full body once.
+        if (!html.isEmpty() && html.size() < 512) {
+            step.restart();
+            const auto rawFull = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
+            fetchMs += step.elapsed();
+            step.restart();
+            const auto htmlFull = extractBodyHtmlFromFetch(rawFull).trimmed();
+            parseMs += step.elapsed();
+            if (!htmlFull.isEmpty()) {
+                raw = rawFull;
+                html = htmlFull;
+            }
+        }
 
         qWarning().noquote() << "[perf-hydrate-exec]"
                              << "uid=" << uid
