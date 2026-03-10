@@ -1804,6 +1804,26 @@ Rectangle {
             Timer {
                 id: fadeOutLoadTimer
 
+                interval: 0
+                repeat: false
+
+                onTriggered: {
+                    if (!htmlContainer.pendingHtml.length)
+                        return;
+                    if (htmlContainer.pendingMessageKey.length > 0 && htmlContainer.pendingMessageKey !== root.renderMessageKey) {
+                        console.log("[pane-state] drop-stale-before-load", "pending=", htmlContainer.pendingMessageKey, "current=", root.renderMessageKey)
+                        htmlContainer.pendingHtml = "";
+                        htmlContainer.pendingMessageKey = "";
+                        return;
+                    }
+                    htmlContainer.bodyOpacity = 0.0;
+                    loadAfterFadeTimer.restart();
+                }
+            }
+
+            Timer {
+                id: loadAfterFadeTimer
+
                 interval: 250
                 repeat: false
 
@@ -1819,7 +1839,6 @@ Rectangle {
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
                     console.log("[pane-state] start-load", "msg=", htmlContainer.activeLoadMessageKey, "reason=", htmlContainer.pendingLoadReason)
-                    htmlContainer.bodyOpacity = 0.0;
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }
