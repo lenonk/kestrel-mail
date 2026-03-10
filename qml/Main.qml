@@ -643,6 +643,7 @@ Kirigami.ApplicationWindow {
         if (root.selectedMessageKey.length > 0)
             markReadTimer.restart()
         if (!root.selectedMessageData) {
+            console.log("[hydrate-html-db] ui-selected-no-data", "key=", root.selectedMessageKey)
             root.setContentPaneHoverExpanded(false)
             return
         }
@@ -652,7 +653,9 @@ Kirigami.ApplicationWindow {
             subject: root.selectedMessageData.subject || "",
             receivedAt: root.selectedMessageData.receivedAt || ""
         }
+        const bodyLen = (root.selectedMessageData.bodyHtml || "").toString().length
         const hasUsableHtml = root.isBodyHtmlUsable(root.selectedMessageData.bodyHtml)
+        console.log("[hydrate-html-db] ui-selected", "key=", root.selectedMessageKey, "bodyLen=", bodyLen, "usable=", hasUsableHtml)
         if (!hasUsableHtml) {
             root.setContentPaneHoverExpanded(false)
             root.requestHydrateForMessageKey(root.selectedMessageKey)
@@ -1019,9 +1022,13 @@ Kirigami.ApplicationWindow {
         const p = root.parseMessageKey(key)
         if (!p || !root.imapServiceObj || !root.imapServiceObj.hydrateMessageBody) return
         const row = root.messageByKey(key)
+        const bodyLen = row && row.bodyHtml ? row.bodyHtml.toString().length : 0
         const hasUsableHtml = row ? root.isBodyHtmlUsable(row.bodyHtml) : false
         if (!hasUsableHtml) {
+            console.log("[hydrate-html-db] ui-request-hydrate", "key=", key, "bodyLen=", bodyLen)
             root.imapServiceObj.hydrateMessageBody(p.accountEmail, p.folder, p.uid)
+        } else {
+            console.log("[hydrate-html-db] ui-skip-hydrate-usable", "key=", key, "bodyLen=", bodyLen)
         }
     }
 

@@ -116,6 +116,11 @@ Rectangle {
             return false;
         return /<html|<body|<div|<table|<p|<br|<span|<img|<a\b/i.test(html);
     }
+
+    onHasUsableBodyHtmlChanged: {
+        const len = (root.messageBodyHtml || "").toString().length;
+        console.log("[hydrate-html-db] pane-usable-changed", "key=", root.renderMessageKey, "usable=", root.hasUsableBodyHtml, "bodyLen=", len)
+    }
     property bool imagesAllowed: false
     readonly property bool immersiveBodyMode: !!(appRoot && appRoot.contentPaneHoverExpandActive)
     // Reads directly from messageData.sender so it updates atomically with the message,
