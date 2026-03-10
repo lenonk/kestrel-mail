@@ -1721,7 +1721,6 @@ Rectangle {
                 pendingMessageKey = root.renderMessageKey;
                 pendingLoadQueuedAtMs = t0;
                 pendingClickAtMs = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? root.appRoot.lastMessageClickAtMs : 0;
-                bodyOpacity = 0.0;
                 const clickToQueue = pendingClickAtMs > 0 ? (pendingLoadQueuedAtMs - pendingClickAtMs) : -1;
                 fadeOutLoadTimer.restart();
             }
@@ -1762,6 +1761,7 @@ Rectangle {
                     }
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
+                    htmlContainer.bodyOpacity = 0.0;
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }

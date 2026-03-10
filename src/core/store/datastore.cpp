@@ -2241,6 +2241,49 @@ QVariantList DataStore::bodyFetchCandidatesByAccount(const QString &accountEmail
             break;
     }
 
+    if (!out.isEmpty())
+        return out;
+
+    // Fallback if received_at parsing/filtering excludes everything: keep Inbox-first
+    // ordering and dedupe by message id, but without time window.
+    QSqlQuery qFallback(database);
+    qFallback.prepare(QStringLiteral(R"(
+        SELECT m.id AS message_id, mfm.folder, mfm.uid
+        FROM message_folder_map mfm
+        JOIN messages m ON m.id = mfm.message_id
+        WHERE mfm.account_email=:account_email
+          AND (
+              m.body_html IS NULL
+              OR trim(m.body_html) = ''
+              OR lower(m.body_html) LIKE '%ok success [throttled]%'
+              OR lower(m.body_html) LIKE '%authenticationfailed%'
+          )
+        ORDER BY CASE WHEN lower(mfm.folder)='inbox' THEN 0 ELSE 1 END,
+                 datetime(m.received_at) DESC,
+                 m.id DESC
+    )"));
+    qFallback.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+
+    if (!qFallback.exec())
+        return out;
+
+    seenMessageIds.clear();
+    while (qFallback.next()) {
+        const qint64 messageId = qFallback.value(0).toLongLong();
+        if (seenMessageIds.contains(messageId))
+            continue;
+        seenMessageIds.insert(messageId);
+
+        QVariantMap row;
+        row.insert(QStringLiteral("messageId"), messageId);
+        row.insert(QStringLiteral("folder"), qFallback.value(1).toString());
+        row.insert(QStringLiteral("uid"), qFallback.value(2).toString());
+        out.push_back(row);
+
+        if (out.size() >= boundedLimit)
+            break;
+    }
+
     return out;
 }
 
