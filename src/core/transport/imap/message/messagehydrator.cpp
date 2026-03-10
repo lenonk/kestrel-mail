@@ -3,6 +3,7 @@
 
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QRegularExpression>
 
 using namespace Qt::Literals::StringLiterals;
 using Imap::BodyProcessor::extractBodyHtmlFromFetch;
@@ -92,11 +93,14 @@ QString MessageHydrator::execute(const Request &req) {
         QString html = extractBodyHtmlFromFetch(raw).trimmed();
         qint64 parseMs = step.elapsed();
 
-        // If bounded window produced suspiciously tiny HTML, or only a plain-text
-        // fallback (white-space:normal wrapper), the 128 KB window missed the HTML part.
-        // Retry with the full body so mailio can find the complete HTML content.
+        // If bounded window produced suspiciously tiny HTML, only a plain-text
+        // fallback, or unresolved CID image refs, the 128 KB window likely missed
+        // related MIME parts. Retry with the full body so mailio can inline CIDs.
         const bool isPlainTextFallback = html.contains(QLatin1String("white-space:normal"));
-        if (!html.isEmpty() && (html.size() < 512 || isPlainTextFallback)) {
+        const bool hasUnresolvedCidSrc = QRegularExpression(QStringLiteral("\\bsrc\\s*=\\s*[\"']\\s*cid:"),
+                                                            QRegularExpression::CaseInsensitiveOption)
+                                             .match(html).hasMatch();
+        if (!html.isEmpty() && (html.size() < 512 || isPlainTextFallback || hasUnresolvedCidSrc)) {
             step.restart();
             const auto rawFull = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
             fetchMs += step.elapsed();
