@@ -439,8 +439,11 @@ Rectangle {
                                     // Normal click: open message, clear multiselect
                                     root.appRoot.lastClickedMessageIndex = index
                                     root.appRoot.lastMessageClickAtMs = Date.now()
-                                    root.appRoot.selectedMessageKeys = ({})
+                                    const hadMulti = root.appRoot.selectedMessageKeys
+                                                      && Object.keys(root.appRoot.selectedMessageKeys).length > 0
                                     root.appRoot.selectedMessageKey = messageCard.messageKeyValue
+                                    if (hadMulti)
+                                        root.appRoot.selectedMessageKeys = ({})
                                 }
                             }
                         }

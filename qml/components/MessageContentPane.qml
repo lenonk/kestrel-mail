@@ -1036,10 +1036,6 @@ Rectangle {
         }
 
         trackingAllowed = false;
-
-        // Force a load attempt on explicit selection changes; relying only on
-        // renderedHtml binding changes can miss transitions when data races.
-        htmlContainer.loadHtmlIfChanged("messageDataChanged");
     }
 
     TapHandler {
