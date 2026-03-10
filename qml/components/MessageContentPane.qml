@@ -464,82 +464,11 @@ Rectangle {
         return out;
     }
 
-    function bodyCidImageNames(baseHtml) {
-        const html = (baseHtml || "").toString();
-        const out = [];
-        if (!html.length)
-            return out;
-
-        const imgTagRe = /<img\b[^>]*>/gi;
-        let m;
-        while ((m = imgTagRe.exec(html)) !== null) {
-            const tag = (m[0] || "").toString();
-            const srcM = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
-            if (!srcM)
-                continue;
-
-            const rawSrc = (srcM[1] || srcM[2] || srcM[3] || "").toString().trim();
-            if (!rawSrc.length)
-                continue;
-
-            let src = rawSrc;
-            try {
-                src = decodeURIComponent(rawSrc);
-            } catch (_) {
-            }
-            const lower = src.toLowerCase();
-            if (!lower.startsWith("cid:"))
-                continue;
-
-            let cid = src.slice(4).trim();
-            if (cid.startsWith("<") && cid.endsWith(">") && cid.length > 2)
-                cid = cid.slice(1, -1);
-            if (!cid.length)
-                continue;
-            out.push(cid.toLowerCase());
-        }
-        return out;
-    }
-
-    function inlineImageAlreadyPresent(baseHtml, attachmentName) {
-        const html = (baseHtml || "").toString();
-        const name = (attachmentName || "").toString();
-        if (!html.length || !name.length)
-            return false;
-
-        const lowerName = name.toLowerCase();
-        const encodedName = encodeURIComponent(name).toLowerCase();
-        const imgTagRe = /<img\b[^>]*>/gi;
-        let m;
-        while ((m = imgTagRe.exec(html)) !== null) {
-            const tag = (m[0] || "").toString();
-            const tagLower = tag.toLowerCase();
-            // Some clients store attachment hints in non-src attrs (alt/title/data-*).
-            if (tagLower.indexOf(lowerName) >= 0 || tagLower.indexOf(encodedName) >= 0)
-                return true;
-
-            const srcM = tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
-            if (!srcM)
-                continue;
-            const src = (srcM[1] || srcM[2] || srcM[3] || "").toString();
-            const srcLower = src.toLowerCase();
-            let decodedLower = srcLower;
-            try {
-                decodedLower = decodeURIComponent(src).toLowerCase();
-            } catch (_) {
-            }
-            if (srcLower.indexOf(lowerName) >= 0 || decodedLower.indexOf(lowerName) >= 0 || srcLower.indexOf(encodedName) >= 0)
-                return true;
-        }
-        return false;
-    }
-
     function inlineImageAttachmentsHtml(baseHtml) {
         // TODO: gate inline rendering behind a user setting.
         if (!root.attachmentItems || root.attachmentItems.length === 0)
             return "";
 
-        const cidNames = bodyCidImageNames(baseHtml);
         const dataHashes = bodyDataImageHashes(baseHtml);
 
         const images = [];
@@ -550,19 +479,6 @@ Rectangle {
             const isImage = mt.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name);
             if (!isImage)
                 continue;
-
-            const lowerName = name.toLowerCase();
-            const encodedName = encodeURIComponent(name).toLowerCase();
-            const alreadyByCid = cidNames.some(function (c) {
-                return c.indexOf(lowerName) >= 0 || c.indexOf(encodedName) >= 0;
-            });
-            if (alreadyByCid) {
-                continue;
-            }
-
-            if (inlineImageAlreadyPresent(baseHtml, name)) {
-                continue;
-            }
 
             const partId = (a.partId || "").toString();
             const localPath = (root.attachmentLocalPaths && partId.length) ? (root.attachmentLocalPaths[partId] || "") : "";
@@ -976,7 +892,6 @@ Rectangle {
         root.selectedAttachmentKey = "";
         htmlContainer.pendingHtml = "";
         htmlContainer.pendingMessageKey = "";
-        htmlContainer.activeLoadMessageKey = "";
         htmlContainer.pendingLoadReason = "";
         htmlContainer.pendingLoadQueuedAtMs = 0;
         htmlContainer.pendingLoadStartedAtMs = 0;
@@ -1812,7 +1727,6 @@ Rectangle {
                         return;
                     }
                     // Drop previous document right at fade-out completion before loading next.
-                    htmlContainer.suppressNextLoadCommit = true;
                     htmlView.loadHtml("<!doctype html><html><body></body></html>", "file:///");
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
@@ -1848,11 +1762,6 @@ Rectangle {
                 onLoadingChanged: function (req) {
                     const st = req.status;
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
-                        if (htmlContainer.suppressNextLoadCommit) {
-                            htmlContainer.suppressNextLoadCommit = false;
-                            return;
-                        }
-
                         const loadedForCurrent = !htmlContainer.activeLoadMessageKey.length
                                               || htmlContainer.activeLoadMessageKey === root.selectedMessageEdgeKey;
                         const hasNewerPending = htmlContainer.pendingMessageKey.length > 0
