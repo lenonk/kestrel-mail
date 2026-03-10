@@ -146,6 +146,7 @@ Rectangle {
         if (!root.hasUsableBodyHtml)
             return "";
         const t0 = Date.now();
+        const clickDelta = (appRoot && appRoot.lastMessageClickAtMs) ? (t0 - appRoot.lastMessageClickAtMs) : -1;
         const base = root.htmlForMessage();
         const t1 = Date.now();
 
@@ -173,6 +174,17 @@ Rectangle {
 
         const out = root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized;
         const t5 = Date.now();
+        console.log("[rendered-html] compute",
+                    "key=", root.renderMessageKey,
+                    "selected=", root.selectedMessageEdgeKey,
+                    "clickDeltaMs=", clickDelta,
+                    "htmlForMessageMs=", (t1 - t0),
+                    "sanitizeMs=", (t2 - t1),
+                    "trackMs=", (t3 - t2),
+                    "imagesMs=", (t4 - t3),
+                    "postMs=", (t5 - t4),
+                    "totalMs=", (t5 - t0),
+                    "len=", out.length);
         return out;
     }
     property string selectedAttachmentKey: ""
@@ -971,7 +983,9 @@ Rectangle {
     color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
 
     onMessageDataChanged: {
-        console.log("[pane-state] message-changed", "to=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey)
+        const now = Date.now();
+        const clickDelta = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? (now - root.appRoot.lastMessageClickAtMs) : -1;
+        console.log("[pane-state] message-changed", "to=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey, "clickDeltaMs=", clickDelta)
         root.selectedAttachmentKey = "";
         htmlContainer.pendingHtml = "";
         htmlContainer.pendingMessageKey = "";
@@ -1897,6 +1911,9 @@ Rectangle {
                         htmlContainer.loadHtmlIfChanged("imagesAllowed");
                     }
                     function onRenderedHtmlChanged() {
+                        const now = Date.now();
+                        const clickDelta = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? (now - root.appRoot.lastMessageClickAtMs) : -1;
+                        console.log("[rendered-html] changed", "render=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey, "clickDeltaMs=", clickDelta);
                         htmlContainer.loadHtmlIfChanged("renderedHtml");
                     }
 
