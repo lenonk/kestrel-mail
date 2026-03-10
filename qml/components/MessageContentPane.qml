@@ -69,6 +69,16 @@ Rectangle {
     property var attachmentProgress: ({})
     property var attachmentDownloading: ({})
     property string lastAttachmentMessageKey: ""
+    readonly property string renderMessageKey: {
+        if (!messageData)
+            return "";
+        const a = (messageData.accountEmail || "").toString();
+        const f = (messageData.folder || "").toString();
+        const u = (messageData.uid || "").toString();
+        if (!a.length || !u.length)
+            return "";
+        return a + "|" + f + "|" + u;
+    }
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
@@ -941,6 +951,11 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
+        htmlContainer.pendingHtml = "";
+        htmlContainer.pendingMessageKey = "";
+        htmlContainer.pendingLoadReason = "";
+        htmlContainer.pendingLoadQueuedAtMs = 0;
+        htmlContainer.pendingLoadStartedAtMs = 0;
 
         const account = (messageData && messageData.accountEmail) ? messageData.accountEmail.toString() : "";
         const uid = (messageData && messageData.uid) ? messageData.uid.toString() : "";
@@ -1684,6 +1699,7 @@ Rectangle {
             property string lastLoadedHtmlKey: ""
             property string pendingHtml: ""
             property string pendingLoadReason: ""
+            property string pendingMessageKey: ""
             property double pendingLoadQueuedAtMs: 0
             property double pendingLoadStartedAtMs: 0
             property double pendingClickAtMs: 0
@@ -1694,12 +1710,13 @@ Rectangle {
                 const t0 = Date.now();
                 if (!root.renderedHtml.length)
                     return;
-                const key = (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml;
+                const key = root.renderMessageKey + "|" + (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml;
                 if (key === lastLoadedHtmlKey)
                     return;
                 lastLoadedHtmlKey = key;
                 pendingHtml = root.renderedHtml;
                 pendingLoadReason = reason;
+                pendingMessageKey = root.renderMessageKey;
                 pendingLoadQueuedAtMs = t0;
                 pendingClickAtMs = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? root.appRoot.lastMessageClickAtMs : 0;
                 bodyOpacity = 0.0;
@@ -1736,8 +1753,12 @@ Rectangle {
                 onTriggered: {
                     if (!htmlContainer.pendingHtml.length)
                         return;
+                    if (htmlContainer.pendingMessageKey.length > 0 && htmlContainer.pendingMessageKey !== root.renderMessageKey) {
+                        htmlContainer.pendingHtml = "";
+                        htmlContainer.pendingMessageKey = "";
+                        return;
+                    }
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
-                                "queueDelay=", (htmlContainer.pendingLoadStartedAtMs - htmlContainer.pendingLoadQueuedAtMs));
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }
@@ -1750,8 +1771,6 @@ Rectangle {
                     const now = Date.now();
                     const loadToVisible = htmlContainer.pendingLoadCompletedAtMs > 0 ? (now - htmlContainer.pendingLoadCompletedAtMs) : -1;
                     const clickToVisible = htmlContainer.pendingClickAtMs > 0 ? (now - htmlContainer.pendingClickAtMs) : -1;
-                                "loadToVisible=", loadToVisible, "clickToVisible=", clickToVisible,
-                                "opacity=", htmlContainer.bodyOpacity);
                     htmlContainer.pendingLoadCompletedAtMs = 0;
                     htmlContainer.pendingClickAtMs = 0;
                     htmlContainer.pendingCompletedReason = "";
@@ -1776,11 +1795,11 @@ Rectangle {
                         const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
                         const clickToLoad = htmlContainer.pendingClickAtMs > 0 ? (tDone - htmlContainer.pendingClickAtMs) : -1;
-                                    "status=", st, "loadMs=", loadMs, "totalMs=", totalMs, "clickToLoad=", clickToLoad);
 
                         htmlContainer.pendingLoadCompletedAtMs = tDone;
                         htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
                         htmlContainer.pendingHtml = "";
+                        htmlContainer.pendingMessageKey = "";
                         htmlContainer.pendingLoadReason = "";
                         htmlContainer.pendingLoadQueuedAtMs = 0;
                         htmlContainer.pendingLoadStartedAtMs = 0;
