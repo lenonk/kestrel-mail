@@ -441,9 +441,6 @@ Rectangle {
                                     root.appRoot.lastMessageClickAtMs = Date.now()
                                     root.appRoot.selectedMessageKeys = ({})
                                     root.appRoot.selectedMessageKey = messageCard.messageKeyValue
-                                    if (root.appRoot.imapServiceObj && root.appRoot.imapServiceObj.hydrateMessageBody) {
-                                        root.appRoot.imapServiceObj.hydrateMessageBody(accountEmail, folder, uid)
-                                    }
                                 }
                             }
                         }
