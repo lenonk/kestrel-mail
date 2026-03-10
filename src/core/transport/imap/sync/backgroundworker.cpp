@@ -166,17 +166,15 @@ BackgroundWorker::start() {
                                       || (status.highestModSeq > 0 && status.highestModSeq != previousStatus.highestModSeq)
                                       || (status.messages >= 0 && status.messages != previousStatus.messages);
 
-            const bool isInbox = folder.compare("INBOX", Qt::CaseInsensitive) == 0;
-            if (!changedByStatus && !isInbox)
+            if (!changedByStatus)
                 continue;
 
             const auto account = m_activeAccount;
             const auto email = m_activeEmail;
             const auto token = m_activeAccessToken;
             const auto folderCopy = folder;
-            const auto dispatched = QtConcurrent::run([this, account, email, token, folderCopy, changedByStatus]() {
-                if (changedByStatus)
-                    emit syncHeadersAndFlagsRequested(account, email, folderCopy, token);
+            const auto dispatched = QtConcurrent::run([this, account, email, token, folderCopy]() {
+                emit syncHeadersAndFlagsRequested(account, email, folderCopy, token);
                 emit fetchBodiesRequested(account, email, folderCopy, token);
             });
             Q_UNUSED(dispatched);

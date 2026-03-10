@@ -96,6 +96,9 @@ private:
 
     QSet<QString>             m_inFlightBodyHydrations;
     QMutex                    m_inFlightBodyHydrationsMutex;
+    QSet<QString>             m_activeBgHydrateFolders;
+    QSet<QString>             m_pendingBgHydrateFolders;
+    QMutex                    m_bgHydrateMutex;
 
     struct AttachmentCacheEntry { QString localPath; qint64 expiresAt = 0; };
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;

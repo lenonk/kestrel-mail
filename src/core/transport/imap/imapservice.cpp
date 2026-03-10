@@ -1066,54 +1066,61 @@ ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &,
 void
 ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
                                    const QString &) {
-    static qint64 sBgHydratePass = 0;
-    const qint64 pass = ++sBgHydratePass;
-
     if (!m_store)
         return;
 
-    // Trigger one account-wide background hydrate pass from Inbox loop only.
-    const QString f = folder.trimmed().toLower();
-    if (f != "inbox"_L1) {
-        qWarning().noquote() << "[bg-hydrate-pass]" << "pass=" << pass << "skipFolder=" << folder;
+    const QString folderNorm = folder.trimmed();
+    if (folderNorm.isEmpty())
         return;
+
+    const QString key = email.trimmed().toLower() + "|" + folderNorm.toLower();
+    {
+        QMutexLocker lock(&m_bgHydrateMutex);
+        if (m_activeBgHydrateFolders.contains(key)) {
+            m_pendingBgHydrateFolders.insert(key);
+            return;
+        }
+        m_activeBgHydrateFolders.insert(key);
     }
 
     bool ok = false;
     const int configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
     const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
 
-    QVariantList candidates;
-    if (QThread::currentThread() == thread()) {
-        candidates = m_store->bodyFetchCandidatesByAccount(email, limit);
-    } else {
-        QMetaObject::invokeMethod(this, [this, &candidates, email, limit]() {
-            if (m_store)
-                candidates = m_store->bodyFetchCandidatesByAccount(email, limit);
-        }, Qt::BlockingQueuedConnection);
-    }
+    runBackgroundTask([this, email, folderNorm, key, limit]() {
+        while (!m_destroying.load()) {
+            QStringList candidates;
+            QMetaObject::invokeMethod(this, [this, &candidates, email, folderNorm, limit]() {
+                if (m_store)
+                    candidates = m_store->bodyFetchCandidates(email, folderNorm, limit);
+            }, Qt::BlockingQueuedConnection);
 
-    qWarning().noquote() << "[bg-hydrate-pass]" << "pass=" << pass << "account=" << email
-                         << "limit=" << limit << "candidates=" << candidates.size();
+            if (candidates.isEmpty())
+                break;
 
-    if (candidates.isEmpty()) {
-        qWarning().noquote() << "[bg-hydrate]" << "pass=" << pass << "account=" << email << "candidates=0";
-        return;
-    }
+            for (const auto &uid : candidates) {
+                if (m_destroying.load())
+                    break;
+                qWarning().noquote() << "[bg-hydrate-start]"
+                                     << "account=" << email
+                                     << "folder=" << folderNorm
+                                     << "uid=" << uid;
+                hydrateMessageBodyInternal(email, folderNorm, uid, false);
+            }
 
-    for (const QVariant &v : candidates) {
-        const auto row = v.toMap();
-        const QString folderName = row.value("folder"_L1).toString();
-        const QString uid = row.value("uid"_L1).toString();
-        if (folderName.trimmed().isEmpty() || uid.trimmed().isEmpty())
-            continue;
+            bool rerun = false;
+            {
+                QMutexLocker lock(&m_bgHydrateMutex);
+                rerun = m_pendingBgHydrateFolders.remove(key) > 0;
+            }
+            if (!rerun)
+                break;
+        }
 
-        qWarning().noquote() << "[bg-hydrate-start]"
-                             << "account=" << email
-                             << "folder=" << folderName
-                             << "uid=" << uid;
-        hydrateMessageBodyInternal(email, folderName, uid, false);
-    }
+        QMutexLocker lock(&m_bgHydrateMutex);
+        m_activeBgHydrateFolders.remove(key);
+        m_pendingBgHydrateFolders.remove(key);
+    });
 }
 
 void
