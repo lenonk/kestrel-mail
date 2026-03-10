@@ -1995,14 +1995,6 @@ ImapService::syncAll(bool announce) {
                     if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
                         folderLabel = "Inbox"_L1;
 
-                    const auto syncingToast = QStringLiteral("Syncing %1").arg(folderLabel);
-                    QMetaObject::invokeMethod(this, [this, announce, syncingToast]() {
-                        if (announce)
-                            emit syncFinished(true, syncingToast);
-                        else
-                            emit realtimeStatus(true, syncingToast);
-                    }, Qt::QueuedConnection);
-
                     const auto folderHeaders = syncFolderInternal(AccountInfo{email, host, accessToken, port},
                         folderTarget, SyncFolderOptions{announce}, seqNum, inboxInserted,
                         pendingHeaders, result.headers, flushTimer, flush);
