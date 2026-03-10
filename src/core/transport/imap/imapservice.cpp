@@ -1119,7 +1119,12 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
                                      << "uid=" << uid
                                      << "index=" << (i + 1)
                                      << "of=" << candidates.size();
-                hydrateMessageBodyInternal(email, folderNorm, uid, false);
+
+                QMetaObject::invokeMethod(this,
+                                          [this, email, folderNorm, uid]() {
+                                              hydrateMessageBodyInternal(email, folderNorm, uid, false);
+                                          },
+                                          Qt::BlockingQueuedConnection);
             }
 
             bool rerun = false;
