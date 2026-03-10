@@ -1147,6 +1147,7 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     });
 }
 
+
 void
 ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &) {
     auto fn = [this]() {
