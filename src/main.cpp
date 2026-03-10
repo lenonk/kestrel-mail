@@ -14,13 +14,6 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
-#include <QByteArray>
-#include <QDebug>
-#include <cstdlib>
-
-#if defined(__linux__)
-#include <execinfo.h>
-#endif
 
 #include "core/accounts/accountrepository.h"
 #include "core/accounts/accountsetupcontroller.h"
@@ -30,32 +23,6 @@
 #include "core/store/datastore.h"
 #include "core/store/messagelistmodel.h"
 #include "core/transport/imap/imapservice.h"
-
-static QtMessageHandler g_prevMsgHandler = nullptr;
-
-static void kestrelMsgHandler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg)
-{
-#if defined(__linux__)
-    if (msg.contains("QFont::setPixelSize: Pixel size <= 0", Qt::CaseInsensitive)) {
-        void *stack[64];
-        const int n = backtrace(stack, 64);
-        qWarning().noquote() << "[qfont-trace] captured stack frames=" << n;
-        if (n > 0) {
-            char **symbols = backtrace_symbols(stack, n);
-            if (symbols) {
-                for (int i = 0; i < n; ++i)
-                    qWarning().noquote() << "[qfont-trace]" << symbols[i];
-                free(symbols);
-            }
-        }
-    }
-#else
-    Q_UNUSED(ctx)
-#endif
-
-    if (g_prevMsgHandler)
-        g_prevMsgHandler(type, ctx, msg);
-}
 
 class CachingNetworkAccessManagerFactory : public QQmlNetworkAccessManagerFactory
 {
@@ -78,9 +45,6 @@ public:
 
 int main(int argc, char *argv[])
 {
-    if (qEnvironmentVariableIsSet("KESTREL_TRACE_QFONT_WARN"))
-        g_prevMsgHandler = qInstallMessageHandler(kestrelMsgHandler);
-
     QtWebEngineQuick::initialize();
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("kestrel-mail"));
