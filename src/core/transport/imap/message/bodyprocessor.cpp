@@ -1,12 +1,8 @@
 #include "bodyprocessor.h"
-#include "messageutils.h"
 #include "../../../mime/mailioparser.h"
 #include <QRegularExpression>
-#include <QTextDocument>
-#include <algorithm>
-#include <utility>
 
-#include "src/core/mime/mailioparser.h"
+using namespace Qt::Literals::StringLiterals;
 
 namespace Imap::BodyProcessor {
 
@@ -403,79 +399,32 @@ decodeTransferEncoded(const QByteArray &raw) {
 }
 
 QString
-extractBodySnippetFromFetch(const QByteArray &fetchRespRaw) {
-    QString best;
-    int bestScore = -999;
-
-    qsizetype i = 0;
-    while (i < fetchRespRaw.size()) {
-        if (fetchRespRaw[i] != '{') {
-            ++i;
-            continue;
-        }
-
-        qsizetype j = i + 1;
-        while (j < fetchRespRaw.size() && fetchRespRaw[j] >= '0' && fetchRespRaw[j] <= '9') {
-            ++j;
-        }
-        if (j <= i + 1 || fetchRespRaw[j] != '}') {
-            ++i;
-            continue;
-        }
-
-        auto literalStart = j + 1;
-        if (literalStart < fetchRespRaw.size() && ((fetchRespRaw[literalStart] == '\r') || fetchRespRaw[literalStart] == '\n'))
-            ++literalStart;
-
-        auto ok = false;
-        const auto literalLen = fetchRespRaw.mid(i + 1, j - (i + 1)).toInt(&ok);
-        if (!ok || literalLen <= 0) {
-            ++i;
-            continue;
-        }
-
-        if (literalStart >= fetchRespRaw.size()) break;
-
-        const auto literalEndExclusive = qMin(fetchRespRaw.size(), literalStart + literalLen);
-        if (literalEndExclusive <= literalStart) {
-            i = j + 1;
-            continue;
-        }
-
-        auto literalBytes = fetchRespRaw.mid(literalStart, literalEndExclusive - literalStart);
-        if (auto bodyStart = literalBytes.indexOf("\r\n\r\n"); bodyStart >= 0) {
-            literalBytes = literalBytes.mid(bodyStart + 4);
-        }
-        else {
-            bodyStart = literalBytes.indexOf("\n\n");
-            if (bodyStart >= 0) {
-                literalBytes = literalBytes.mid(bodyStart + 2);
-            }
-        }
-
-        const auto decoded = decodeTransferEncoded(literalBytes);
-        auto cand = MessageUtils::cleanSnippet(QString::fromUtf8(decoded)).left(180);
-        if (cand.isEmpty())
-            cand = MessageUtils::cleanSnippet(QString::fromUtf8(literalBytes)).left(180);
-
-        if (const auto score = MessageUtils::snippetQualityScore(cand); !cand.isEmpty() && score > bestScore) {
-            best = cand;
-            bestScore = score;
-        }
-
-        i = literalEndExclusive;
-    }
-
-    if (best.isEmpty()) {
-        best = MessageUtils::cleanSnippet(QString::fromUtf8(fetchRespRaw)).left(180);
-    }
-    return best;
-}
-
-QString
 extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw) {
     auto html = Mime::extractHtmlWithMailio(fetchRespRaw).trimmed();
     if (!html.isEmpty()) { return html; }
+
+    // Heuristic fallback: some malformed MIME payloads still contain a usable
+    // raw HTML document that mailio misses. Recover the largest <html>...</html>
+    // block before dropping to plain-text wrapping.
+    const QString rawUtf8 = QString::fromUtf8(fetchRespRaw);
+    const QString rawLatin1 = QString::fromLatin1(fetchRespRaw);
+    auto extractRawHtmlDoc = [](const QString &raw) -> QString {
+        const int start = raw.indexOf(QStringLiteral("<html"), 0, Qt::CaseInsensitive);
+        if (start < 0)
+            return {};
+        const int end = raw.lastIndexOf(QStringLiteral("</html>"), -1, Qt::CaseInsensitive);
+        if (end <= start)
+            return {};
+        const int endIncl = end + QStringLiteral("</html>").size();
+        const QString doc = raw.mid(start, endIncl - start).trimmed();
+        return doc.size() >= 256 ? doc : QString();
+    };
+
+    html = extractRawHtmlDoc(rawUtf8);
+    if (html.isEmpty())
+        html = extractRawHtmlDoc(rawLatin1);
+    if (!html.isEmpty())
+        return html;
 
     if (const QString plain = Mime::extractPlainTextWithMailio(fetchRespRaw).trimmed(); !plain.isEmpty()) {
         QString escaped = plain.toHtmlEscaped();
@@ -491,24 +440,123 @@ extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw) {
         "</body></html>");
 }
 
+// Remove a complete <tag>…</tag> block using a linear string scan.
+// Avoids PCRE backtracking limits that cause regex to fail on large HTML.
+static void stripHtmlBlock(QString &s, QLatin1StringView tag)
+{
+    QString openPfx; openPfx.reserve(tag.size() + 1); openPfx += u'<'; openPfx += tag;
+    QString closeTag; closeTag.reserve(tag.size() + 2); closeTag += u'<'; closeTag += u'/'; closeTag += tag;
+    int i = 0;
+    while (i < s.size()) {
+        const int start = s.indexOf(openPfx, i, Qt::CaseInsensitive);
+        if (start < 0) break;
+        const int afterTag = start + openPfx.size();
+        if (afterTag < s.size()) {
+            const QChar c = s[afterTag];
+            // Must be >, /, or whitespace — not a longer tag name like <header>
+            if (c != u'>' && c != u'/' && !c.isSpace()) { i = start + 1; continue; }
+        }
+        const int closeStart = s.indexOf(closeTag, start, Qt::CaseInsensitive);
+        if (closeStart < 0) { s.truncate(start); break; }
+        const int closeEnd = s.indexOf(u'>', closeStart);
+        if (closeEnd < 0) { s.truncate(start); break; }
+        s.remove(start, closeEnd - start + 1);
+    }
+}
+
+// Flatten HTML to plain text for snippet generation.
+// Uses string-based block removal (no regex backtracking) for <head>/<style>/<script>.
+static QString flattenHtmlToText(const QString &html)
+{
+    auto s = html;
+    stripHtmlBlock(s, "head"_L1);
+    stripHtmlBlock(s, "style"_L1);
+    stripHtmlBlock(s, "script"_L1);
+
+    // Block-end tags → newline so words don't jam together
+    static const QRegularExpression kBreakTagsRe(
+        QStringLiteral("<br\\s*/?>|</p>|</div>|</li>|</tr>|</h[1-6]>"),
+        QRegularExpression::CaseInsensitiveOption);
+    s.replace(kBreakTagsRe, "\n"_L1);
+
+    // Strip remaining tags
+    static const QRegularExpression kTagRe(QStringLiteral("<[^>]+>"));
+    s.replace(kTagRe, " "_L1);
+
+    // Decode common HTML entities
+    s.replace("&nbsp;"_L1,  " "_L1,  Qt::CaseInsensitive);
+    s.replace("&amp;"_L1,   "&"_L1,  Qt::CaseInsensitive);
+    s.replace("&lt;"_L1,    "<"_L1,  Qt::CaseInsensitive);
+    s.replace("&gt;"_L1,    ">"_L1,  Qt::CaseInsensitive);
+    s.replace("&#39;"_L1,   "'"_L1,  Qt::CaseInsensitive);
+    s.replace("&quot;"_L1,  "\""_L1, Qt::CaseInsensitive);
+
+    static const QRegularExpression kWsRe(QStringLiteral("\\s+"));
+    s.replace(kWsRe, " "_L1);
+    return s.trimmed();
+}
+
+// Clean up plain-text content before using it as a snippet.
+// Skips forwarded-message preamble and leading separator lines.
+static QString cleanPlainTextForSnippet(const QString &text)
+{
+    // Skip forwarded-message header block (e.g. "---------- Forwarded message ---------")
+    const int fwdIdx = text.indexOf("forwarded message"_L1, 0, Qt::CaseInsensitive);
+    if (fwdIdx >= 0 && fwdIdx < 200) {
+        const int blankLine = text.indexOf("\n\n"_L1, fwdIdx);
+        if (blankLine >= 0) {
+            const auto after = text.mid(blankLine).trimmed();
+            if (after.size() > 20) return after;
+        }
+    }
+    // Strip leading separator-only lines (---, ===, ***, etc.)
+    int pos = 0;
+    while (pos < text.size()) {
+        const int lineEnd = text.indexOf('\n', pos);
+        if (lineEnd < 0) break;
+        bool isSep = (lineEnd - pos) >= 3;
+        for (int j = pos; isSep && j < lineEnd; ++j) {
+            const auto u = text[j].unicode();
+            isSep = (u == '-' || u == '=' || u == '_' || u == '*' || u == ' ' || u == '\r');
+        }
+        if (!isSep) break;
+        pos = lineEnd + 1;
+    }
+    if (pos > 0) {
+        const auto stripped = text.mid(pos).trimmed();
+        if (!stripped.isEmpty()) return stripped;
+    }
+    return text;
+}
+
 QString
 extractBodyTextForSnippet(const QByteArray &fetchRespRaw) {
-    // Plain text is already clean — try it first.
+    // Plain text is preferred, but NOT when mailio's msg.content() fallback has returned
+    // raw HTML (happens for HTML-only messages with no text/plain part).
     const QString plain = Mime::extractPlainTextWithMailio(fetchRespRaw).trimmed();
-    if (!plain.isEmpty())
-        return plain;
+    if (!plain.isEmpty() && !plain.startsWith(u'<')) {
+        // Reject if the content looks like CSS leaking through (3+ braces in first 500 chars)
+        int braceCount = 0;
+        const int checkLen = qMin(plain.size(), 500);
+        for (int k = 0; k < checkLen; ++k) {
+            if (plain[k] == u'{' || plain[k] == u'}') ++braceCount;
+        }
+        if (braceCount < 3)
+            return cleanPlainTextForSnippet(plain);
+    }
 
-    // For HTML emails: strip tags aggressively, and prefer hidden preheader text
-    // (display:none spans that newsletters use to set the inbox preview line).
-    const QString html = Mime::extractHtmlWithMailio(fetchRespRaw).trimmed();
-    if (html.isEmpty())
-        return {};  // mailio failed entirely — caller should try raw literal paths
+    // HTML path: use the element-aware flattener
+    QString html = Mime::extractHtmlWithMailio(fetchRespRaw).trimmed();
+    // If mailio gave us nothing but "plain" is actually HTML, use it directly
+    if (html.isEmpty() && !plain.isEmpty() && plain.startsWith(u'<'))
+        html = plain;
+    if (html.isEmpty()) return {};
 
+    // Prefer hidden preheader text (display:none preview spans used by newsletters)
     const auto preheader = extractHiddenPreheader(html);
-    if (!preheader.isEmpty())
-        return preheader;
+    if (!preheader.isEmpty()) return preheader;
 
-    return stripHtmlTags(html);
+    return flattenHtmlToText(html);
 }
 
 QString
@@ -538,77 +586,6 @@ extractHiddenPreheader(const QString &html) {
         pre = pre.left(200);
 
     return pre;
-}
-
-QString
-stripHtmlTags(const QString &html) {
-    auto s = html;
-
-    static const QRegularExpression htmlHeadRe(QStringLiteral("<head[\\s\\S]*?</head>"), QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression htmlStyleRe(QStringLiteral("<style[^>]*>[\\s\\S]*?</style>"), QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression htmlScriptRe(QStringLiteral("<script[^>]*>[\\s\\S]*?</script>"), QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression htmlBodyStyleRe(QStringLiteral("body\\s*\\{[^}]*\\}"), QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression htmlBreakTagsRe(QStringLiteral("<br\\s*/?>|</p>|</div>|</li>|</tr>|</h[1-6]>"), QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression htmlTagRe(QStringLiteral("<[^>]+>"));
-    static const QRegularExpression htmlEntityRe(QStringLiteral("&nbsp;|&amp;|&[a-zA-Z0-9#]+;"));
-    static const QRegularExpression whitespaceRe(QStringLiteral("\\s+"));
-
-    s.replace(htmlHeadRe, QStringLiteral(" "));
-    s.replace(htmlStyleRe, QStringLiteral(" "));
-    s.replace(htmlScriptRe, QStringLiteral(" "));
-    s.replace(htmlBodyStyleRe, QStringLiteral(" "));
-
-    s.replace(htmlBreakTagsRe, QStringLiteral("\n"));
-    s.replace(htmlTagRe, QStringLiteral(" "));
-    s.replace(htmlEntityRe, QStringLiteral(" "));
-    s.replace(whitespaceRe, QStringLiteral(" "));
-
-    return s.trimmed();
-}
-
-QString
-decodeSnippetLiteral(const QByteArray &literalBytes, const BodyPart &meta) {
-    auto decoded = literalBytes;
-
-    if (const auto enc = meta.encoding.toLower(); enc == QStringLiteral("base64")) {
-        auto payload = literalBytes;
-
-        payload.replace("\r", "");
-        payload.replace("\n", "");
-
-        if (const auto b = QByteArray::fromBase64(payload); !b.isEmpty()) {
-            decoded = b;
-        }
-    }
-    else if (enc == QStringLiteral("quoted-printable")) {
-        decoded = decodeQuotedPrintable(literalBytes);
-    }
-
-    QString text;
-    if (const auto cs = meta.charset.toLower(); cs == QStringLiteral("iso-8859-1") || cs == QStringLiteral("windows-1252")) {
-        text = QString::fromLatin1(decoded);
-    }
-    else {
-        text = QString::fromUtf8(decoded);
-    }
-
-    if (meta.subtype.toLower() == QStringLiteral("html") || text.contains('<')) {
-        const auto preheader = extractHiddenPreheader(text);
-        const auto bodyText = stripHtmlTags(text);
-
-        if (!preheader.isEmpty()) {
-            text = preheader;
-            if (!bodyText.isEmpty() && !bodyText.startsWith(preheader, Qt::CaseInsensitive)) {
-                text = (preheader + QStringLiteral(" ") + bodyText).left(220);
-            }
-        }
-        else {
-            text = bodyText;
-        }
-    }
-    static const QRegularExpression whitespaceRe(QStringLiteral("\\s+"));
-    text.replace(whitespaceRe, QStringLiteral(" "));
-    return text.trimmed();
 }
 
 } // namespace Imap::BodyProcessor

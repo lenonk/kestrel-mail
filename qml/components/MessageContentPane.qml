@@ -1734,6 +1734,7 @@ Rectangle {
             property double pendingClickAtMs: 0
             property double pendingLoadCompletedAtMs: 0
             property string pendingCompletedReason: ""
+            property bool suppressNextLoadCommit: false
 
             function loadHtmlIfChanged(reason) {
                 const t0 = Date.now();
@@ -1811,6 +1812,7 @@ Rectangle {
                         return;
                     }
                     // Drop previous document right at fade-out completion before loading next.
+                    htmlContainer.suppressNextLoadCommit = true;
                     htmlView.loadHtml("<!doctype html><html><body></body></html>", "file:///");
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
@@ -1846,6 +1848,11 @@ Rectangle {
                 onLoadingChanged: function (req) {
                     const st = req.status;
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
+                        if (htmlContainer.suppressNextLoadCommit) {
+                            htmlContainer.suppressNextLoadCommit = false;
+                            return;
+                        }
+
                         const loadedForCurrent = !htmlContainer.activeLoadMessageKey.length
                                               || htmlContainer.activeLoadMessageKey === root.selectedMessageEdgeKey;
                         const hasNewerPending = htmlContainer.pendingMessageKey.length > 0
