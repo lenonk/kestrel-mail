@@ -96,6 +96,8 @@ private:
 
     QSet<QString>             m_inFlightBodyHydrations;
     QMutex                    m_inFlightBodyHydrationsMutex;
+    QSet<QString>             m_activeFolderSyncTargets;
+    QMutex                    m_activeFolderSyncTargetsMutex;
     QSet<QString>             m_activeBgHydrateFolders;
     QSet<QString>             m_pendingBgHydrateFolders;
     QMutex                    m_bgHydrateMutex;

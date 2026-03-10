@@ -1747,10 +1747,23 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
         return;
 
     const auto target = folderName.trimmed().isEmpty() ? "INBOX"_L1 : folderName.trimmed();
+    const QString syncTargetKey = target.trimmed().toLower();
+
+    {
+        QMutexLocker lock(&m_activeFolderSyncTargetsMutex);
+        if (m_activeFolderSyncTargets.contains(syncTargetKey))
+            return;
+        m_activeFolderSyncTargets.insert(syncTargetKey);
+    }
+    const auto releaseSyncTarget = [this, syncTargetKey]() {
+        QMutexLocker lock(&m_activeFolderSyncTargetsMutex);
+        m_activeFolderSyncTargets.remove(syncTargetKey);
+    };
 
     if (target.contains("/Categories/"_L1, Qt::CaseInsensitive)) {
         if (announce)
             emit syncFinished(true, "Category folders are managed via labels.");
+        releaseSyncTarget();
         return;
     }
 
@@ -1758,6 +1771,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
     if (!m_accounts || !m_store) {
         if (announce)
             emit syncFinished(false, "Sync dependencies not initialized.");
+        releaseSyncTarget();
         return;
     }
 
@@ -1765,6 +1779,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
     if (accounts.isEmpty()) {
         if (announce)
             emit syncFinished(false, "No accounts configured yet.");
+        releaseSyncTarget();
         return;
     }
 
@@ -1830,7 +1845,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
             return result;
         },
-        [this, announce, target](const SyncResult &r) {
+        [this, announce, target, releaseSyncTarget](const SyncResult &r) {
             QString folderLabel = target;
             if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
                 folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
@@ -1851,24 +1866,18 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             if (announce) {
                 if (!r.ok)
                     emit syncFinished(false, r.message);
-                else if (r.inserted > 0)
-                    emit syncFinished(true, QStringLiteral("%1 new message%2 received.")
-                                               .arg(r.inserted)
-                                               .arg(r.inserted == 1 ? QString() : "s"));
                 else if (syncedCount > 0)
                     emit syncFinished(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
+                releaseSyncTarget();
                 return;
             }
 
             if (!r.ok) {
                 emit realtimeStatus(false, r.message);
-            } else if (r.inserted > 0) {
-                emit realtimeStatus(true, QStringLiteral("%1 new message%2 received.")
-                                         .arg(r.inserted)
-                                         .arg(r.inserted == 1 ? QString() : "s"));
             } else if (syncedCount > 0) {
                 emit realtimeStatus(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
             }
+            releaseSyncTarget();
         }
     );
 }
