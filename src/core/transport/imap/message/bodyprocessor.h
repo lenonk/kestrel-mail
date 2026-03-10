@@ -16,6 +16,7 @@ struct BodyPart {
     QString filename;      // attachment/display filename when present
     int bytes = 0;
     bool isAttachment = false;
+    bool isInline = false;     // Content-Disposition: inline — render in body, not as card
     int score = 0;         // Higher score = better for snippet extraction
 };
 
@@ -56,12 +57,6 @@ QByteArray decodeTransferEncoded(const QByteArray &raw);
 QByteArray decodeQuotedPrintable(const QByteArray &in);
 
 /**
- * Extract snippet from FETCH response by finding best text/plain or text/html part.
- * Returns cleaned, decoded snippet text.
- */
-QString extractBodySnippetFromFetch(const QByteArray &fetchRespRaw);
-
-/**
  * Extract HTML body from FETCH response using mailio parser.
  * Falls back to plain text wrapped in HTML if no HTML part found.
  */
@@ -69,28 +64,16 @@ QString extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw);
 
 /**
  * Extract plain text for snippet generation using mailio parser.
- * Tries plain text first, then HTML via stripHtmlTags.
- * Returns empty string on failure (no fallback message), allowing
- * the caller to fall through to raw-literal extraction paths.
+ * Prefers text/plain; falls back to HTML flattening via flattenHtmlToText.
+ * Detects HTML-as-plain (HTML-only emails) and routes through the HTML path.
+ * Returns empty on total failure, allowing the caller to fall back.
  */
 QString extractBodyTextForSnippet(const QByteArray &fetchRespRaw);
 
 /**
- * Decode snippet literal with charset detection and cleaning.
- * Handles HTML preheader extraction and text cleaning.
- */
-QString decodeSnippetLiteral(const QByteArray &literalBytes, const BodyPart &meta);
-
-/**
- * Extract hidden preheader text from HTML (display:none blocks).
+ * Extract hidden preheader text from HTML (display:none blocks used by newsletters).
  */
 QString extractHiddenPreheader(const QString &html);
-
-/**
- * Strip HTML tags and return plain text.
- * Preserves line breaks from block elements.
- */
-QString stripHtmlTags(const QString &html);
 
 namespace Private_ {
 

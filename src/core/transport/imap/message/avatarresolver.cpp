@@ -11,6 +11,8 @@
 #include <QSet>
 #include <QHash>
 #include <QCryptographicHash>
+#include <QMutex>
+#include <QMutexLocker>
 
 namespace Imap::AvatarResolver {
 
@@ -155,6 +157,7 @@ parseBimiLogoFromTxtRecord(const QString &txtRaw) {
 
 QString
 resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessToken) {
+    static QMutex mutex;
     static QHash<QString, QString> cache;
     static bool peopleAuthUnavailable = false;
 
@@ -162,8 +165,15 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     if (e.isEmpty() || accessToken.trimmed().isEmpty())
         return {};
 
-    if (cache.contains(e))
-        return cache.value(e);
+    {
+        QMutexLocker lock(&mutex);
+        if (cache.contains(e))
+            return cache.value(e);
+        if (peopleAuthUnavailable) {
+            cache.insert(e, QString());
+            return {};
+        }
+    }
 
     const auto at = e.indexOf('@');
     const auto local = (at > 0) ? e.left(at) : QString();
@@ -177,6 +187,7 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     };
 
     if (!likelyPersonalDomains.contains(domain)) {
+        QMutexLocker lock(&mutex);
         cache.insert(e, QString());
         return {};
     }
@@ -188,11 +199,7 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
             || local.contains(QStringLiteral("do-not-reply"))
             || local.contains(QStringLiteral("mailer-daemon"))
             || local.contains(QStringLiteral("postmaster"))) {
-        cache.insert(e, QString());
-        return {};
-    }
-
-    if (peopleAuthUnavailable) {
+        QMutexLocker lock(&mutex);
         cache.insert(e, QString());
         return {};
     }
@@ -246,19 +253,25 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
         const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         outcome = QStringLiteral("http-%1").arg(status > 0 ? status : -1);
         if (status == 401 || status == 403) {
+            QMutexLocker lock(&mutex);
             peopleAuthUnavailable = true;
         }
     }
 
     if (!reply->isFinished()) reply->abort();
     reply->deleteLater();
-    cache.insert(e, found);
+
+    {
+        QMutexLocker lock(&mutex);
+        cache.insert(e, found);
+    }
 
     return found;
 }
 
 QString
 fetchAvatarBlob(const QString &url) {
+    static QMutex mutex;
     static QHash<QString, AvatarBlobCacheEntry> cache;
 
     auto u = url.trimmed();
@@ -267,9 +280,12 @@ fetchAvatarBlob(const QString &url) {
     }
 
     const auto now = QDateTime::currentDateTimeUtc();
-    if (const auto it = cache.constFind(u); it != cache.constEnd() && it.value().fetchedAtUtc.secsTo(now) < kAvatarBlobTtlSeconds) {
-        const auto mime = it.value().mime.isEmpty() ? QStringLiteral("image/png") : it.value().mime;
-        return QStringLiteral("data:%1;base64,%2").arg(mime, QString::fromLatin1(it.value().bytes.toBase64()));
+    {
+        QMutexLocker lock(&mutex);
+        if (const auto it = cache.constFind(u); it != cache.constEnd() && it.value().fetchedAtUtc.secsTo(now) < kAvatarBlobTtlSeconds) {
+            const auto mime = it.value().mime.isEmpty() ? QStringLiteral("image/png") : it.value().mime;
+            return QStringLiteral("data:%1;base64,%2").arg(mime, QString::fromLatin1(it.value().bytes.toBase64()));
+        }
     }
 
     QNetworkAccessManager nam;
@@ -290,11 +306,14 @@ fetchAvatarBlob(const QString &url) {
         const auto payload = reply->readAll();
         const auto contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString().trimmed().toLower();
         if (!payload.isEmpty() && payload.size() <= 512 * 1024 && contentType.startsWith(QStringLiteral("image/"))) {
-            AvatarBlobCacheEntry e;
-            e.bytes = payload;
-            e.mime = contentType;
-            e.fetchedAtUtc = now;
-            cache.insert(u, e);
+            AvatarBlobCacheEntry entry;
+            entry.bytes = payload;
+            entry.mime = contentType;
+            entry.fetchedAtUtc = now;
+            {
+                QMutexLocker lock(&mutex);
+                cache.insert(u, entry);
+            }
             out = QStringLiteral("data:%1;base64,%2").arg(contentType, QString::fromLatin1(payload.toBase64()));
         }
     }
@@ -363,13 +382,8 @@ extractListIdDomain(const QString &headerSource) {
 
 QString
 resolveBimiLogoUrlViaDoh(const QString& domain) {
+    static QMutex mutex;
     static QHash<QString, QString> cache;
-    static int cacheHits = 0;
-    static int cacheMisses = 0;
-    static int networkQueries = 0;
-    static int networkErrors = 0;
-    static int networkTimeouts = 0;
-    static int logoHits = 0;
 
     const QString d = domain.trimmed().toLower();
     if (d.isEmpty())
@@ -381,23 +395,22 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
     };
 
     if (bimiSkip.contains(d)) {
+        QMutexLocker lock(&mutex);
         cache.insert(d, QString());
         return {};
     }
 
-    if (cache.contains(d)) {
-        ++cacheHits;
-        return cache.value(d);
+    {
+        QMutexLocker lock(&mutex);
+        if (cache.contains(d))
+            return cache.value(d);
     }
-
-    ++cacheMisses;
 
     const QUrl url(QStringLiteral("https://dns.google/resolve?name=default._bimi.%1&type=TXT").arg(d));
     QNetworkAccessManager nam;
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("kestrel-mail/1.0"));
 
-    ++networkQueries;
     QNetworkReply *reply = nam.get(req);
     QEventLoop loop;
     QTimer timeout;
@@ -408,36 +421,26 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
     loop.exec();
 
     QString found;
-    bool timedOut = false;
-    if (!reply->isFinished()) {
-        timedOut = true;
-        ++networkTimeouts;
-    }
-    else if (reply->error() == QNetworkReply::NoError) {
+    if (reply->isFinished() && reply->error() == QNetworkReply::NoError) {
         const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
         for (const auto answers = obj.value(QStringLiteral("Answer")).toArray(); const auto &av : answers) {
             const auto ao = av.toObject();
-
             if (const auto type = ao.value(QStringLiteral("type")).toInt(0); type != 16)
                 continue; // TXT record
-
             const auto data = ao.value(QStringLiteral("data")).toString().trimmed();
             if (const auto logo = parseBimiLogoFromTxtRecord(data); !logo.isEmpty()) {
                 found = logo;
-                ++logoHits;
                 break;
             }
         }
-    }
-    else {
-        ++networkErrors;
     }
 
     if (!reply->isFinished()) reply->abort();
     reply->deleteLater();
 
-    cache.insert(d, found);
-    if (!timedOut) {
+    {
+        QMutexLocker lock(&mutex);
+        cache.insert(d, found);
     }
 
     return found;
@@ -445,14 +448,18 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
 
 QString
 resolveGravatarUrl(const QString &email) {
+    static QMutex mutex;
     static QHash<QString, QString> cache;
 
     const QString e = email.trimmed().toLower();
     if (e.isEmpty())
         return {};
 
-    if (cache.contains(e))
-        return cache.value(e);
+    {
+        QMutexLocker lock(&mutex);
+        if (cache.contains(e))
+            return cache.value(e);
+    }
 
     const auto at = e.indexOf('@');
     const auto local = (at > 0) ? e.left(at) : QString();
@@ -462,6 +469,7 @@ resolveGravatarUrl(const QString &email) {
             || local.contains(QStringLiteral("do-not-reply"))
             || local.contains(QStringLiteral("mailer-daemon"))
             || local.contains(QStringLiteral("postmaster"))) {
+        QMutexLocker lock(&mutex);
         cache.insert(e, {});
         return {};
     }
@@ -475,7 +483,10 @@ resolveGravatarUrl(const QString &email) {
         ? QString{}
         : QStringLiteral("data:%1;base64,%2").arg(result.mime, QString::fromLatin1(result.bytes.toBase64()));
 
-    cache.insert(e, found);
+    {
+        QMutexLocker lock(&mutex);
+        cache.insert(e, found);
+    }
     return found;
 }
 
@@ -569,14 +580,18 @@ resolveFaviconLogoUrl(const QString &domain) {
 
 QString
 resolveFaviconLogoUrl(const QString &domain) {
+    static QMutex mutex;
     static QHash<QString, QString> cache;
 
     const QString d = domain.trimmed().toLower();
     if (d.isEmpty())
         return {};
 
-    if (cache.contains(d))
-        return cache.value(d);
+    {
+        QMutexLocker lock(&mutex);
+        if (cache.contains(d))
+            return cache.value(d);
+    }
 
     // Personal/consumer domains: use initials, not a brand logo.
     static const QSet<QString> skip = {
@@ -588,6 +603,7 @@ resolveFaviconLogoUrl(const QString &domain) {
     };
 
     if (skip.contains(d)) {
+        QMutexLocker lock(&mutex);
         cache.insert(d, {});
         return {};
     }
@@ -609,7 +625,10 @@ resolveFaviconLogoUrl(const QString &domain) {
             found = toDataUri(ddgResult);
     }
 
-    cache.insert(d, found);
+    {
+        QMutexLocker lock(&mutex);
+        cache.insert(d, found);
+    }
 
     return found;
 }

@@ -194,17 +194,21 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
     if (m_i < m_text.size() && m_text[m_i] != '(' && m_text[m_i] != ')')
         skipAny();
 
-    // Content-Disposition: may carry the filename when content-type params don't.
-    if (filename.isEmpty()) {
+    // Content-Disposition: always parse — type (inline vs attachment) affects isAttachment.
+    bool isInlineDisp = false;
+    {
         const QString dispRaw = readParenBlock();
         if (!dispRaw.isEmpty()) {
-            if (const auto fm = nameRe.match(dispRaw); fm.hasMatch())
-                filename = fm.captured(1).trimmed();
+            static const QRegularExpression dispTypeRe(
+                QStringLiteral("^\\(\\s*\"([^\"]+)\""),
+                QRegularExpression::CaseInsensitiveOption);
+            if (const auto dm = dispTypeRe.match(dispRaw); dm.hasMatch())
+                isInlineDisp = dm.captured(1).compare(QStringLiteral("inline"), Qt::CaseInsensitive) == 0;
+            if (filename.isEmpty()) {
+                if (const auto fm = nameRe.match(dispRaw); fm.hasMatch())
+                    filename = fm.captured(1).trimmed();
+            }
         }
-    } else {
-        skipWs();
-        if (m_i < m_text.size() && m_text[m_i] == '(')
-            readParenBlock(); // advance past disposition we don't need
     }
 
     {
@@ -217,8 +221,9 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
         part.encoding = encoding;
         part.charset = charset.isEmpty() ? QStringLiteral("utf-8") : charset;
         part.filename = filename;
+        part.isInline = isInlineDisp;
 
-        if (!part.filename.isEmpty())
+        if (!part.filename.isEmpty() && !isInlineDisp)
             part.isAttachment = true;
 
         auto okBytes = false;
@@ -298,6 +303,8 @@ parseAttachmentParts(const QString &bodyStructureResponse) {
     QList<BodyPart> all = parsePreferredTextParts(bodyStructureResponse);
     QList<BodyPart> out;
     for (const BodyPart &p : all) {
+        if (p.isInline)
+            continue;
         if (p.isAttachment
                 || (p.type != QStringLiteral("TEXT")
                     && p.type != QStringLiteral("MULTIPART")

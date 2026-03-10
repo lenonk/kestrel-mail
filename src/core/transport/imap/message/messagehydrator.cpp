@@ -92,8 +92,11 @@ QString MessageHydrator::execute(const Request &req) {
         QString html = extractBodyHtmlFromFetch(raw).trimmed();
         qint64 parseMs = step.elapsed();
 
-        // If bounded window produced suspiciously tiny HTML, retry full body once.
-        if (!html.isEmpty() && html.size() < 512) {
+        // If bounded window produced suspiciously tiny HTML, or only a plain-text
+        // fallback (white-space:normal wrapper), the 128 KB window missed the HTML part.
+        // Retry with the full body so mailio can find the complete HTML content.
+        const bool isPlainTextFallback = html.contains(QLatin1String("white-space:normal"));
+        if (!html.isEmpty() && (html.size() < 512 || isPlainTextFallback)) {
             step.restart();
             const auto rawFull = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
             fetchMs += step.elapsed();

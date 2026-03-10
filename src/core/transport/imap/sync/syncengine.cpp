@@ -37,9 +37,6 @@ using Imap::Parser::parseSearchIds;
 // Snippet utilities
 using Imap::MessageUtils::decodeRfc2047;
 using Imap::MessageUtils::compileDeterministicSnippet;
-using Imap::MessageUtils::cleanSnippet;
-using Imap::MessageUtils::snippetQualityScore;
-using Imap::MessageUtils::snippetLooksLikeProtocolOrJunk;
 
 // Address utilities
 using Imap::MessageUtils::extractEmailAddress;
@@ -57,7 +54,6 @@ using Imap::AvatarResolver::resolveGravatarUrl;
 using Imap::AvatarResolver::fetchAvatarBlob;
 
 // Body processor
-using Imap::BodyProcessor::extractBodySnippetFromFetch;
 using Imap::BodyProcessor::parseAttachmentParts;
 
 namespace Imap {
@@ -617,17 +613,7 @@ enrichSnippets(const SyncContext &ctx, IngestState &state) {
     // IngestState already support them (snippetEnrichCandidates, etc.).
 
     Q_UNUSED(ctx);
-
-    // Absolute final sweep: clear low-quality snippet remnants.
-    for (int i = 0; i < state.out.size(); ++i) {
-        QVariantMap row = state.out.at(i).toMap();
-        const QString sn = row.value("snippet"_L1).toString().trimmed();
-        if (sn.startsWith("From "_L1, Qt::CaseInsensitive)
-                || snippetLooksLikeProtocolOrJunk(sn)) {
-            row.insert("snippet"_L1, QString());
-            state.out[i] = row;
-        }
-    }
+    Q_UNUSED(state);
 }
 
 // ── Incremental sync ──────────────────────────────────────────────────────────

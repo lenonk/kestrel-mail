@@ -283,29 +283,15 @@ void MessageListModel::refresh()
 void MessageListModel::loadMore()
 {
     if (!m_hasMore || m_isLoadingPage) {
-        qInfo().noquote() << "[list-loadmore-skip]"
-                          << "folderKey=" << m_folderKey
-                          << "hasMore=" << m_hasMore
-                          << "isLoading=" << m_isLoadingPage
-                          << "nextOffset=" << m_nextOffset;
         return;
     }
-    m_isLoadingPage = true;
 
-    qInfo().noquote() << "[list-loadmore-start]"
-                      << "folderKey=" << m_folderKey
-                      << "offset=" << m_nextOffset
-                      << "pageSize=" << m_pageSize;
+    m_isLoadingPage = true;
 
     QVariantList nextRows;
     bool hasMore = false;
     if (m_dataStore) {
-        nextRows = m_dataStore->messagesForSelection(m_folderKey,
-                                                     m_selectedCategories,
-                                                     m_selectedCategoryIndex,
-                                                     m_pageSize,
-                                                     m_nextOffset,
-                                                     &hasMore);
+        nextRows = m_dataStore->messagesForSelection(m_folderKey, m_selectedCategories, m_selectedCategoryIndex, m_pageSize, m_nextOffset, &hasMore);
     }
 
     if (!nextRows.isEmpty()) {
@@ -313,12 +299,6 @@ void MessageListModel::loadMore()
         for (const QVariant &v : nextRows) m_loadedSourceRows.push_back(v);
         m_nextOffset += nextRows.size();
     }
-
-    qInfo().noquote() << "[list-loadmore-data]"
-                      << "folderKey=" << m_folderKey
-                      << "fetched=" << nextRows.size()
-                      << "hasMore=" << hasMore
-                      << "nextOffset(after)=" << m_nextOffset;
 
     const bool oldHasMore = m_hasMore;
     m_hasMore = hasMore;
@@ -357,11 +337,6 @@ void MessageListModel::loadMore()
     const int end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
     for (int i = m_windowStart; i < end; ++i) window.push_back(m_allRows.at(i));
     applyRows(std::move(window));
-
-    qInfo().noquote() << "[list-loadmore-end]"
-                      << "folderKey=" << m_folderKey
-                      << "allRows=" << m_allRows.size()
-                      << "visibleRows=" << m_rows.size();
 
     m_isLoadingPage = false;
 }
