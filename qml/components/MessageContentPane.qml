@@ -1757,10 +1757,8 @@ Rectangle {
                         const tDone = Date.now();
                         const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
-                                    "reason=", htmlContainer.pendingLoadReason, "loadMs=", loadMs, "totalMs=", totalMs);
-
-                        htmlView.runJavaScript("(function(){try{var out=[];var root=document.querySelector('[data-kestrel-inline-attachments]');if(!root)return JSON.stringify({count:0,imgs:[]});var imgs=root.querySelectorAll('img');for(var i=0;i<imgs.length;i++){var im=imgs[i];out.push({src:im.currentSrc||im.src,complete:!!im.complete,naturalWidth:im.naturalWidth||0,naturalHeight:im.naturalHeight||0});}return JSON.stringify({count:imgs.length,imgs:out});}catch(e){return JSON.stringify({error:String(e)});}})();", function(result) {
-                        });
+                        console.log("[perf-html] load-complete reason=", htmlContainer.pendingLoadReason,
+                                    "status=", st, "loadMs=", loadMs, "totalMs=", totalMs);
 
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingLoadReason = "";
