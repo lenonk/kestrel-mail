@@ -1783,8 +1783,7 @@ Rectangle {
             Timer {
                 id: fadeOutLoadTimer
 
-                // Keep transition, but avoid perceptible click-to-render lag.
-                interval: 16
+                interval: 250
                 repeat: false
 
                 onTriggered: {
