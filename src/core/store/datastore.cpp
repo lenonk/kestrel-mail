@@ -3463,7 +3463,7 @@ QVariantList DataStore::attachmentsForMessage(const QString &accountEmail, const
     // Resolve message_id via the folder edge, then fetch all attachment rows.
     QSqlQuery q(database);
     q.prepare(QStringLiteral(R"(
-        SELECT ma.part_id, ma.name, ma.mime_type, ma.encoded_bytes, ma.encoding
+        SELECT DISTINCT ma.part_id, ma.name, ma.mime_type, ma.encoded_bytes, ma.encoding
         FROM message_attachments ma
         JOIN message_folder_map mfm ON mfm.message_id = ma.message_id
                                    AND mfm.account_email = ma.account_email
