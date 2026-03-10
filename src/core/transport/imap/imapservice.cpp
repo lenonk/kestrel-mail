@@ -63,6 +63,13 @@ std::atomic_bool g_poolInitialized{false};
 std::function<QString(const QString &email)> g_poolTokenRefresher;
 constexpr int kOperationalPoolMax = 5;
 constexpr int kPoolAcquireTimeoutMs = 3500;
+
+static bool isBackgroundOwner(const QString &owner) {
+    return owner.startsWith("bg-", Qt::CaseInsensitive)
+        || owner.startsWith("background", Qt::CaseInsensitive)
+        || owner == "prefetch-attachments"_L1
+        || owner == "prefetch-images"_L1;
+}
 }
 
 std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString &email, const QString &owner) {
@@ -71,16 +78,28 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
 
     QMutexLocker lock(&g_poolMutex);
     while (true) {
+        int freeForEmail = 0;
         for (int i = 0; i < static_cast<int>(g_poolSlots.size()); ++i) {
-            if (g_poolSlots[i].busy)
-                continue;
             if (!email.isEmpty() && g_poolSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
                 continue;
-            g_poolSlots[i].busy = true;
-            g_poolSlots[i].owner = owner;
-            g_poolSlots[i].leasedAtMs = QDateTime::currentMSecsSinceEpoch();
-            slotIndex = i;
-            break;
+            if (!g_poolSlots[i].busy)
+                ++freeForEmail;
+        }
+
+        const bool reserveForUser = isBackgroundOwner(owner) && freeForEmail <= 1;
+
+        if (!reserveForUser) {
+            for (int i = 0; i < static_cast<int>(g_poolSlots.size()); ++i) {
+                if (g_poolSlots[i].busy)
+                    continue;
+                if (!email.isEmpty() && g_poolSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
+                    continue;
+                g_poolSlots[i].busy = true;
+                g_poolSlots[i].owner = owner;
+                g_poolSlots[i].leasedAtMs = QDateTime::currentMSecsSinceEpoch();
+                slotIndex = i;
+                break;
+            }
         }
 
         if (slotIndex >= 0)
@@ -1051,11 +1070,27 @@ ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &,
 }
 
 void
-ImapService::backgroundFetchBodies(const QVariantMap &, const QString &, const QString &,
+ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
                                    const QString &) {
-    // Disabled intentionally: background hydration can starve pooled connections
-    // and delay user-initiated message opens. Keep click-initiated hydration only.
-    return;
+    if (!m_store)
+        return;
+
+    bool ok = false;
+    const int configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
+    const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
+
+    QStringList candidates;
+    if (QThread::currentThread() == thread()) {
+        candidates = m_store->bodyFetchCandidates(email, folder, limit);
+    } else {
+        QMetaObject::invokeMethod(this, [this, &candidates, email, folder, limit]() {
+            if (m_store)
+                candidates = m_store->bodyFetchCandidates(email, folder, limit);
+        }, Qt::BlockingQueuedConnection);
+    }
+
+    for (const auto &uid : candidates)
+        hydrateMessageBodyInternal(email, folder, uid, false);
 }
 
 void
@@ -1534,10 +1569,11 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
         const qint64 mapMs = hydrateTimer.elapsed();
 
+        const QString hydrateOwner = userInitiated ? "hydrate-user"_L1 : "bg-hydrate"_L1;
         qint8 attempts = 0;
-        auto pooled = getPooledConnection(emailCopy, "hydrate");
+        auto pooled = getPooledConnection(emailCopy, hydrateOwner);
         while (!pooled && attempts++ < 10)
-            pooled = getPooledConnection(emailCopy, "hydrate-retry");
+            pooled = getPooledConnection(emailCopy, hydrateOwner + "-retry");
 
         const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
 
