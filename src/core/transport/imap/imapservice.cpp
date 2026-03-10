@@ -55,7 +55,7 @@ QWaitCondition g_poolWait;
 std::vector<PooledConnSlot> g_poolSlots;
 std::atomic_bool g_poolInitialized{false};
 std::function<QString(const QString &email)> g_poolTokenRefresher;
-constexpr int kOperationalPoolMax = 10;
+constexpr int kOperationalPoolMax = 7;
 constexpr int kPoolAcquireTimeoutMs = 3500;
 
 static bool isBackgroundOwner(const QString &owner) {
@@ -1558,22 +1558,24 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
                                                          QRegularExpression::CaseInsensitiveOption).match(htmlTrim).hasMatch();
         const bool hasMimeHeaders = htmlLower.contains(QStringLiteral("content-type:"))
                                  || htmlLower.contains(QStringLiteral("mime-version:"));
+        const bool plainWrap = htmlTrim.startsWith("<html><body style=\"white-space:normal;\">", Qt::CaseInsensitive);
         const bool suspicious = !hasHtmlish || hasMarkdownLinks || hasMimeHeaders || htmlTrim.size() < 160;
 
-        if (suspicious) {
-            QVariantMap row;
-            if (m_store)
-                row = m_store->messageByKey(emailNorm, folderNorm, uidNorm);
-            const QString subject = row.value("subject"_L1).toString();
-            qWarning().noquote() << "[hydrate-html-db] suspicious"
-                                 << "source=" << (userInitiated ? "user" : "bg")
-                                 << "uid=" << uidNorm
-                                 << "subject=" << subject.left(120)
-                                 << "htmlLen=" << htmlTrim.size()
-                                 << "hasHtmlish=" << hasHtmlish
-                                 << "hasMarkdownLinks=" << hasMarkdownLinks
-                                 << "hasMimeHeaders=" << hasMimeHeaders;
-        }
+        QVariantMap row;
+        if (m_store)
+            row = m_store->messageByKey(emailNorm, folderNorm, uidNorm);
+        const QString subject = row.value("subject"_L1).toString();
+
+        qWarning().noquote() << "[hydrate-html-db] hydrate-result"
+                             << "source=" << (userInitiated ? "user" : "bg")
+                             << "uid=" << uidNorm
+                             << "subject=" << subject.left(120)
+                             << "htmlLen=" << htmlTrim.size()
+                             << "hasHtmlish=" << hasHtmlish
+                             << "hasMarkdownLinks=" << hasMarkdownLinks
+                             << "hasMimeHeaders=" << hasMimeHeaders
+                             << "plainWrap=" << plainWrap
+                             << "suspicious=" << suspicious;
 
         m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, html);
     });
