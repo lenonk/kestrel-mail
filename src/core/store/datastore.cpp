@@ -2415,6 +2415,12 @@ bool DataStore::hasUsableBodyForEdge(const QString &accountEmail, const QString 
     if (lower.contains("ok success [throttled]"_L1) || lower.contains("authenticationfailed"_L1))
         return false;
 
+    // Treat unresolved CID-backed inline images as not-yet-hydrated content.
+    // This allows a follow-up full FETCH+parse pass to inline embedded resources
+    // (common in Drafts where body_html may initially contain src="cid:...").
+    if (lower.contains("cid:"_L1))
+        return false;
+
     return true;
 }
 
