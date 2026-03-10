@@ -639,6 +639,19 @@ bool DataStore::init()
         "WHERE esp_vendor IS NOT NULL "
         "AND esp_vendor NOT IN ('Mailgun','Sendgrid','Mailchimp','Klaviyo','Postmark','Amazon SES')"
     ));
+    // Clear snippets that contain raw HTML/DOCTYPE content — produced by a bug where
+    // extractRfc822Literal returned the BODY[HEADER.FIELDS] literal instead of BODY[],
+    // or where HTML-only emails fed raw HTML into the plain-text path.
+    // Nulling these out causes them to be re-fetched by the fixed snippet pipeline.
+    q.exec(QStringLiteral(
+        "UPDATE messages SET snippet = NULL "
+        "WHERE snippet IS NOT NULL AND ("
+        "  snippet LIKE '<!DOCTYPE%' OR snippet LIKE '<%html%' OR "
+        "  snippet LIKE '<img%' OR snippet LIKE '<[%' OR "
+        "  snippet LIKE '<table%' OR snippet LIKE '<div%' OR "
+        "  snippet LIKE '<style%' OR snippet LIKE '<script%'"
+        ")"
+    ));
 
     if (!q.exec(QStringLiteral(R"(
         CREATE TABLE IF NOT EXISTS message_folder_map (
@@ -2064,6 +2077,27 @@ QStringList DataStore::folderUids(const QString &accountEmail, const QString &fo
 
     QSqlQuery q(database);
     q.prepare(QStringLiteral("SELECT uid FROM message_folder_map WHERE account_email=:account_email AND lower(folder)=lower(:folder)"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"), folder.trimmed());
+    if (!q.exec()) return out;
+    while (q.next()) {
+        const QString uid = q.value(0).toString().trimmed();
+        if (!uid.isEmpty()) out.push_back(uid);
+    }
+    return out;
+}
+
+QStringList DataStore::folderUidsWithNullSnippet(const QString &accountEmail, const QString &folder) const
+{
+    QStringList out;
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return out;
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(
+        "SELECT mfm.uid FROM message_folder_map mfm "
+        "JOIN messages m ON m.id = mfm.message_id "
+        "WHERE mfm.account_email = :account_email AND lower(mfm.folder) = lower(:folder) "
+        "AND (m.snippet IS NULL OR m.snippet = '')"));
     q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
     q.bindValue(QStringLiteral(":folder"), folder.trimmed());
     if (!q.exec()) return out;
