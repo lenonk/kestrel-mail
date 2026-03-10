@@ -818,6 +818,12 @@ Rectangle {
         // Rewrite known tracking redirect links to their real destination URLs.
         html = sanitizeTrackingLinks(html);
 
+        // Some senders hand us text/plain bodies wrapped as HTML with markdown links
+        // like [label](https://...). Convert those into real anchors for rendering.
+        html = html.replace(/\[([^\]\n]{1,240})\]\((https?:\/\/[^\s)]+)\)/gi, function (_, label, url) {
+            return '<a href="' + url + '">' + label + '</a>';
+        });
+
         // If we already have a full HTML document, avoid destructive rewrites.
         const trimmed = html.trim();
         if (/<html\b/i.test(trimmed) && /<\/html>\s*$/i.test(trimmed)) {
@@ -1777,7 +1783,8 @@ Rectangle {
             Timer {
                 id: fadeOutLoadTimer
 
-                interval: 250
+                // Keep transition, but avoid perceptible click-to-render lag.
+                interval: 16
                 repeat: false
 
                 onTriggered: {
