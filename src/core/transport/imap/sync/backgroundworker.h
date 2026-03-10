@@ -35,8 +35,6 @@ signals:
                                            qint64 uidNext, qint64 highestModSeq, qint64 messages);
     void syncHeadersAndFlagsRequested(const QVariantMap &account, const QString &email, const QString &folder,
                                       const QString &accessToken);
-    void fetchBodiesRequested(const QVariantMap &account, const QString &email, const QString &folder,
-                              const QString &accessToken);
     void idleLiveUpdateRequested(const QVariantMap &account, const QString &email);
 
     void loopError(const QString &message);

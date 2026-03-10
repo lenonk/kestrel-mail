@@ -935,12 +935,6 @@ ImapService::startBackgroundWorker() {
                 backgroundSyncHeadersAndFlags(account, email, folder, accessToken);
             }, Qt::QueuedConnection);
 
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::fetchBodiesRequested,
-            this, [this](const QVariantMap &account, const QString &email, const QString &folder,
-                         const QString &accessToken) {
-                backgroundFetchBodies(account, email, folder, accessToken);
-            }, Qt::QueuedConnection);
-
     connect(m_backgroundWorker, &Imap::BackgroundWorker::idleLiveUpdateRequested,
             this, [this](const QVariantMap &account, const QString &email) {
                 backgroundOnIdleLiveUpdate(account, email);
@@ -1765,8 +1759,32 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
                     return;
 
                 const QVariantList batch = pendingHeaders; pendingHeaders.clear();
-                QMetaObject::invokeMethod(this, [this, batch]() { m_store->upsertHeaders(batch); },
-                                         Qt::QueuedConnection);
+                QMetaObject::invokeMethod(this, [this, batch]() {
+                    if (!m_store)
+                        return;
+
+                    m_store->upsertHeaders(batch);
+
+                    QSet<QString> dispatched;
+                    for (const QVariant &hv : batch) {
+                        const QVariantMap h = hv.toMap();
+                        const QString email = h.value("accountEmail"_L1).toString().trimmed();
+                        const QString folder = h.value("folder"_L1).toString().trimmed();
+                        if (email.isEmpty() || folder.isEmpty())
+                            continue;
+
+                        const QString key = email.toLower() + "|"_L1 + folder.toLower();
+                        if (dispatched.contains(key))
+                            continue;
+                        dispatched.insert(key);
+
+                        qWarning().noquote() << "[bg-hydrate-flow] signal-sent"
+                                             << "account=" << email
+                                             << "folder=" << folder
+                                             << "source=upsert-batch";
+                        backgroundFetchBodies({}, email, folder, {});
+                    }
+                }, Qt::QueuedConnection);
                 flushTimer.restart();
             };
 
@@ -1863,8 +1881,32 @@ ImapService::syncAll(bool announce) {
                     return;
 
                 const QVariantList batch = pendingHeaders; pendingHeaders.clear();
-                QMetaObject::invokeMethod(this, [this, batch]() { m_store->upsertHeaders(batch); },
-                                         Qt::QueuedConnection);
+                QMetaObject::invokeMethod(this, [this, batch]() {
+                    if (!m_store)
+                        return;
+
+                    m_store->upsertHeaders(batch);
+
+                    QSet<QString> dispatched;
+                    for (const QVariant &hv : batch) {
+                        const QVariantMap h = hv.toMap();
+                        const QString email = h.value("accountEmail"_L1).toString().trimmed();
+                        const QString folder = h.value("folder"_L1).toString().trimmed();
+                        if (email.isEmpty() || folder.isEmpty())
+                            continue;
+
+                        const QString key = email.toLower() + "|"_L1 + folder.toLower();
+                        if (dispatched.contains(key))
+                            continue;
+                        dispatched.insert(key);
+
+                        qWarning().noquote() << "[bg-hydrate-flow] signal-sent"
+                                             << "account=" << email
+                                             << "folder=" << folder
+                                             << "source=upsert-batch";
+                        backgroundFetchBodies({}, email, folder, {});
+                    }
+                }, Qt::QueuedConnection);
                 flushTimer.restart();
             };
 
