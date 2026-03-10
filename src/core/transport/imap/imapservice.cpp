@@ -1066,13 +1066,18 @@ ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &,
 void
 ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
                                    const QString &) {
+    static qint64 sBgHydratePass = 0;
+    const qint64 pass = ++sBgHydratePass;
+
     if (!m_store)
         return;
 
     // Trigger one account-wide background hydrate pass from Inbox loop only.
     const QString f = folder.trimmed().toLower();
-    if (f != "inbox"_L1)
+    if (f != "inbox"_L1) {
+        qWarning().noquote() << "[bg-hydrate-pass]" << "pass=" << pass << "skipFolder=" << folder;
         return;
+    }
 
     bool ok = false;
     const int configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
@@ -1088,8 +1093,11 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
         }, Qt::BlockingQueuedConnection);
     }
 
+    qWarning().noquote() << "[bg-hydrate-pass]" << "pass=" << pass << "account=" << email
+                         << "limit=" << limit << "candidates=" << candidates.size();
+
     if (candidates.isEmpty()) {
-        qWarning().noquote() << "[bg-hydrate]" << "account=" << email << "candidates=0";
+        qWarning().noquote() << "[bg-hydrate]" << "pass=" << pass << "account=" << email << "candidates=0";
         return;
     }
 
@@ -1282,6 +1290,14 @@ ImapService::fetchFolderHeaders(const QString &email,
         QStringList result;
         QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
             if (m_store) result = m_store->folderUids(acctEmail, folder);
+        }, Qt::BlockingQueuedConnection);
+        return result;
+    };
+
+    ctx.getUidsNeedingSnippetRefresh = [this](const QString &acctEmail, const QString &folder) -> QStringList {
+        QStringList result;
+        QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
+            if (m_store) result = m_store->folderUidsWithNullSnippet(acctEmail, folder);
         }, Qt::BlockingQueuedConnection);
         return result;
     };

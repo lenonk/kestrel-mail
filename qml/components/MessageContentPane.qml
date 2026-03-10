@@ -950,6 +950,7 @@ Rectangle {
     color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
 
     onMessageDataChanged: {
+        console.log("[pane-state] message-changed", "to=", root.renderMessageKey)
         root.selectedAttachmentKey = "";
         htmlContainer.pendingHtml = "";
         htmlContainer.pendingMessageKey = "";
@@ -1722,6 +1723,7 @@ Rectangle {
                 pendingLoadQueuedAtMs = t0;
                 pendingClickAtMs = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? root.appRoot.lastMessageClickAtMs : 0;
                 const clickToQueue = pendingClickAtMs > 0 ? (pendingLoadQueuedAtMs - pendingClickAtMs) : -1;
+                console.log("[pane-state] queue", "reason=", reason, "msg=", pendingMessageKey, "clickToQueue=", clickToQueue, "len=", pendingHtml.length)
                 fadeOutLoadTimer.restart();
             }
             function scrollHtmlBy(deltaY) {
@@ -1755,12 +1757,14 @@ Rectangle {
                     if (!htmlContainer.pendingHtml.length)
                         return;
                     if (htmlContainer.pendingMessageKey.length > 0 && htmlContainer.pendingMessageKey !== root.renderMessageKey) {
+                        console.log("[pane-state] drop-stale-before-load", "pending=", htmlContainer.pendingMessageKey, "current=", root.renderMessageKey)
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingMessageKey = "";
                         return;
                     }
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
+                    console.log("[pane-state] start-load", "msg=", htmlContainer.activeLoadMessageKey, "reason=", htmlContainer.pendingLoadReason)
                     htmlContainer.bodyOpacity = 0.0;
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
@@ -1799,6 +1803,7 @@ Rectangle {
 
                         if (!loadedForCurrent) {
                             // Stale load completion for previous message selection; ignore visual commit.
+                            console.log("[pane-state] drop-stale-on-complete", "loadedFor=", htmlContainer.activeLoadMessageKey, "current=", root.renderMessageKey)
                             htmlContainer.pendingHtml = "";
                             htmlContainer.pendingMessageKey = "";
                             htmlContainer.activeLoadMessageKey = "";
@@ -1813,6 +1818,7 @@ Rectangle {
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
                         const clickToLoad = htmlContainer.pendingClickAtMs > 0 ? (tDone - htmlContainer.pendingClickAtMs) : -1;
 
+                        console.log("[pane-state] complete", "msg=", htmlContainer.activeLoadMessageKey, "status=", st, "loadMs=", loadMs, "totalMs=", totalMs, "clickToLoad=", clickToLoad)
                         htmlContainer.pendingLoadCompletedAtMs = tDone;
                         htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
                         htmlContainer.pendingHtml = "";
