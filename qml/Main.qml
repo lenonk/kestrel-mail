@@ -639,6 +639,9 @@ Kirigami.ApplicationWindow {
         root.syncMessageListModelSelection()
     }
     onSelectedMessageKeyChanged: {
+        const now = Date.now()
+        const clickDelta = root.lastMessageClickAtMs > 0 ? (now - root.lastMessageClickAtMs) : -1
+        console.log("[selection-path] selected-key-changed", "key=", root.selectedMessageKey, "clickDeltaMs=", clickDelta)
         markReadTimer.stop()
         if (root.selectedMessageKey.length > 0)
             markReadTimer.restart()
@@ -952,6 +955,7 @@ Kirigami.ApplicationWindow {
     }
 
     function messageByKey(key) {
+        const tStart = Date.now()
         const p = root.parseMessageKey(key)
         if (!p || !root.dataStoreObj || !root.dataStoreObj.inbox) return null
         const rows = root.dataStoreObj.inbox
@@ -1003,7 +1007,8 @@ Kirigami.ApplicationWindow {
             console.log("[pane-resolve] miss",
                         "key=", key,
                         "want=", wantedAccount + "|" + wantedFolder + "|" + wantedUid,
-                        "rows=", rows.length)
+                        "rows=", rows.length,
+                        "resolveMs=", (Date.now() - tStart))
             return null
         }
 
@@ -1024,7 +1029,8 @@ Kirigami.ApplicationWindow {
                     "got=", resolvedAccount + "|" + resolvedFolder + "|" + resolvedUid,
                     "mode=", matchMode,
                     "bodyLen=", bodyLen,
-                    "usable=", usable)
+                    "usable=", usable,
+                    "resolveMs=", (Date.now() - tStart))
 
         return base
     }
