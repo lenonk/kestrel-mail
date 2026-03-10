@@ -25,6 +25,9 @@ struct SyncContext {
 
     std::function<bool(const QString &email, int ttlSecs, int maxFailures)> avatarShouldRefresh;
     std::function<QStringList(const QString &email, const QString &folder)> getFolderUids;
+    // Optional: returns UIDs of locally-known messages that need snippet regeneration.
+    // executeFull will include these in its fetch pass even if they are already in getFolderUids.
+    std::function<QStringList(const QString &email, const QString &folder)> getUidsNeedingSnippetRefresh;
     std::function<void(const QString &email, const QStringList &uids)> removeUids;
     std::function<void(const QString &email, const QString &folder, const QStringList &readUids)> onFlagsReconciled;
 

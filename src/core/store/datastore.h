@@ -40,6 +40,7 @@ public:
     // Removes ALL folder edges for a message_id (fallback when server gives no COPYUID).
     void removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId);
     Q_INVOKABLE QStringList folderUids(const QString &accountEmail, const QString &folder) const;
+    QStringList folderUidsWithNullSnippet(const QString &accountEmail, const QString &folder) const;
     Q_INVOKABLE qint64 folderMaxUid(const QString &accountEmail, const QString &folder) const;
     Q_INVOKABLE QVariantMap folderSyncStatus(const QString &accountEmail, const QString &folder) const;
     Q_INVOKABLE void upsertFolderSyncStatus(const QString &accountEmail, const QString &folder,

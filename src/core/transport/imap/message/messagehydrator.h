@@ -3,6 +3,9 @@
 #include <QString>
 #include <QVector>
 #include <QPair>
+#include <memory>
+
+#include "../connection/imapconnection.h"
 
 namespace Imap {
 
@@ -12,10 +15,8 @@ namespace Imap {
 class MessageHydrator {
 public:
     struct Request {
-        QString host;
-        int     port        = 0;
-        QString email;
-        QString accessToken;
+        std::shared_ptr<Connection> cxn;
+
         QString folderName;
         QString uid;
 
