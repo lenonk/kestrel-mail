@@ -1866,7 +1866,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             if (announce) {
                 if (!r.ok)
                     emit syncFinished(false, r.message);
-                else if (syncedCount > 0)
+                else
                     emit syncFinished(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
                 releaseSyncTarget();
                 return;
@@ -1874,7 +1874,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
             if (!r.ok) {
                 emit realtimeStatus(false, r.message);
-            } else if (syncedCount > 0) {
+            } else {
                 emit realtimeStatus(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
             }
             releaseSyncTarget();
