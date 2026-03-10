@@ -41,7 +41,11 @@ QString MessageHydrator::execute(const Request &req) {
     for (const auto &[folder, uid] : candidates) {
         QElapsedTimer step;
         step.start();
-        const auto [selectOk, _] = req.cxn->select(folder);
+        bool selectOk = true;
+        if (req.cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+            const auto sel = req.cxn->select(folder);
+            selectOk = std::get<0>(sel);
+        }
         const qint64 selectMs = step.elapsed();
 
         if (!selectOk) {
@@ -54,11 +58,20 @@ QString MessageHydrator::execute(const Request &req) {
         }
 
         step.restart();
-        const auto raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
-        const qint64 fetchMs = step.elapsed();
+        auto raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[TEXT]<0.96000>)"_L1.arg(uid));
+        qint64 fetchMs = step.elapsed();
 
-        const auto hasFetchData = raw.contains(" FETCH (") || raw.contains(" fetch (");
-        const bool hasLiteral = raw.contains('{');
+        bool hasFetchData = raw.toLower().contains(" fetch (");
+        bool hasLiteral = raw.contains('{');
+
+        if (!hasFetchData || !hasLiteral) {
+            // Fallback for servers/messages where BODY[TEXT] window misses usable literal.
+            step.restart();
+            raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
+            fetchMs += step.elapsed();
+            hasFetchData = raw.toLower().contains(" fetch (");
+            hasLiteral = raw.contains('{');
+        }
 
         if (!hasFetchData || !hasLiteral) {
             qWarning().noquote() << "[perf-hydrate-exec]"

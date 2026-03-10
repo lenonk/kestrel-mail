@@ -106,6 +106,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     m_email       = email;
     m_accessToken = accessToken;
     m_idleTag.clear();
+    m_selectedFolder.clear();
 
     // Connect with TLS
     m_socket->connectToHostEncrypted(host, static_cast<quint16>(port));
@@ -192,6 +193,11 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     result.success      = true;
     result.message      = QStringLiteral("Connected and authenticated");
     result.capabilities = m_capabilities;
+
+    // Detach socket from its creating thread so it can be used from any thread
+    // without QSocketNotifier warnings. We use synchronous waitFor* calls only,
+    // so no event loop delivery is needed.
+    m_socket->moveToThread(nullptr);
 
     return result;
 }
@@ -398,6 +404,7 @@ Connection::disconnect() {
 
     m_authenticated = false;
     m_idleTag.clear();
+    m_selectedFolder.clear();
 }
 
 bool
