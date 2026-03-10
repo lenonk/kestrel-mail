@@ -1565,6 +1565,11 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         if (m_store)
             row = m_store->messageByKey(emailNorm, folderNorm, uidNorm);
         const QString subject = row.value("subject"_L1).toString();
+        const QString prevHtml = row.value("bodyHtml"_L1).toString().trimmed();
+        const bool prevPlainWrap = prevHtml.startsWith("<html><body style=\"white-space:normal;\">", Qt::CaseInsensitive);
+        const bool prevRichHtml = prevHtml.contains("<table"_L1, Qt::CaseInsensitive)
+                               || prevHtml.contains("<style"_L1, Qt::CaseInsensitive)
+                               || prevHtml.contains("<head"_L1, Qt::CaseInsensitive);
 
         qWarning().noquote() << "[hydrate-html-db] hydrate-result"
                              << "source=" << (userInitiated ? "user" : "bg")
@@ -1576,6 +1581,15 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
                              << "hasMimeHeaders=" << hasMimeHeaders
                              << "plainWrap=" << plainWrap
                              << "suspicious=" << suspicious;
+
+        if (plainWrap && prevRichHtml && !prevPlainWrap && prevHtml.size() > 512) {
+            qWarning().noquote() << "[hydrate-html-db] skip-downgrade"
+                                 << "source=" << (userInitiated ? "user" : "bg")
+                                 << "uid=" << uidNorm
+                                 << "prevLen=" << prevHtml.size()
+                                 << "newLen=" << htmlTrim.size();
+            return;
+        }
 
         m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, html);
     });
