@@ -114,6 +114,8 @@ Rectangle {
             return false;
         if (lower.indexOf("authenticationfailed") >= 0)
             return false;
+        if (/\bsrc\s*=\s*["']\s*cid:/i.test(html))
+            return false;
         return /<html|<body|<div|<table|<p|<br|<span|<img|<a\b/i.test(html);
     }
 
@@ -1726,8 +1728,6 @@ Rectangle {
                         htmlContainer.pendingMessageKey = "";
                         return;
                     }
-                    // Drop previous document right at fade-out completion before loading next.
-                    htmlView.loadHtml("<!doctype html><html><body></body></html>", "file:///");
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
@@ -1762,8 +1762,7 @@ Rectangle {
                 onLoadingChanged: function (req) {
                     const st = req.status;
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
-                        const loadedForCurrent = !htmlContainer.activeLoadMessageKey.length
-                                              || htmlContainer.activeLoadMessageKey === root.selectedMessageEdgeKey;
+                        const loadedForCurrent = htmlContainer.activeLoadMessageKey === root.selectedMessageEdgeKey;
                         const hasNewerPending = htmlContainer.pendingMessageKey.length > 0
                                               && htmlContainer.pendingMessageKey !== htmlContainer.activeLoadMessageKey;
 
@@ -1785,6 +1784,7 @@ Rectangle {
                         htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingMessageKey = "";
+                        htmlContainer.activeLoadMessageKey = "";
                         htmlContainer.pendingLoadReason = "";
                         htmlContainer.pendingLoadQueuedAtMs = 0;
                         htmlContainer.pendingLoadStartedAtMs = 0;
