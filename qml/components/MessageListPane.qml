@@ -438,10 +438,8 @@ Rectangle {
                                 } else {
                                     // Normal click: open message, clear multiselect
                                     root.appRoot.lastClickedMessageIndex = index
+                                    root.appRoot.lastMessageClickAtMs = Date.now()
                                     root.appRoot.selectedMessageKeys = ({})
-                                    console.log("[qml-click]", "key=", messageCard.messageKeyValue,
-                                                "account=", accountEmail, "folder=", folder, "uid=", uid,
-                                                "index=", index)
                                     root.appRoot.selectedMessageKey = messageCard.messageKeyValue
                                     if (root.appRoot.imapServiceObj && root.appRoot.imapServiceObj.hydrateMessageBody) {
                                         root.appRoot.imapServiceObj.hydrateMessageBody(accountEmail, folder, uid)

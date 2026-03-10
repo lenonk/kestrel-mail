@@ -83,6 +83,7 @@ Kirigami.ApplicationWindow {
     property int selectedCategoryIndex: 0
     property bool categorySelectionExplicit: false
     property string selectedMessageKey: ""
+    property double lastMessageClickAtMs: 0
     property var selectedMessageAnchor: ({})
     // Set of message keys currently checked in the message list (JS object used as Set).
     property var selectedMessageKeys: ({})

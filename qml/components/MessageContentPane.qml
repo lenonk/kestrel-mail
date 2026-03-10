@@ -1687,6 +1687,9 @@ Rectangle {
             property string pendingLoadReason: ""
             property double pendingLoadQueuedAtMs: 0
             property double pendingLoadStartedAtMs: 0
+            property double pendingClickAtMs: 0
+            property double pendingLoadCompletedAtMs: 0
+            property string pendingCompletedReason: ""
 
             function loadHtmlIfChanged(reason) {
                 const t0 = Date.now();
@@ -1699,8 +1702,10 @@ Rectangle {
                 pendingHtml = root.renderedHtml;
                 pendingLoadReason = reason;
                 pendingLoadQueuedAtMs = t0;
+                pendingClickAtMs = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? root.appRoot.lastMessageClickAtMs : 0;
                 bodyOpacity = 0.0;
-                console.log("[perf-html] queue-load reason=", reason, "len=", pendingHtml.length);
+                const clickToQueue = pendingClickAtMs > 0 ? (pendingLoadQueuedAtMs - pendingClickAtMs) : -1;
+                console.log("[perf-html] queue-load reason=", reason, "len=", pendingHtml.length, "clickToQueue=", clickToQueue);
                 fadeOutLoadTimer.restart();
             }
             function scrollHtmlBy(deltaY) {
@@ -1739,6 +1744,23 @@ Rectangle {
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }
+
+            Timer {
+                id: visiblePerfTimer
+                interval: 0
+                repeat: false
+                onTriggered: {
+                    const now = Date.now();
+                    const loadToVisible = htmlContainer.pendingLoadCompletedAtMs > 0 ? (now - htmlContainer.pendingLoadCompletedAtMs) : -1;
+                    const clickToVisible = htmlContainer.pendingClickAtMs > 0 ? (now - htmlContainer.pendingClickAtMs) : -1;
+                    console.log("[perf-html] visible reason=", htmlContainer.pendingCompletedReason,
+                                "loadToVisible=", loadToVisible, "clickToVisible=", clickToVisible,
+                                "opacity=", htmlContainer.bodyOpacity);
+                    htmlContainer.pendingLoadCompletedAtMs = 0;
+                    htmlContainer.pendingClickAtMs = 0;
+                    htmlContainer.pendingCompletedReason = "";
+                }
+            }
             WebEngineView {
                 id: htmlView
 
@@ -1757,14 +1779,18 @@ Rectangle {
                         const tDone = Date.now();
                         const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
+                        const clickToLoad = htmlContainer.pendingClickAtMs > 0 ? (tDone - htmlContainer.pendingClickAtMs) : -1;
                         console.log("[perf-html] load-complete reason=", htmlContainer.pendingLoadReason,
-                                    "status=", st, "loadMs=", loadMs, "totalMs=", totalMs);
+                                    "status=", st, "loadMs=", loadMs, "totalMs=", totalMs, "clickToLoad=", clickToLoad);
 
+                        htmlContainer.pendingLoadCompletedAtMs = tDone;
+                        htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingLoadReason = "";
                         htmlContainer.pendingLoadQueuedAtMs = 0;
                         htmlContainer.pendingLoadStartedAtMs = 0;
                         htmlContainer.bodyOpacity = 1.0;
+                        visiblePerfTimer.restart();
                     }
                 }
                 onNavigationRequested: function (request) {
