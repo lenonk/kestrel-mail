@@ -974,20 +974,6 @@ Kirigami.ApplicationWindow {
             }
         }
 
-        // Keep content pane stable when UID/folder changes for the same logical message.
-        if (!base && root.selectedMessageAnchor
-                && (root.selectedMessageAnchor.accountEmail || "") === (p.accountEmail || "")) {
-            for (let i = 0; i < rows.length; ++i) {
-                const r = rows[i]
-                if ((r.accountEmail || "") !== (root.selectedMessageAnchor.accountEmail || "")) continue
-                if ((r.sender || "") !== (root.selectedMessageAnchor.sender || "")) continue
-                if ((r.subject || "") !== (root.selectedMessageAnchor.subject || "")) continue
-                if ((r.receivedAt || "") !== (root.selectedMessageAnchor.receivedAt || "")) continue
-                base = r
-                break
-            }
-        }
-
         let dbRow = null
         if (root.dataStoreObj && root.dataStoreObj.messageByKey) {
             dbRow = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
