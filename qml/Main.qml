@@ -954,6 +954,7 @@ Kirigami.ApplicationWindow {
         if (lower.indexOf("ok success [throttled]") >= 0) return false
         if (lower.indexOf("authenticationfailed") >= 0) return false
         if (lower.indexOf("no-fetch-payload") >= 0) return false
+        if (/\bsrc\s*=\s*["']\s*cid:/i.test(html)) return false
         const hasHtmlish = /<html|<body|<div|<table|<p|<br|<span|<img|<a\b/i.test(html)
         return hasHtmlish
     }
