@@ -1785,7 +1785,6 @@ Rectangle {
                         htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingMessageKey = "";
-                        htmlContainer.activeLoadMessageKey = "";
                         htmlContainer.pendingLoadReason = "";
                         htmlContainer.pendingLoadQueuedAtMs = 0;
                         htmlContainer.pendingLoadStartedAtMs = 0;
