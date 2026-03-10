@@ -1487,10 +1487,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             QMutexLocker locker(&m_inFlightBodyHydrationsMutex);
             m_inFlightBodyHydrations.remove(inFlightKey);
         }
-        qWarning().noquote() << "[hydrate-fail] reason=account-not-found"
-                             << "account=" << emailNorm
-                             << "folder=" << folderNorm
-                             << "uid=" << uidNorm;
         if (userInitiated)
             emit hydrateStatus(false, "Message body fetch failed: account not found.");
         return;
@@ -1513,10 +1509,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return;
 
         if (html.isEmpty()) {
-            qWarning().noquote() << "[hydrate-fail] reason=empty-body-html"
-                                 << "account=" << emailNorm
-                                 << "folder=" << folderNorm
-                                 << "uid=" << uidNorm;
             if (userInitiated)
                 emit hydrateStatus(false, "Message body fetch failed: parser returned empty HTML.");
             return;
@@ -1531,7 +1523,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return {};
 
         if (account.value("authType"_L1).toString() != "oauth2"_L1) {
-            qWarning().noquote() << "[hydrate] abort: non-oauth account" << emailCopy;
             return {};
         }
 
@@ -1551,7 +1542,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
         auto pooled = getPooledConnection(emailCopy);
         if (!pooled) {
-            qWarning().noquote() << "[hydrate] abort: pool timeout" << emailCopy;
             return {};
         }
         r.cxn = std::move(pooled);
@@ -1641,10 +1631,8 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
             if (!ok) return;
         }
 
-        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\Seen)").arg(uid));
+        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
         Q_UNUSED(result);
-
-        qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
     });
 }
 

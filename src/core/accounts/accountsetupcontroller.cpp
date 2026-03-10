@@ -64,22 +64,11 @@ void AccountSetupController::discoverProvider()
 void AccountSetupController::beginOAuth()
 {
     if (!m_oauth) {
-        qWarning().noquote() << "[wizard-oauth] beginOAuth skipped: oauth service is null";
         return;
     }
 
-    const QString providerId = m_selectedProvider.value("id").toString();
-    qInfo().noquote() << "[wizard-oauth] beginOAuth"
-                      << "email=" << m_email.trimmed().toLower()
-                      << "providerId=" << providerId
-                      << "supportsOAuth2=" << m_selectedProvider.value("supportsOAuth2").toBool();
-
     m_oauthUrl = m_oauth->startAuthorization(m_selectedProvider, m_email);
     m_statusMessage = m_oauth->lastStatus();
-
-    qInfo().noquote() << "[wizard-oauth] beginOAuth result"
-                      << "oauthUrlEmpty=" << m_oauthUrl.trimmed().isEmpty()
-                      << "status=" << m_statusMessage;
 
     emit oauthUrlChanged();
     emit statusMessageChanged();

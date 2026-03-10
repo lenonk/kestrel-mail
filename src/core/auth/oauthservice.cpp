@@ -29,10 +29,6 @@ QString OAuthService::lastStatus() const { return m_lastStatus; }
 QString OAuthService::startAuthorization(const QVariantMap &provider, const QString &email)
 {
     const QString providerId = provider.value("id").toString();
-    qInfo().noquote() << "[oauth] startAuthorization"
-                      << "providerId=" << providerId
-                      << "email=" << email.trimmed().toLower()
-                      << "supportsOAuth2=" << provider.value("supportsOAuth2").toBool();
     if (!provider.value("supportsOAuth2").toBool()) {
         m_lastStatus = QStringLiteral("This mail provider needs manual sign-in setup in this build.");
         emit lastStatusChanged();
@@ -47,9 +43,6 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
     m_pendingClientSecret = provider.value("oauthClientSecret").toString();
 
     if (m_pendingClientId.trimmed().isEmpty()) {
-        qWarning().noquote() << "[oauth] missing client id"
-                             << "providerId=" << providerId
-                             << "hasInlineClientId=" << !provider.value("oauthClientId").toString().trimmed().isEmpty();
         m_lastStatus = QStringLiteral("Sign-in is not configured yet for this provider in this build.");
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
@@ -132,9 +125,6 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
     url.setQuery(q);
 
     m_pendingAuthUrl = url.toString();
-    qInfo().noquote() << "[oauth] auth-url-ready"
-                      << "providerId=" << providerId
-                      << "urlEmpty=" << m_pendingAuthUrl.trimmed().isEmpty();
     m_lastStatus = QStringLiteral("OAuth sign-in started. Complete login in browser; Kestrel will capture callback automatically.");
     emit pendingAuthUrlChanged();
     emit lastStatusChanged();

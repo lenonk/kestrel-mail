@@ -995,11 +995,6 @@ SyncEngine::execute(SyncContext &ctx) {
         const QStringList seenUids = parseSearchIds(flagResp);
         if (!seenUids.isEmpty()) {
             ctx.onFlagsReconciled(ctx.cxn->email(), ctx.cxn->selectedFolder(), seenUids);
-            qInfo().noquote() << "[flags-reconcile]"
-                              << "folder=" << ctx.cxn->selectedFolder()
-                              << "window=" << windowStart << ":" << ctx.minUidExclusive
-                              << "seenCount=" << seenUids.size()
-                              << "elapsedMs=" << flagsReconcileTimer.elapsed();
         }
     }
 

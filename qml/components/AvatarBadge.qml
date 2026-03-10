@@ -14,9 +14,22 @@ Item {
     property int avatarSourceIndex: 0
     property int avatarRetryNonce: 0
     readonly property string currentAvatarSource: {
-        const base = (avatarSources && avatarSources.length > avatarSourceIndex)
-                ? (avatarSources[avatarSourceIndex] || "")
-                : ""
+        let base = ""
+        if (avatarSources && avatarSources.length > 0) {
+            for (let i = Math.max(0, avatarSourceIndex); i < avatarSources.length; ++i) {
+                const candidate = (avatarSources[i] || "")
+                if (!candidate.length)
+                    continue
+                // Skip noisy Google favicon proxy URLs that frequently 404.
+                if (candidate.indexOf("t0.gstatic.com/faviconV2") >= 0
+                        || candidate.indexOf("t1.gstatic.com/faviconV2") >= 0
+                        || candidate.indexOf("t2.gstatic.com/faviconV2") >= 0
+                        || candidate.indexOf("t3.gstatic.com/faviconV2") >= 0)
+                    continue
+                base = candidate
+                break
+            }
+        }
         if (!base.length || avatarRetryNonce <= 0) return base
         if (!(base.startsWith("https://") || base.startsWith("http://"))) return base
         const joiner = base.indexOf("?") >= 0 ? "&" : "?"

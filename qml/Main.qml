@@ -985,22 +985,18 @@ Kirigami.ApplicationWindow {
             dbRow = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
             if (dbRow) {
                 base = dbRow
-                console.log("[qml-messageByKey-db-authoritative]", key, p.accountEmail, p.folder, p.uid)
             } else if (!base) {
                 base = dbRow
-                console.log("[qml-messageByKey-db-fallback]", key, p.accountEmail, p.folder, p.uid, !!base)
             }
         }
 
         if (!base) {
-            console.log("[qml-messageByKey-miss]", key, p.accountEmail, p.folder, p.uid)
             return null
         }
 
         // If DB has fresher hydrated body for this exact key, prefer it over stale inbox cache row.
         if (dbRow && root.isBodyHtmlUsable(dbRow.bodyHtml) && !root.isBodyHtmlUsable(base.bodyHtml)) {
             base = dbRow
-            console.log("[qml-messageByKey-db-prefer-body]", key)
         }
 
         return base
@@ -1020,7 +1016,6 @@ Kirigami.ApplicationWindow {
         const row = root.messageByKey(key)
         const hasUsableHtml = row ? root.isBodyHtmlUsable(row.bodyHtml) : false
         if (!hasUsableHtml) {
-            console.log("[qml] hydrate-request", key, p.accountEmail, p.folder, p.uid)
             root.imapServiceObj.hydrateMessageBody(p.accountEmail, p.folder, p.uid)
         }
     }

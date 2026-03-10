@@ -1931,8 +1931,6 @@ void DataStore::markMessageRead(const QString &accountEmail, const QString &uid)
     qMsg.bindValue(":uid"_L1, uid);
     qMsg.exec();
 
-    qInfo().noquote() << "[mark-read-db]" << "acc=" << acc << "uid=" << uid
-                      << "edgesUpdated=" << qMap.numRowsAffected();
     emit messageMarkedRead(acc, uid);
     reloadInbox();
 
@@ -2397,11 +2395,6 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
 
     const bool changed = q.numRowsAffected() > 0;
     if (changed) {
-        qInfo().noquote() << "[datastore] updateBodyForKey"
-                          << "account=" << accountEmail
-                          << "folder=" << folder
-                          << "uid=" << uid
-                          << "bodyLen=" << html.size();
         scheduleReloadInbox();
     }
     return changed;
