@@ -116,9 +116,6 @@ Kirigami.ApplicationWindow {
         interval: 2000
         repeat: false
         onTriggered: {
-            const now = Date.now()
-            const clickDelta = root.lastMessageClickAtMs > 0 ? (now - root.lastMessageClickAtMs) : -1
-            console.log("[selection-path] mark-read-trigger", "key=", root.selectedMessageKey, "clickDeltaMs=", clickDelta)
             const p = root.parseMessageKey(root.selectedMessageKey)
             if (!p || !root.imapServiceObj) return
             root.imapServiceObj.markMessageRead(p.accountEmail, p.folder, p.uid)
@@ -642,9 +639,6 @@ Kirigami.ApplicationWindow {
         root.syncMessageListModelSelection()
     }
     onSelectedMessageKeyChanged: {
-        const now = Date.now()
-        const clickDelta = root.lastMessageClickAtMs > 0 ? (now - root.lastMessageClickAtMs) : -1
-        console.log("[selection-path] selected-key-changed", "key=", root.selectedMessageKey, "clickDeltaMs=", clickDelta)
         markReadTimer.stop()
         if (root.selectedMessageKey.length > 0)
             markReadTimer.restart()
@@ -673,15 +667,6 @@ Kirigami.ApplicationWindow {
         if (!root.contentPaneHoverExpandEnabled) {
             root.setContentPaneHoverExpanded(false)
         }
-    }
-
-    onSelectedMessageDataChanged: {
-        const now = Date.now()
-        const clickDelta = root.lastMessageClickAtMs > 0 ? (now - root.lastMessageClickAtMs) : -1
-        const k = root.selectedMessageKey || ""
-        const d = root.selectedMessageData
-        const edge = d ? ((d.accountEmail || "") + "|" + (d.folder || "") + "|" + (d.uid || "")) : ""
-        console.log("[selection-path] selected-data-changed", "key=", k, "edge=", edge, "clickDeltaMs=", clickDelta)
     }
 
     onSelectedFolderCategoriesChanged: {
@@ -967,7 +952,6 @@ Kirigami.ApplicationWindow {
     }
 
     function messageByKey(key) {
-        const tStart = Date.now()
         const p = root.parseMessageKey(key)
         if (!p || !root.dataStoreObj || !root.dataStoreObj.inbox) return null
         const rows = root.dataStoreObj.inbox
@@ -975,7 +959,6 @@ Kirigami.ApplicationWindow {
         const wantedAccount = (p.accountEmail || "").toString()
         const wantedFolder = (p.folder || "").toString()
         const wantedUid = (p.uid || "").toString()
-        let matchMode = "none"
 
         let base = null
         for (let i = 0; i < rows.length; ++i) {
@@ -984,7 +967,6 @@ Kirigami.ApplicationWindow {
                     && ((r.folder || "").toString().toLowerCase() === wantedFolder.toLowerCase())
                     && (r.uid || "") === wantedUid) {
                 base = r
-                matchMode = "edge-case-insensitive-folder"
                 break
             }
         }
@@ -999,7 +981,6 @@ Kirigami.ApplicationWindow {
                 if ((r.subject || "") !== (root.selectedMessageAnchor.subject || "")) continue
                 if ((r.receivedAt || "") !== (root.selectedMessageAnchor.receivedAt || "")) continue
                 base = r
-                matchMode = "anchor-fallback"
                 break
             }
         }
@@ -1009,40 +990,19 @@ Kirigami.ApplicationWindow {
             dbRow = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
             if (dbRow) {
                 base = dbRow
-                matchMode = "db-exact"
             } else if (!base) {
                 base = dbRow
             }
         }
 
         if (!base) {
-            console.log("[pane-resolve] miss",
-                        "key=", key,
-                        "want=", wantedAccount + "|" + wantedFolder + "|" + wantedUid,
-                        "rows=", rows.length,
-                        "resolveMs=", (Date.now() - tStart))
             return null
         }
 
         // If DB has fresher hydrated body for this exact key, prefer it over stale inbox cache row.
         if (dbRow && root.isBodyHtmlUsable(dbRow.bodyHtml) && !root.isBodyHtmlUsable(base.bodyHtml)) {
             base = dbRow
-            matchMode = "db-prefer-usable-html"
         }
-
-        const resolvedAccount = (base.accountEmail || "").toString()
-        const resolvedFolder = (base.folder || "").toString()
-        const resolvedUid = (base.uid || "").toString()
-        const bodyLen = (base.bodyHtml || "").toString().length
-        const usable = root.isBodyHtmlUsable(base.bodyHtml)
-        console.log("[pane-resolve] hit",
-                    "key=", key,
-                    "want=", wantedAccount + "|" + wantedFolder + "|" + wantedUid,
-                    "got=", resolvedAccount + "|" + resolvedFolder + "|" + resolvedUid,
-                    "mode=", matchMode,
-                    "bodyLen=", bodyLen,
-                    "usable=", usable,
-                    "resolveMs=", (Date.now() - tStart))
 
         return base
     }

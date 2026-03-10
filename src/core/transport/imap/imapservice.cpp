@@ -1060,9 +1060,6 @@ ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &,
 void
 ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
                                    const QString &) {
-    qWarning().noquote() << "[bg-hydrate-flow] signal-received"
-                         << "account=" << email
-                         << "folder=" << folder;
     if (!m_store)
         return;
 
@@ -1085,15 +1082,9 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
 
     runBackgroundTask([this, email, folderNorm, key, limit]() {
-        qWarning().noquote() << "[bg-hydrate-flow] loop-start"
-                             << "account=" << email
-                             << "folder=" << folderNorm
                              << "limit=" << limit;
 
         while (!m_destroying.load()) {
-            qWarning().noquote() << "[bg-hydrate-flow] scan-candidates"
-                                 << "account=" << email
-                                 << "folder=" << folderNorm;
 
             QStringList candidates;
             QMetaObject::invokeMethod(this, [this, &candidates, email, folderNorm, limit]() {
@@ -1101,9 +1092,6 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
                     candidates = m_store->bodyFetchCandidates(email, folderNorm, limit);
             }, Qt::BlockingQueuedConnection);
 
-            qWarning().noquote() << "[bg-hydrate-flow] candidates-found"
-                                 << "account=" << email
-                                 << "folder=" << folderNorm
                                  << "count=" << candidates.size();
 
             if (candidates.isEmpty())
@@ -1113,9 +1101,6 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
                 if (m_destroying.load())
                     break;
                 const QString uid = candidates.at(i);
-                qWarning().noquote() << "[bg-hydrate-flow] hydrating"
-                                     << "account=" << email
-                                     << "folder=" << folderNorm
                                      << "uid=" << uid
                                      << "index=" << (i + 1)
                                      << "of=" << candidates.size();
@@ -1136,9 +1121,6 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
                 break;
         }
 
-        qWarning().noquote() << "[bg-hydrate-flow] loop-finished"
-                             << "account=" << email
-                             << "folder=" << folderNorm;
 
         QMutexLocker lock(&m_bgHydrateMutex);
         m_activeBgHydrateFolders.remove(key);
@@ -1571,6 +1553,31 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return;
         }
 
+        const QString htmlTrim = html.trimmed();
+        const QString htmlLower = htmlTrim.left(1024).toLower();
+        const bool hasHtmlish = QRegularExpression(QStringLiteral("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"),
+                                                 QRegularExpression::CaseInsensitiveOption).match(htmlTrim).hasMatch();
+        const bool hasMarkdownLinks = QRegularExpression(QStringLiteral("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"),
+                                                         QRegularExpression::CaseInsensitiveOption).match(htmlTrim).hasMatch();
+        const bool hasMimeHeaders = htmlLower.contains(QStringLiteral("content-type:"))
+                                 || htmlLower.contains(QStringLiteral("mime-version:"));
+        const bool suspicious = !hasHtmlish || hasMarkdownLinks || hasMimeHeaders || htmlTrim.size() < 160;
+
+        if (suspicious) {
+            QVariantMap row;
+            if (m_store)
+                row = m_store->messageByKey(emailNorm, folderNorm, uidNorm);
+            const QString subject = row.value("subject"_L1).toString();
+            qWarning().noquote() << "[hydrate-html-db] suspicious"
+                                 << "source=" << (userInitiated ? "user" : "bg")
+                                 << "uid=" << uidNorm
+                                 << "subject=" << subject.left(120)
+                                 << "htmlLen=" << htmlTrim.size()
+                                 << "hasHtmlish=" << hasHtmlish
+                                 << "hasMarkdownLinks=" << hasMarkdownLinks
+                                 << "hasMimeHeaders=" << hasMimeHeaders;
+        }
+
         m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, html);
     });
 
@@ -1613,7 +1620,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
                 emit hydrateStatus(false, "Message body fetch failed: IMAP connection pool timeout.");
             qWarning().noquote() << "[perf-hydrate]"
                                  << "uid=" << uidNorm
-                                 << "folder=" << folderNorm
                                  << "mapMs=" << mapMs
                                  << "acquireMs=" << acquireMs
                                  << "attempts=" << attempts
@@ -1627,7 +1633,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         const qint64 executeMs = totalMs - mapMs - acquireMs;
         qWarning().noquote() << "[perf-hydrate]"
                              << "uid=" << uidNorm
-                             << "folder=" << folderNorm
                              << "mapMs=" << mapMs
                              << "acquireMs=" << acquireMs
                              << "executeMs=" << executeMs
@@ -1783,10 +1788,6 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
                             continue;
                         dispatched.insert(key);
 
-                        qWarning().noquote() << "[bg-hydrate-flow] signal-sent"
-                                             << "account=" << email
-                                             << "folder=" << folder
-                                             << "source=upsert-batch";
                         backgroundFetchBodies({}, email, folder, {});
                     }
                 }, Qt::QueuedConnection);
@@ -1905,10 +1906,6 @@ ImapService::syncAll(bool announce) {
                             continue;
                         dispatched.insert(key);
 
-                        qWarning().noquote() << "[bg-hydrate-flow] signal-sent"
-                                             << "account=" << email
-                                             << "folder=" << folder
-                                             << "source=upsert-batch";
                         backgroundFetchBodies({}, email, folder, {});
                     }
                 }, Qt::QueuedConnection);

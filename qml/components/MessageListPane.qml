@@ -437,22 +437,10 @@ Rectangle {
                                     root.appRoot.selectedMessageKeys = next
                                 } else {
                                     // Normal click: open message, clear multiselect
-                                    const tClickStart = Date.now()
-                                    const prevKey = root.appRoot.selectedMessageKey
-                                    const prevMultiCount = (root.appRoot.selectedMessageKeys && Object.keys(root.appRoot.selectedMessageKeys).length) || 0
-                                    console.log("[click-path] start", "idx=", index, "key=", messageCard.messageKeyValue, "prevKey=", prevKey, "prevMulti=", prevMultiCount)
-
                                     root.appRoot.lastClickedMessageIndex = index
-                                    root.appRoot.lastMessageClickAtMs = tClickStart
+                                    root.appRoot.lastMessageClickAtMs = Date.now()
                                     root.appRoot.selectedMessageKeys = ({})
-                                    const tBeforeSetKey = Date.now()
                                     root.appRoot.selectedMessageKey = messageCard.messageKeyValue
-                                    const tAfterSetKey = Date.now()
-
-                                    console.log("[click-path] end", "idx=", index, "key=", messageCard.messageKeyValue,
-                                                "clearMs=", (tBeforeSetKey - tClickStart),
-                                                "setKeyMs=", (tAfterSetKey - tBeforeSetKey),
-                                                "totalMs=", (tAfterSetKey - tClickStart))
                                 }
                             }
                         }

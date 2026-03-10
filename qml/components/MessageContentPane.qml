@@ -96,9 +96,6 @@ Rectangle {
     }
 
     onSelectedMessageEdgeKeyChanged: {
-        const now = Date.now();
-        const clickDelta = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? (now - root.appRoot.lastMessageClickAtMs) : -1;
-        console.log("[selection-path] selected-edge-changed", "edge=", root.selectedMessageEdgeKey, "render=", root.renderMessageKey, "clickDeltaMs=", clickDelta)
         htmlContainer.loadHtmlIfChanged("selectedEdgeChanged");
     }
     readonly property string folderName: i18n("Inbox")
@@ -152,24 +149,18 @@ Rectangle {
     readonly property string renderedHtml: {
         if (!root.hasUsableBodyHtml)
             return "";
-        const t0 = Date.now();
-        const clickDelta = (appRoot && appRoot.lastMessageClickAtMs) ? (t0 - appRoot.lastMessageClickAtMs) : -1;
         const base = root.htmlForMessage();
-        const t1 = Date.now();
 
         let sanitized = root.sanitizeRenderHtml(base);
-        const t2 = Date.now();
 
         // Neutralize tracking pixels unless the user has explicitly allowed them.
         // Reading root.trackingAllowed here makes this binding reactive to that property.
         if (!root.trackingAllowed)
             sanitized = root.neutralizeTrackingPixels(sanitized);
-        const t3 = Date.now();
 
         // Keep inline local images renderable while external images remain blocked.
         if (!root.imagesAllowed)
             sanitized = root.neutralizeExternalImages(sanitized);
-        const t4 = Date.now();
 
         // Inject a baseline background so plain-text and unstyled messages use the
         // theme background. No !important — emails with their own explicit backgrounds
@@ -179,20 +170,7 @@ Rectangle {
         if (sanitized.indexOf("<head>") >= 0)
             sanitized = sanitized.replace("<head>", "<head>" + bgStyle);
 
-        const out = root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized;
-        const t5 = Date.now();
-        console.log("[rendered-html] compute",
-                    "key=", root.renderMessageKey,
-                    "selected=", root.selectedMessageEdgeKey,
-                    "clickDeltaMs=", clickDelta,
-                    "htmlForMessageMs=", (t1 - t0),
-                    "sanitizeMs=", (t2 - t1),
-                    "trackMs=", (t3 - t2),
-                    "imagesMs=", (t4 - t3),
-                    "postMs=", (t5 - t4),
-                    "totalMs=", (t5 - t0),
-                    "len=", out.length);
-        return out;
+        return root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized;
     }
     property string selectedAttachmentKey: ""
 
@@ -990,9 +968,6 @@ Rectangle {
     color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
 
     onMessageDataChanged: {
-        const now = Date.now();
-        const clickDelta = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? (now - root.appRoot.lastMessageClickAtMs) : -1;
-        console.log("[pane-state] message-changed", "to=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey, "clickDeltaMs=", clickDelta)
         root.selectedAttachmentKey = "";
         htmlContainer.pendingHtml = "";
         htmlContainer.pendingMessageKey = "";
@@ -1758,16 +1733,13 @@ Rectangle {
             function loadHtmlIfChanged(reason) {
                 const t0 = Date.now();
                 if (!root.renderedHtml.length) {
-                    console.log("[pane-state] skip-load", "reason=empty-html", "trigger=", reason, "render=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey);
                     return;
                 }
                 if (root.selectedMessageEdgeKey.length > 0 && root.renderMessageKey !== root.selectedMessageEdgeKey) {
-                    console.log("[pane-state] skip-load", "reason=key-mismatch", "trigger=", reason, "render=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey);
                     return;
                 }
                 const key = root.renderMessageKey + "|" + (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml;
                 if (key === lastLoadedHtmlKey) {
-                    console.log("[pane-state] skip-load", "reason=same-key", "trigger=", reason, "key=", root.renderMessageKey);
                     return;
                 }
                 lastLoadedHtmlKey = key;
@@ -1777,7 +1749,6 @@ Rectangle {
                 pendingLoadQueuedAtMs = t0;
                 pendingClickAtMs = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? root.appRoot.lastMessageClickAtMs : 0;
                 const clickToQueue = pendingClickAtMs > 0 ? (pendingLoadQueuedAtMs - pendingClickAtMs) : -1;
-                console.log("[pane-state] queue", "reason=", reason, "msg=", pendingMessageKey, "clickToQueue=", clickToQueue, "len=", pendingHtml.length)
                 fadeOutLoadTimer.restart();
             }
             function scrollHtmlBy(deltaY) {
@@ -1811,7 +1782,6 @@ Rectangle {
                     if (!htmlContainer.pendingHtml.length)
                         return;
                     if (htmlContainer.pendingMessageKey.length > 0 && htmlContainer.pendingMessageKey !== root.renderMessageKey) {
-                        console.log("[pane-state] drop-stale-before-load", "pending=", htmlContainer.pendingMessageKey, "current=", root.renderMessageKey)
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingMessageKey = "";
                         return;
@@ -1831,14 +1801,12 @@ Rectangle {
                     if (!htmlContainer.pendingHtml.length)
                         return;
                     if (htmlContainer.pendingMessageKey.length > 0 && htmlContainer.pendingMessageKey !== root.renderMessageKey) {
-                        console.log("[pane-state] drop-stale-before-load", "pending=", htmlContainer.pendingMessageKey, "current=", root.renderMessageKey)
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingMessageKey = "";
                         return;
                     }
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
-                    console.log("[pane-state] start-load", "msg=", htmlContainer.activeLoadMessageKey, "reason=", htmlContainer.pendingLoadReason)
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }
@@ -1876,7 +1844,6 @@ Rectangle {
 
                         if (!loadedForCurrent) {
                             // Stale load completion for previous message selection; ignore visual commit.
-                            console.log("[pane-state] drop-stale-on-complete", "loadedFor=", htmlContainer.activeLoadMessageKey, "current=", root.renderMessageKey)
                             htmlContainer.pendingHtml = "";
                             htmlContainer.pendingMessageKey = "";
                             htmlContainer.activeLoadMessageKey = "";
@@ -1891,7 +1858,6 @@ Rectangle {
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
                         const clickToLoad = htmlContainer.pendingClickAtMs > 0 ? (tDone - htmlContainer.pendingClickAtMs) : -1;
 
-                        console.log("[pane-state] complete", "msg=", htmlContainer.activeLoadMessageKey, "status=", st, "loadMs=", loadMs, "totalMs=", totalMs, "clickToLoad=", clickToLoad)
                         htmlContainer.pendingLoadCompletedAtMs = tDone;
                         htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
                         htmlContainer.pendingHtml = "";
@@ -1937,9 +1903,6 @@ Rectangle {
                         htmlContainer.loadHtmlIfChanged("imagesAllowed");
                     }
                     function onRenderedHtmlChanged() {
-                        const now = Date.now();
-                        const clickDelta = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? (now - root.appRoot.lastMessageClickAtMs) : -1;
-                        console.log("[rendered-html] changed", "render=", root.renderMessageKey, "selected=", root.selectedMessageEdgeKey, "clickDeltaMs=", clickDelta);
                         htmlContainer.loadHtmlIfChanged("renderedHtml");
                     }
 

@@ -2547,6 +2547,28 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
     if (!q.exec()) return false;
 
     const bool changed = q.numRowsAffected() > 0;
+
+    const QString htmlLower = html.left(1024).toLower();
+    const bool hasHtmlish = QRegularExpression(QStringLiteral("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"),
+                                             QRegularExpression::CaseInsensitiveOption).match(html).hasMatch();
+    const bool hasMarkdownLinks = QRegularExpression(QStringLiteral("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"),
+                                                     QRegularExpression::CaseInsensitiveOption).match(html).hasMatch();
+    const bool hasMimeHeaders = htmlLower.contains(QStringLiteral("content-type:"))
+                             || htmlLower.contains(QStringLiteral("mime-version:"));
+    const bool suspicious = !hasHtmlish || hasMarkdownLinks || hasMimeHeaders || html.size() < 160;
+
+    if (suspicious) {
+        qWarning().noquote() << "[hydrate-html-db] store-write"
+                             << "account=" << accountEmail.trimmed()
+                             << "folder=" << folder.trimmed()
+                             << "uid=" << uid.trimmed()
+                             << "htmlLen=" << html.size()
+                             << "changed=" << changed
+                             << "hasHtmlish=" << hasHtmlish
+                             << "hasMarkdownLinks=" << hasMarkdownLinks
+                             << "hasMimeHeaders=" << hasMimeHeaders;
+    }
+
     if (changed) {
         scheduleReloadInbox();
     }
