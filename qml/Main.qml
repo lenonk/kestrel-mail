@@ -642,19 +642,23 @@ Kirigami.ApplicationWindow {
         markReadTimer.stop()
         if (root.selectedMessageKey.length > 0)
             markReadTimer.restart()
-        if (!root.selectedMessageData) {
+
+        const row = root.messageByKey(root.selectedMessageKey)
+        if (!row) {
             console.log("[hydrate-html-db] ui-selected-no-data", "key=", root.selectedMessageKey)
             root.setContentPaneHoverExpanded(false)
             return
         }
+
         root.selectedMessageAnchor = {
-            accountEmail: root.selectedMessageData.accountEmail || "",
-            sender: root.selectedMessageData.sender || "",
-            subject: root.selectedMessageData.subject || "",
-            receivedAt: root.selectedMessageData.receivedAt || ""
+            accountEmail: row.accountEmail || "",
+            sender: row.sender || "",
+            subject: row.subject || "",
+            receivedAt: row.receivedAt || ""
         }
-        const bodyLen = (root.selectedMessageData.bodyHtml || "").toString().length
-        const hasUsableHtml = root.isBodyHtmlUsable(root.selectedMessageData.bodyHtml)
+
+        const bodyLen = (row.bodyHtml || "").toString().length
+        const hasUsableHtml = root.isBodyHtmlUsable(row.bodyHtml)
         console.log("[hydrate-html-db] ui-selected", "key=", root.selectedMessageKey, "bodyLen=", bodyLen, "usable=", hasUsableHtml)
         if (!hasUsableHtml) {
             root.setContentPaneHoverExpanded(false)
