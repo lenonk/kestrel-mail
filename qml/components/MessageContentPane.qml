@@ -69,15 +69,30 @@ Rectangle {
     property var attachmentProgress: ({})
     property var attachmentDownloading: ({})
     property string lastAttachmentMessageKey: ""
-    readonly property string renderMessageKey: {
-        if (!messageData)
-            return "";
-        const a = (messageData.accountEmail || "").toString();
-        const f = (messageData.folder || "").toString();
-        const u = (messageData.uid || "").toString();
+    function normalizedEdgeKey(account, folder, uid) {
+        const a = (account || "").toString().toLowerCase();
+        const f = (folder || "").toString().toLowerCase();
+        const u = (uid || "").toString();
         if (!a.length || !u.length)
             return "";
         return a + "|" + f + "|" + u;
+    }
+
+    readonly property string renderMessageKey: {
+        if (!messageData)
+            return "";
+        return normalizedEdgeKey(messageData.accountEmail, messageData.folder, messageData.uid);
+    }
+
+    readonly property string selectedMessageEdgeKey: {
+        const k = (root.appRoot && root.appRoot.selectedMessageKey) ? root.appRoot.selectedMessageKey.toString() : "";
+        if (!k.length)
+            return "";
+        const raw = k.startsWith("msg:") ? k.slice(4) : k;
+        const p = raw.split("|");
+        if (p.length < 3)
+            return "";
+        return normalizedEdgeKey(p[0], p[1], p[2]);
     }
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
@@ -1713,6 +1728,8 @@ Rectangle {
                 const t0 = Date.now();
                 if (!root.renderedHtml.length)
                     return;
+                if (root.selectedMessageEdgeKey.length > 0 && root.renderMessageKey !== root.selectedMessageEdgeKey)
+                    return;
                 const key = root.renderMessageKey + "|" + (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml;
                 if (key === lastLoadedHtmlKey)
                     return;
@@ -1799,7 +1816,7 @@ Rectangle {
                     const st = req.status;
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
                         const loadedForCurrent = !htmlContainer.activeLoadMessageKey.length
-                                              || htmlContainer.activeLoadMessageKey === root.renderMessageKey;
+                                              || htmlContainer.activeLoadMessageKey === root.selectedMessageEdgeKey;
 
                         if (!loadedForCurrent) {
                             // Stale load completion for previous message selection; ignore visual commit.
