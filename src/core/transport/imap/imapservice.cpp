@@ -41,6 +41,7 @@
 #include <QtConcurrentRun>
 
 #include "sync/idlewatcher.h"
+#include "sync/kestreltimer.h"
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -1044,27 +1045,11 @@ ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &,
 }
 
 void
-ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
+ImapService::backgroundFetchBodies(const QVariantMap &, const QString &, const QString &,
                                    const QString &) {
-    if (!m_store)
-        return;
-
-    bool ok = false;
-    const int configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
-    const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
-
-    QStringList candidates;
-    if (QThread::currentThread() == thread()) {
-        candidates = m_store->bodyFetchCandidates(email, folder, limit);
-    } else {
-        QMetaObject::invokeMethod(this, [this, &candidates, email, folder, limit]() {
-            if (m_store)
-                candidates = m_store->bodyFetchCandidates(email, folder, limit);
-        }, Qt::BlockingQueuedConnection);
-    }
-
-    for (const auto &uid : candidates)
-        hydrateMessageBodyInternal(email, folder, uid, false);
+    // Disabled intentionally: background hydration can starve pooled connections
+    // and delay user-initiated message opens. Keep click-initiated hydration only.
+    return;
 }
 
 void
@@ -1509,6 +1494,10 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return;
 
         if (html.isEmpty()) {
+            qWarning().noquote() << "[hydrate-fail] reason=empty-body-html"
+                                 << "account=" << emailNorm
+                                 << "folder=" << folderNorm
+                                 << "uid=" << uidNorm;
             if (userInitiated)
                 emit hydrateStatus(false, "Message body fetch failed: parser returned empty HTML.");
             return;
@@ -1523,6 +1512,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return {};
 
         if (account.value("authType"_L1).toString() != "oauth2"_L1) {
+            qWarning().noquote() << "[hydrate] abort: non-oauth account" << emailCopy;
             return {};
         }
 
@@ -1540,10 +1530,18 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             r.extraCandidates.push_back( { m.value("folder"_L1).toString(), m.value("uid"_L1).toString() } );
         }
 
+        qint8 attempts = 0;
         auto pooled = getPooledConnection(emailCopy);
+        while (!pooled && attempts++ < 10) {
+            qInfo() << "[hydrate] getPooledConnection() failed: attempt: " << attempts;
+            pooled = getPooledConnection(emailCopy);
+        }
+
         if (!pooled) {
+            qWarning().noquote() << "[hydrate] abort: pool timeout" << emailCopy;
             return {};
         }
+
         r.cxn = std::move(pooled);
 
         return Imap::MessageHydrator::execute(r);
@@ -1631,8 +1629,10 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
             if (!ok) return;
         }
 
-        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
+        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\Seen)").arg(uid));
         Q_UNUSED(result);
+
+        qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
     });
 }
 
