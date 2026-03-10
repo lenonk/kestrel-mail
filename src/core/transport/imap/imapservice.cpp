@@ -1088,6 +1088,11 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
         }, Qt::BlockingQueuedConnection);
     }
 
+    if (candidates.isEmpty()) {
+        qWarning().noquote() << "[bg-hydrate]" << "account=" << email << "candidates=0";
+        return;
+    }
+
     for (const QVariant &v : candidates) {
         const auto row = v.toMap();
         const QString folderName = row.value("folder"_L1).toString();

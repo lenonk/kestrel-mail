@@ -953,6 +953,7 @@ Rectangle {
         root.selectedAttachmentKey = "";
         htmlContainer.pendingHtml = "";
         htmlContainer.pendingMessageKey = "";
+        htmlContainer.activeLoadMessageKey = "";
         htmlContainer.pendingLoadReason = "";
         htmlContainer.pendingLoadQueuedAtMs = 0;
         htmlContainer.pendingLoadStartedAtMs = 0;
@@ -1700,6 +1701,7 @@ Rectangle {
             property string pendingHtml: ""
             property string pendingLoadReason: ""
             property string pendingMessageKey: ""
+            property string activeLoadMessageKey: ""
             property double pendingLoadQueuedAtMs: 0
             property double pendingLoadStartedAtMs: 0
             property double pendingClickAtMs: 0
@@ -1759,6 +1761,7 @@ Rectangle {
                         return;
                     }
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
+                    htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
             }
@@ -1791,6 +1794,20 @@ Rectangle {
                 onLoadingChanged: function (req) {
                     const st = req.status;
                     if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
+                        const loadedForCurrent = !htmlContainer.activeLoadMessageKey.length
+                                              || htmlContainer.activeLoadMessageKey === root.renderMessageKey;
+
+                        if (!loadedForCurrent) {
+                            // Stale load completion for previous message selection; ignore visual commit.
+                            htmlContainer.pendingHtml = "";
+                            htmlContainer.pendingMessageKey = "";
+                            htmlContainer.activeLoadMessageKey = "";
+                            htmlContainer.pendingLoadReason = "";
+                            htmlContainer.pendingLoadQueuedAtMs = 0;
+                            htmlContainer.pendingLoadStartedAtMs = 0;
+                            return;
+                        }
+
                         const tDone = Date.now();
                         const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
@@ -1800,6 +1817,7 @@ Rectangle {
                         htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
                         htmlContainer.pendingHtml = "";
                         htmlContainer.pendingMessageKey = "";
+                        htmlContainer.activeLoadMessageKey = "";
                         htmlContainer.pendingLoadReason = "";
                         htmlContainer.pendingLoadQueuedAtMs = 0;
                         htmlContainer.pendingLoadStartedAtMs = 0;

@@ -1163,12 +1163,6 @@ void DataStore::upsertHeader(const QVariantMap &header)
     if (subjectNormForLog.compare(QStringLiteral("T-Minus 26 Days Until Spring"), Qt::CaseInsensitive) == 0
             || (sanNormForLog.compare(subjectNormForLog, Qt::CaseInsensitive) == 0 && !rawNormForLog.isEmpty()
                 && rawNormForLog.compare(subjectNormForLog, Qt::CaseInsensitive) != 0)) {
-        qInfo().noquote() << "[snippet-persist-debug]"
-                          << "uid=" << uidValue
-                          << "folder=" << folderValue
-                          << "subject=" << subjectNormForLog.left(120)
-                          << "rawSnippet=" << rawNormForLog.left(180)
-                          << "sanitizedSnippet=" << sanNormForLog.left(180);
     }
 
     QSqlQuery qCanon(database);
@@ -2344,9 +2338,7 @@ bool DataStore::hasUsableBodyForEdge(const QString &accountEmail, const QString 
     if (lower.contains("ok success [throttled]"_L1) || lower.contains("authenticationfailed"_L1))
         return false;
 
-    static const QRegularExpression htmlRe("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
-        QRegularExpression::CaseInsensitiveOption);
-    return htmlRe.match(html).hasMatch();
+    return true;
 }
 
 QVariantMap DataStore::messageByKey(const QString &accountEmail, const QString &folder, const QString &uid) const
