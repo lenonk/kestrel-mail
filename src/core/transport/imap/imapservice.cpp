@@ -52,6 +52,8 @@ struct PooledConnSlot {
     QString email;
     QString host;
     int port = 0;
+    QString owner;
+    qint64 leasedAtMs = 0;
 };
 
 QMutex g_poolMutex;
@@ -63,7 +65,7 @@ constexpr int kOperationalPoolMax = 5;
 constexpr int kPoolAcquireTimeoutMs = 3500;
 }
 
-std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString &email) {
+std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString &email, const QString &owner) {
     int slotIndex = -1;
     const auto deadline = QDateTime::currentMSecsSinceEpoch() + kPoolAcquireTimeoutMs;
 
@@ -1507,7 +1509,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
     });
 
     const QString emailCopy = emailNorm;
-    watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm, emailCopy]() -> QString {
+    watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm, emailCopy, userInitiated]() -> QString {
         if (m_destroying)
             return {};
 
@@ -1538,6 +1540,8 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         }
 
         if (!pooled) {
+            if (userInitiated)
+                emit hydrateStatus(false, "Message body fetch failed: IMAP connection pool timeout.");
             qWarning().noquote() << "[hydrate] abort: pool timeout" << emailCopy;
             return {};
         }

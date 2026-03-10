@@ -51,7 +51,7 @@ BackgroundWorker::fetchFolderStatus(const QString &folder) const {
 
     std::shared_ptr<Connection> cxn;
     while (m_running.load() && !cxn)
-        cxn = ImapService::getPooledConnection(m_activeEmail);
+        cxn = ImapService::getPooledConnection(m_activeEmail, "bg-folder-status");
     if (!cxn)
         return out;
 
@@ -100,7 +100,7 @@ BackgroundWorker::start() {
 
         std::shared_ptr<Connection> pooled;
         while (m_running.load() && !pooled)
-            pooled = ImapService::getPooledConnection(m_activeEmail);
+            pooled = ImapService::getPooledConnection(m_activeEmail, "bg-list-folders");
         if (!pooled)
             continue;
 
