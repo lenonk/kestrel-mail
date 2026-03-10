@@ -1810,6 +1810,8 @@ Rectangle {
                         htmlContainer.pendingMessageKey = "";
                         return;
                     }
+                    // Drop previous document right at fade-out completion before loading next.
+                    htmlView.loadHtml("<!doctype html><html><body></body></html>", "file:///");
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
                     htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
