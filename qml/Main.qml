@@ -956,13 +956,19 @@ Kirigami.ApplicationWindow {
         if (!p || !root.dataStoreObj || !root.dataStoreObj.inbox) return null
         const rows = root.dataStoreObj.inbox
 
+        const wantedAccount = (p.accountEmail || "").toString()
+        const wantedFolder = (p.folder || "").toString()
+        const wantedUid = (p.uid || "").toString()
+        let matchMode = "none"
+
         let base = null
         for (let i = 0; i < rows.length; ++i) {
             const r = rows[i]
-            if ((r.accountEmail || "") === p.accountEmail
-                    && (r.folder || "") === p.folder
-                    && (r.uid || "") === p.uid) {
+            if ((r.accountEmail || "") === wantedAccount
+                    && ((r.folder || "").toString().toLowerCase() === wantedFolder.toLowerCase())
+                    && (r.uid || "") === wantedUid) {
                 base = r
+                matchMode = "edge-case-insensitive-folder"
                 break
             }
         }
@@ -977,6 +983,7 @@ Kirigami.ApplicationWindow {
                 if ((r.subject || "") !== (root.selectedMessageAnchor.subject || "")) continue
                 if ((r.receivedAt || "") !== (root.selectedMessageAnchor.receivedAt || "")) continue
                 base = r
+                matchMode = "anchor-fallback"
                 break
             }
         }
@@ -986,19 +993,38 @@ Kirigami.ApplicationWindow {
             dbRow = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
             if (dbRow) {
                 base = dbRow
+                matchMode = "db-exact"
             } else if (!base) {
                 base = dbRow
             }
         }
 
         if (!base) {
+            console.log("[pane-resolve] miss",
+                        "key=", key,
+                        "want=", wantedAccount + "|" + wantedFolder + "|" + wantedUid,
+                        "rows=", rows.length)
             return null
         }
 
         // If DB has fresher hydrated body for this exact key, prefer it over stale inbox cache row.
         if (dbRow && root.isBodyHtmlUsable(dbRow.bodyHtml) && !root.isBodyHtmlUsable(base.bodyHtml)) {
             base = dbRow
+            matchMode = "db-prefer-usable-html"
         }
+
+        const resolvedAccount = (base.accountEmail || "").toString()
+        const resolvedFolder = (base.folder || "").toString()
+        const resolvedUid = (base.uid || "").toString()
+        const bodyLen = (base.bodyHtml || "").toString().length
+        const usable = root.isBodyHtmlUsable(base.bodyHtml)
+        console.log("[pane-resolve] hit",
+                    "key=", key,
+                    "want=", wantedAccount + "|" + wantedFolder + "|" + wantedUid,
+                    "got=", resolvedAccount + "|" + resolvedFolder + "|" + resolvedUid,
+                    "mode=", matchMode,
+                    "bodyLen=", bodyLen,
+                    "usable=", usable)
 
         return base
     }
