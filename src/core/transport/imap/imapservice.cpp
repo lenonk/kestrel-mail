@@ -97,7 +97,6 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
     const QString slotEmail = g_poolSlots[slotIndex].email;
     const QString slotHost  = g_poolSlots[slotIndex].host;
     const int     slotPort  = g_poolSlots[slotIndex].port;
-    qWarning().noquote() << "[pool-trace] leased" << "slot=" << slotIndex << "owner=" << owner << "email=" << slotEmail;
     lock.unlock();
 
     if (!raw->isConnected()) {
@@ -118,11 +117,6 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
     return {raw, [slotIndex](Imap::Connection *) {
         QMutexLocker rel(&g_poolMutex);
         if (slotIndex >= 0 && slotIndex < static_cast<int>(g_poolSlots.size())) {
-            const qint64 now = QDateTime::currentMSecsSinceEpoch();
-            const qint64 heldMs = g_poolSlots[slotIndex].leasedAtMs > 0 ? (now - g_poolSlots[slotIndex].leasedAtMs) : -1;
-            qWarning().noquote() << "[pool-trace] returned" << "slot=" << slotIndex
-                                 << "owner=" << g_poolSlots[slotIndex].owner
-                                 << "heldMs=" << heldMs;
             g_poolSlots[slotIndex].busy = false;
             g_poolSlots[slotIndex].owner.clear();
             g_poolSlots[slotIndex].leasedAtMs = 0;
@@ -1506,10 +1500,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return;
 
         if (html.isEmpty()) {
-            qWarning().noquote() << "[hydrate-fail] reason=empty-body-html"
-                                 << "account=" << emailNorm
-                                 << "folder=" << folderNorm
-                                 << "uid=" << uidNorm;
             if (userInitiated)
                 emit hydrateStatus(false, "Message body fetch failed: parser returned empty HTML.");
             return;
@@ -1520,11 +1510,11 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
     const QString emailCopy = emailNorm;
     watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm, emailCopy, userInitiated]() -> QString {
+        const QElapsedTimer hydrateTimer = [](){ QElapsedTimer t; t.start(); return t; }();
         if (m_destroying)
             return {};
 
-        if (account.value("authType"_L1).toString() != "oauth2"_L1) {
-            qWarning().noquote() << "[hydrate] abort: non-oauth account" << emailCopy;
+        if (account.value("authType"_L1).toString() != "oauth2") {
             return {};
         }
 
@@ -1542,23 +1532,41 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             r.extraCandidates.push_back( { m.value("folder"_L1).toString(), m.value("uid"_L1).toString() } );
         }
 
+        const qint64 mapMs = hydrateTimer.elapsed();
+
         qint8 attempts = 0;
         auto pooled = getPooledConnection(emailCopy, "hydrate");
-        while (!pooled && attempts++ < 10) {
-            qInfo() << "[hydrate] getPooledConnection() failed: attempt: " << attempts;
+        while (!pooled && attempts++ < 10)
             pooled = getPooledConnection(emailCopy, "hydrate-retry");
-        }
+
+        const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
 
         if (!pooled) {
             if (userInitiated)
                 emit hydrateStatus(false, "Message body fetch failed: IMAP connection pool timeout.");
-            qWarning().noquote() << "[hydrate] abort: pool timeout" << emailCopy;
+            qWarning().noquote() << "[perf-hydrate]"
+                                 << "uid=" << uidNorm
+                                 << "folder=" << folderNorm
+                                 << "mapMs=" << mapMs
+                                 << "acquireMs=" << acquireMs
+                                 << "attempts=" << attempts
+                                 << "result=pool-timeout";
             return {};
         }
 
         r.cxn = std::move(pooled);
-
-        return Imap::MessageHydrator::execute(r);
+        const QString html = Imap::MessageHydrator::execute(r);
+        const qint64 totalMs = hydrateTimer.elapsed();
+        const qint64 executeMs = totalMs - mapMs - acquireMs;
+        qWarning().noquote() << "[perf-hydrate]"
+                             << "uid=" << uidNorm
+                             << "folder=" << folderNorm
+                             << "mapMs=" << mapMs
+                             << "acquireMs=" << acquireMs
+                             << "executeMs=" << executeMs
+                             << "totalMs=" << totalMs
+                             << "htmlLen=" << html.size();
+        return html;
     }));
 }
 
@@ -1643,10 +1651,8 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
             if (!ok) return;
         }
 
-        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\Seen)").arg(uid));
+        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
         Q_UNUSED(result);
-
-        qInfo().noquote() << "[mark-read]" << "uid=" << uid << "folder=" << folder;
     });
 }
 

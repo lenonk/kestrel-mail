@@ -148,7 +148,6 @@ Rectangle {
 
         const out = root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized;
         const t5 = Date.now();
-        console.log("[perf-html] htmlFor=", (t1 - t0), "sanitize=", (t2 - t1), "track=", (t3 - t2), "external=", (t4 - t3), "finalize=", (t5 - t4), "total=", (t5 - t0), "len=", out.length);
         return out;
     }
     property string selectedAttachmentKey: ""
@@ -1705,7 +1704,6 @@ Rectangle {
                 pendingClickAtMs = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? root.appRoot.lastMessageClickAtMs : 0;
                 bodyOpacity = 0.0;
                 const clickToQueue = pendingClickAtMs > 0 ? (pendingLoadQueuedAtMs - pendingClickAtMs) : -1;
-                console.log("[perf-html] queue-load reason=", reason, "len=", pendingHtml.length, "clickToQueue=", clickToQueue);
                 fadeOutLoadTimer.restart();
             }
             function scrollHtmlBy(deltaY) {
@@ -1739,7 +1737,6 @@ Rectangle {
                     if (!htmlContainer.pendingHtml.length)
                         return;
                     htmlContainer.pendingLoadStartedAtMs = Date.now();
-                    console.log("[perf-html] start-load reason=", htmlContainer.pendingLoadReason,
                                 "queueDelay=", (htmlContainer.pendingLoadStartedAtMs - htmlContainer.pendingLoadQueuedAtMs));
                     htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
                 }
@@ -1753,7 +1750,6 @@ Rectangle {
                     const now = Date.now();
                     const loadToVisible = htmlContainer.pendingLoadCompletedAtMs > 0 ? (now - htmlContainer.pendingLoadCompletedAtMs) : -1;
                     const clickToVisible = htmlContainer.pendingClickAtMs > 0 ? (now - htmlContainer.pendingClickAtMs) : -1;
-                    console.log("[perf-html] visible reason=", htmlContainer.pendingCompletedReason,
                                 "loadToVisible=", loadToVisible, "clickToVisible=", clickToVisible,
                                 "opacity=", htmlContainer.bodyOpacity);
                     htmlContainer.pendingLoadCompletedAtMs = 0;
@@ -1780,7 +1776,6 @@ Rectangle {
                         const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
                         const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
                         const clickToLoad = htmlContainer.pendingClickAtMs > 0 ? (tDone - htmlContainer.pendingClickAtMs) : -1;
-                        console.log("[perf-html] load-complete reason=", htmlContainer.pendingLoadReason,
                                     "status=", st, "loadMs=", loadMs, "totalMs=", totalMs, "clickToLoad=", clickToLoad);
 
                         htmlContainer.pendingLoadCompletedAtMs = tDone;

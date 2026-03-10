@@ -1255,11 +1255,6 @@ void DataStore::upsertHeader(const QVariantMap &header)
     qCanon.bindValue(QStringLiteral(":references_header"),  referencesValue.isEmpty()     ? QVariant() : QVariant(referencesValue));
     qCanon.bindValue(QStringLiteral(":esp_vendor"),         espVendorValue.isEmpty()      ? QVariant() : QVariant(espVendorValue));
     qCanon.exec();
-    if (!bodyHtmlValue.isEmpty()) {
-        qInfo().noquote() << "[datastore] canonical upsert body" << "account=" << accountEmail
-                          << "folder=" << folderValue << "uid=" << uidValue
-                          << "bodyLen=" << bodyHtmlValue.size();
-    }
 
     QSqlQuery idQ(database);
     idQ.prepare(QStringLiteral("SELECT id FROM messages WHERE account_email=:account_email AND logical_key=:logical_key LIMIT 1"));
