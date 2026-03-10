@@ -506,7 +506,7 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
         return;
 
     runBackgroundTask([this, accountEmail, folderName, uid, toFetch]() {
-        auto cxn = getPooledConnection(accountEmail);
+        auto cxn = getPooledConnection(accountEmail, "prefetch-attachments");
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
             return;
@@ -608,7 +608,7 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
         return;
 
     runBackgroundTask([this, accountEmail, folderName, uid, toFetch]() {
-        auto cxn = getPooledConnection(accountEmail);
+        auto cxn = getPooledConnection(accountEmail, "prefetch-images");
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
             return;
@@ -1202,7 +1202,7 @@ ImapService::fetchFolderHeaders(const QString &email,
                                 qint64 minUidExclusive,
                                 bool reconcileDeletes,
                                 int fetchBudget) {
-    auto pooled = getPooledConnection(email);
+    auto pooled = getPooledConnection(email, "fetch-folder-headers");
     if (!pooled) {
         if (statusOut)
             *statusOut = "Operational IMAP pool timeout."_L1;
@@ -1372,7 +1372,7 @@ ImapService::refreshFolderList(bool announce) {
                     return r;
                 }
 
-                auto pooled = getPooledConnection(email);
+                auto pooled = getPooledConnection(email, "refresh-folder-list");
                 if (!pooled) continue;
 
                 QString status;
@@ -1543,10 +1543,10 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         }
 
         qint8 attempts = 0;
-        auto pooled = getPooledConnection(emailCopy);
+        auto pooled = getPooledConnection(emailCopy, "hydrate");
         while (!pooled && attempts++ < 10) {
             qInfo() << "[hydrate] getPooledConnection() failed: attempt: " << attempts;
-            pooled = getPooledConnection(emailCopy);
+            pooled = getPooledConnection(emailCopy, "hydrate-retry");
         }
 
         if (!pooled) {
@@ -1589,7 +1589,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
-        auto cxn = getPooledConnection(accountEmail);
+        auto cxn = getPooledConnection(accountEmail, "move-message");
         if (!cxn) return;
 
         if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
@@ -1635,7 +1635,7 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid]() {
         if (m_destroying.load()) return;
 
-        auto cxn = getPooledConnection(accountEmail);
+        auto cxn = getPooledConnection(accountEmail, "mark-read");
         if (!cxn) return;
 
         if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
@@ -1802,7 +1802,7 @@ ImapService::syncAll(bool announce) {
                 }
 
                 // Fetch and store folder list
-                auto pooled = getPooledConnection(email);
+                auto pooled = getPooledConnection(email, "sync-all-folders");
                 if (!pooled) continue;
                 QString folderStatus;
                 const auto folders = Imap::SyncEngine::fetchFolders(pooled, &folderStatus, true);
