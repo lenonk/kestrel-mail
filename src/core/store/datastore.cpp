@@ -2522,6 +2522,28 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
     auto database = db();
     if (!database.isValid() || !database.isOpen()) return false;
 
+    int prevLen = -1;
+    {
+        QSqlQuery qPrev(database);
+        qPrev.prepare(QStringLiteral(R"(
+            SELECT length(trim(COALESCE(m.body_html, '')))
+            FROM messages m
+            WHERE m.id = (
+                SELECT mfm.message_id
+                FROM message_folder_map mfm
+                WHERE mfm.account_email=:account_email
+                  AND lower(mfm.folder)=lower(:folder)
+                  AND mfm.uid=:uid
+                LIMIT 1
+            )
+        )"));
+        qPrev.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+        qPrev.bindValue(QStringLiteral(":folder"), folder.trimmed());
+        qPrev.bindValue(QStringLiteral(":uid"), uid.trimmed());
+        if (qPrev.exec() && qPrev.next())
+            prevLen = qPrev.value(0).toInt();
+    }
+
     QSqlQuery q(database);
     q.prepare(QStringLiteral(R"(
         UPDATE messages
@@ -2557,12 +2579,13 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
                              || htmlLower.contains(QStringLiteral("mime-version:"));
     const bool suspicious = !hasHtmlish || hasMarkdownLinks || hasMimeHeaders || html.size() < 160;
 
-    if (suspicious) {
+    if (suspicious || !changed) {
         qWarning().noquote() << "[hydrate-html-db] store-write"
                              << "account=" << accountEmail.trimmed()
                              << "folder=" << folder.trimmed()
                              << "uid=" << uid.trimmed()
-                             << "htmlLen=" << html.size()
+                             << "prevLen=" << prevLen
+                             << "newLen=" << html.size()
                              << "changed=" << changed
                              << "hasHtmlish=" << hasHtmlish
                              << "hasMarkdownLinks=" << hasMarkdownLinks

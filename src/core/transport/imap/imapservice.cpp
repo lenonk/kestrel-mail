@@ -1540,6 +1540,11 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return;
 
         if (html.isEmpty()) {
+            qWarning().noquote() << "[hydrate-html-db] empty-result"
+                                 << "source=" << (userInitiated ? "user" : "bg")
+                                 << "account=" << emailNorm
+                                 << "folder=" << folderNorm
+                                 << "uid=" << uidNorm;
             if (userInitiated)
                 emit hydrateStatus(false, "Message body fetch failed: parser returned empty HTML.");
             return;
