@@ -1082,17 +1082,12 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
 
     runBackgroundTask([this, email, folderNorm, key, limit]() {
-                             << "limit=" << limit;
-
         while (!m_destroying.load()) {
-
             QStringList candidates;
             QMetaObject::invokeMethod(this, [this, &candidates, email, folderNorm, limit]() {
                 if (m_store)
                     candidates = m_store->bodyFetchCandidates(email, folderNorm, limit);
             }, Qt::BlockingQueuedConnection);
-
-                                 << "count=" << candidates.size();
 
             if (candidates.isEmpty())
                 break;
@@ -1101,9 +1096,6 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
                 if (m_destroying.load())
                     break;
                 const QString uid = candidates.at(i);
-                                     << "uid=" << uid
-                                     << "index=" << (i + 1)
-                                     << "of=" << candidates.size();
 
                 QMetaObject::invokeMethod(this,
                                           [this, email, folderNorm, uid]() {
