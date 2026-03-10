@@ -116,6 +116,9 @@ Kirigami.ApplicationWindow {
         interval: 2000
         repeat: false
         onTriggered: {
+            const now = Date.now()
+            const clickDelta = root.lastMessageClickAtMs > 0 ? (now - root.lastMessageClickAtMs) : -1
+            console.log("[selection-path] mark-read-trigger", "key=", root.selectedMessageKey, "clickDeltaMs=", clickDelta)
             const p = root.parseMessageKey(root.selectedMessageKey)
             if (!p || !root.imapServiceObj) return
             root.imapServiceObj.markMessageRead(p.accountEmail, p.folder, p.uid)
@@ -670,6 +673,15 @@ Kirigami.ApplicationWindow {
         if (!root.contentPaneHoverExpandEnabled) {
             root.setContentPaneHoverExpanded(false)
         }
+    }
+
+    onSelectedMessageDataChanged: {
+        const now = Date.now()
+        const clickDelta = root.lastMessageClickAtMs > 0 ? (now - root.lastMessageClickAtMs) : -1
+        const k = root.selectedMessageKey || ""
+        const d = root.selectedMessageData
+        const edge = d ? ((d.accountEmail || "") + "|" + (d.folder || "") + "|" + (d.uid || "")) : ""
+        console.log("[selection-path] selected-data-changed", "key=", k, "edge=", edge, "clickDeltaMs=", clickDelta)
     }
 
     onSelectedFolderCategoriesChanged: {

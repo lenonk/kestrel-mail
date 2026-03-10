@@ -94,6 +94,12 @@ Rectangle {
             return "";
         return normalizedEdgeKey(p[0], p[1], p[2]);
     }
+
+    onSelectedMessageEdgeKeyChanged: {
+        const now = Date.now();
+        const clickDelta = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? (now - root.appRoot.lastMessageClickAtMs) : -1;
+        console.log("[selection-path] selected-edge-changed", "edge=", root.selectedMessageEdgeKey, "render=", root.renderMessageKey, "clickDeltaMs=", clickDelta)
+    }
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
