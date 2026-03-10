@@ -4,7 +4,6 @@
 #include "bodyprocessor.h"
 
 #include <QRegularExpression>
-#include <QTextDocument>
 #include <QUrl>
 
 using namespace Qt::Literals::StringLiterals;
@@ -47,6 +46,18 @@ static const QRegularExpression kCssSelectorListRe(
 static const QRegularExpression kRepeatedSeparatorRe("(?:[-=_~]{5,}|(?:[-=*_~#][ \\t]){4,}[-=*_~#]?)"_L1);
 static const QRegularExpression kImagePlaceholderRe("\\(\\s+\\)"_L1);
 static const QRegularExpression kAsteriskDecoRe("\\*{2,}"_L1);
+
+static QString htmlToPlainFast(QString s) {
+    s.replace(kHtmlScriptStyleRe, " "_L1);
+    s.replace(kHtmlTagRe, " "_L1);
+    s.replace("&nbsp;"_L1, " "_L1, Qt::CaseInsensitive);
+    s.replace("&amp;"_L1, "&"_L1, Qt::CaseInsensitive);
+    s.replace("&lt;"_L1, "<"_L1, Qt::CaseInsensitive);
+    s.replace("&gt;"_L1, ">"_L1, Qt::CaseInsensitive);
+    s.replace("&#39;"_L1, "'"_L1, Qt::CaseInsensitive);
+    s.replace("&quot;"_L1, "\""_L1, Qt::CaseInsensitive);
+    return s;
+}
 
 static QString truncateCssJunk(const QString &text) {
     int pos = -1;
@@ -267,7 +278,7 @@ QString compileDeterministicSnippet(const QString &subject, const QString &heade
             text = BodyProcessor::extractHiddenPreheader(html);
             if (!text.isEmpty()) text = stripWhitespaceForSnippet(text);
             else {
-                QTextDocument doc; doc.setHtml(html); text = doc.toPlainText();
+                text = htmlToPlainFast(html);
                 text.replace(kImagePlaceholderRe, " "_L1); text.replace(kAsteriskDecoRe, " "_L1);
                 text = stripWhitespaceForSnippet(text); text = truncateCssJunk(text);
             }
@@ -286,7 +297,8 @@ QString compileDeterministicSnippet(const QString &subject, const QString &heade
                     literalText = literalText.mid(bodyStart + sepLen);
             }
             literalText = stripMimeNoiseForSnippet(literalText);
-            if (literalText.contains('<')) { QTextDocument doc; doc.setHtml(literalText); literalText = doc.toPlainText(); }
+            if (literalText.contains('<'))
+                literalText = htmlToPlainFast(literalText);
             literalText.replace(kImagePlaceholderRe, " "_L1); literalText.replace(kAsteriskDecoRe, " "_L1);
             text = stripWhitespaceForSnippet(literalText); text = truncateCssJunk(text);
         }
