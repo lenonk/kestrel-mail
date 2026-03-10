@@ -55,7 +55,7 @@ QWaitCondition g_poolWait;
 std::vector<PooledConnSlot> g_poolSlots;
 std::atomic_bool g_poolInitialized{false};
 std::function<QString(const QString &email)> g_poolTokenRefresher;
-constexpr int kOperationalPoolMax = 7;
+constexpr int kOperationalPoolMax = 5;
 constexpr int kPoolAcquireTimeoutMs = 3500;
 
 static bool isBackgroundOwner(const QString &owner) {
@@ -1851,6 +1851,10 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             if (announce) {
                 if (!r.ok)
                     emit syncFinished(false, r.message);
+                else if (r.inserted > 0)
+                    emit syncFinished(true, QStringLiteral("%1 new message%2 received.")
+                                               .arg(r.inserted)
+                                               .arg(r.inserted == 1 ? QString() : "s"));
                 else if (syncedCount > 0)
                     emit syncFinished(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
                 return;
@@ -1858,14 +1862,12 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
             if (!r.ok) {
                 emit realtimeStatus(false, r.message);
-            } else if (syncedCount > 0) {
-                emit realtimeStatus(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
-            }
-
-            if (r.ok && r.inserted > 0) {
+            } else if (r.inserted > 0) {
                 emit realtimeStatus(true, QStringLiteral("%1 new message%2 received.")
                                          .arg(r.inserted)
                                          .arg(r.inserted == 1 ? QString() : "s"));
+            } else if (syncedCount > 0) {
+                emit realtimeStatus(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
             }
         }
     );
