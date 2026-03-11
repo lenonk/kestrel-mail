@@ -109,6 +109,8 @@ QVariant MessageListModel::data(const QModelIndex &index, int role) const
     case UnreadRole: return row.message.value(QStringLiteral("unread"));
     case HasAttachmentsRole: return row.message.value(QStringLiteral("hasAttachments"));
     case HasTrackingPixelRole: return row.message.value(QStringLiteral("hasTrackingPixel"));
+    case ThreadCountRole: return row.message.value(QStringLiteral("threadCount"));
+    case IsImportantRole: return row.message.value(QStringLiteral("isImportant"));
     default: return {};
     }
 }
@@ -136,7 +138,9 @@ QHash<int, QByteArray> MessageListModel::roleNames() const
         { AvatarSourceRole, QByteArrayLiteral("avatarSource") },
         { UnreadRole, QByteArrayLiteral("unread") },
         { HasAttachmentsRole, QByteArrayLiteral("hasAttachments") },
-        { HasTrackingPixelRole, QByteArrayLiteral("hasTrackingPixel") }
+        { HasTrackingPixelRole, QByteArrayLiteral("hasTrackingPixel") },
+        { ThreadCountRole, QByteArrayLiteral("threadCount") },
+        { IsImportantRole, QByteArrayLiteral("isImportant") }
     };
 }
 

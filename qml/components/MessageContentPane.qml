@@ -96,7 +96,11 @@ Rectangle {
     }
 
     onSelectedMessageEdgeKeyChanged: {
-        htmlContainer.loadHtmlIfChanged("selectedEdgeChanged");
+        const key = root.selectedMessageEdgeKey;
+        if (key.length && key !== htmlContainer.pendingKey)
+            htmlContainer.startTransition(key);
+        // Also try to queue HTML now in case messageData is already consistent.
+        htmlContainer.onHtmlUpdate();
     }
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
@@ -204,6 +208,219 @@ Rectangle {
     property var tagMap: ({})
     readonly property string trackerVendor: root._trackerInfo.vendor
     property bool trackingAllowed: false
+
+    // ── Thread / conversation view ───────────────────────────────────────────
+    readonly property string threadId: (messageData && messageData.threadId) ? messageData.threadId.toString() : ""
+    readonly property int    threadCount: (messageData && messageData.threadCount) ? messageData.threadCount : 0
+    readonly property var    threadMessages: {
+        if (!threadId.length || threadCount < 2 || !appRoot || !appRoot.dataStoreObj) return []
+        // Reading .inbox creates a dependency on inboxChanged, so the thread
+        // re-queries whenever any body is hydrated or messages are updated.
+        void appRoot.dataStoreObj.inbox
+        return appRoot.dataStoreObj.messagesForThread(messageData.accountEmail, threadId)
+    }
+    readonly property bool   isThreadView: threadMessages.length > 1
+    property bool            threadShowAll: false
+    // null = default state (last card auto-expanded); otherwise an object used as a Set
+    property var             threadExpandedSet: null
+    property var             cardDarkModes: ({})      // index → bool, overrides global dark mode per card
+
+    readonly property var visibleThreadMessages: {
+        const msgs = threadMessages
+        if (threadShowAll || msgs.length <= 5) return msgs
+        return msgs.slice(msgs.length - 5)
+    }
+    readonly property int threadHiddenCount: threadMessages.length - visibleThreadMessages.length
+
+    onThreadIdChanged: {
+        threadShowAll = false
+        threadExpandedIndex = -1
+    }
+
+    function renderedHtmlForThread(bodyHtml, darkMode) {
+        if (!bodyHtml || !bodyHtml.length) return ""
+        let html = bodyHtml
+        const bgColor = Kirigami.Theme.backgroundColor.toString()
+        // Collapse blockquotes behind a native <details> toggle (no JS needed)
+        const quoteCss = '<style>details.kq{margin:4px 0}details.kq>summary{cursor:pointer;list-style:none;display:inline-block;background:rgba(128,128,128,0.15);border-radius:3px;padding:1px 8px;font-size:11px;opacity:.7;outline:none}details.kq>summary::-webkit-details-marker{display:none}details.kq>summary::before{content:"···"}</style>'
+        const bgStyle = "<style data-kestrel-bg='baseline'>html,body{background-color:" + bgColor + ";margin:8px 12px;}</style>"
+        const headInsert = bgStyle + quoteCss
+        if (html.indexOf("<head>") >= 0)
+            html = html.replace("<head>", "<head>" + headInsert)
+        else
+            html = headInsert + html
+        // Wrap each blockquote in <details class="kq"> for collapsible quoted content
+        html = html.replace(/<blockquote(\b[^>]*)>/gi, '<details class="kq"><summary></summary><blockquote$1>')
+        html = html.replace(/<\/blockquote>/gi, '</blockquote></details>')
+        return darkMode ? darkenHtml(html) : html
+    }
+
+    function _threadMessageKey(msg) {
+        if (!msg) return ""
+        return normalizedEdgeKey(msg.accountEmail, msg.folder, msg.uid)
+    }
+
+    function _threadSenderName(msg) {
+        if (!msg || !msg.sender) return ""
+        return appRoot.displaySenderName(msg.sender, msg.accountEmail || "")
+    }
+
+    function _threadRecipientName(msg) {
+        if (!msg || !msg.recipient) return ""
+        return appRoot.displayRecipientNames(msg.recipient, msg.accountEmail || "")
+    }
+
+    function _threadAvatarSources(msg) {
+        if (!msg || !msg.sender) return []
+        return appRoot.senderAvatarSources(msg.sender, msg.avatarDomain || "", msg.avatarUrl || "", msg.accountEmail || "")
+    }
+
+    function _threadDate(msg) {
+        if (!msg) return ""
+        return appRoot.formatContentDate(msg.receivedAt || "")
+    }
+
+    function _threadBodyKey(msg) {
+        if (!msg) return ""
+        return (msg.accountEmail || "") + "|" + (msg.folder || "") + "|" + (msg.uid || "") + "|thread"
+    }
+
+    function _threadHasBody(msg) {
+        if (!msg || !msg.bodyHtml) return false
+        const h = msg.bodyHtml.toString()
+        return h.length > 0 && /<html|<body|<div|<table|<p|<br|<span|<img|<a\b/i.test(h)
+    }
+
+    function _threadRenderedHtml(msg, darkMode) {
+        if (!msg || !msg.bodyHtml) return ""
+        return renderedHtmlForThread(msg.bodyHtml.toString(), darkMode)
+    }
+
+    function _threadIsExpanded(index) {
+        if (threadExpandedSet === null)
+            return index === visibleThreadMessages.length - 1
+        return !!threadExpandedSet[index]
+    }
+
+    function _threadCardHeight(index) {
+        return _threadIsExpanded(index) ? threadExpandedBodyHeight(index) : 72
+    }
+
+    function threadExpandedBodyHeight(index) {
+        // Placeholder — overridden dynamically per card by onContentHeightChanged
+        return 400
+    }
+
+    function _threadToggleExpand(index) {
+        // Materialize from default state on first user interaction
+        if (threadExpandedSet === null) {
+            const last = visibleThreadMessages.length - 1
+            const initial = {}
+            initial[last] = true
+            threadExpandedSet = initial
+        }
+        const next = Object.assign({}, threadExpandedSet)
+        if (next[index])
+            delete next[index]
+        else
+            next[index] = true
+        threadExpandedSet = next
+    }
+
+    function _threadCardDarkMode(index) {
+        return cardDarkModes[index] !== undefined ? cardDarkModes[index] : forceDarkHtml
+    }
+
+    function _threadToggleCardDark(index) {
+        const next = Object.assign({}, cardDarkModes)
+        next[index] = !_threadCardDarkMode(index)
+        cardDarkModes = next
+    }
+
+    function _threadHydrateIfNeeded(msg) {
+        if (!msg || !appRoot || !appRoot.imapServiceObj) return
+        if (_threadHasBody(msg)) return
+        appRoot.imapServiceObj.hydrateMessageBody(msg.accountEmail, msg.folder, msg.uid)
+    }
+
+    function _threadReply(msg) {
+        if (!msg) return
+        appRoot.selectedMessageKey = "msg:" + _threadMessageKey(msg)
+        // small delay to let selectedMessageData settle
+        appRoot.openComposerTo(msg.replyTo || msg.sender, "reply")
+    }
+
+    function _threadOpenExternal(msg) {
+        if (!msg) return
+        Qt.openUrlExternally("mailto:" + (msg.sender || ""))
+    }
+
+    function _threadUnreadCount() {
+        let n = 0
+        for (let i = 0; i < threadMessages.length; i++)
+            if (threadMessages[i].unread) n++
+        return n
+    }
+
+    function _threadOnSelectedChanged() {
+        threadShowAll = false
+        threadExpandedSet = null
+        cardDarkModes = ({})
+    }
+
+    function _threadParticipantsSummary() {
+        const msgs = threadMessages
+        const me = messageData ? (messageData.accountEmail || "").toLowerCase() : ""
+        const names = []
+        const seen = new Set()
+        for (let i = 0; i < msgs.length; i++) {
+            const name = _threadSenderName(msgs[i])
+            if (!name.length) continue
+            const key = name.toLowerCase()
+            if (seen.has(key)) continue
+            seen.add(key)
+            const senderEmail = appRoot.senderEmail(msgs[i].sender || "")
+            names.push(senderEmail.toLowerCase() === me ? i18n("me") : name)
+        }
+        return names.join(", ")
+    }
+
+    function _threadMarkAllRead() {
+        const msgs = threadMessages
+        for (let i = 0; i < msgs.length; i++) {
+            const m = msgs[i]
+            if (m.unread && appRoot.imapServiceObj)
+                appRoot.imapServiceObj.markMessageRead(m.accountEmail, m.folder, m.uid)
+        }
+    }
+
+    function _threadOnCardExpanded(index) {
+        const msgs = visibleThreadMessages
+        if (index < 0 || index >= msgs.length) return
+        _threadHydrateIfNeeded(msgs[index])
+    }
+
+    function _threadSubject() {
+        return messageSubject
+    }
+
+    function _threadBodyTextForCard(index) {
+        void cardDarkModes  // reactive dependency: re-evaluate when dark mode changes
+        const msgs = visibleThreadMessages
+        if (index < 0 || index >= msgs.length) return ""
+        const msg = msgs[index]
+        if (!msg.bodyHtml) return ""
+        return renderedHtmlForThread(msg.bodyHtml.toString(), _threadCardDarkMode(index))
+    }
+
+    function _threadScrollToCard(index) {
+        const item = threadCardsRepeater.itemAt(index)
+        if (!item) return
+        const yPos = item.mapToItem(threadScrollContent, 0, 0).y
+        threadFlickable.contentY = Math.max(0, yPos - 8)
+    }
+
+    // ── End thread helpers ───────────────────────────────────────────────────
 
     function _fileNameFromUrl(url) {
         const raw = (url || "").toString();
@@ -892,15 +1109,6 @@ Rectangle {
 
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
-        // Only wipe in-flight load state when switching to a different message.
-        // Background data updates for the current message must not cancel a pending fade.
-        if (htmlContainer.pendingMessageKey.length === 0 || htmlContainer.pendingMessageKey !== root.renderMessageKey) {
-            htmlContainer.pendingHtml = "";
-            htmlContainer.pendingMessageKey = "";
-            htmlContainer.pendingLoadReason = "";
-            htmlContainer.pendingLoadQueuedAtMs = 0;
-            htmlContainer.pendingLoadStartedAtMs = 0;
-        }
 
         const account = (messageData && messageData.accountEmail) ? messageData.accountEmail.toString() : "";
         const uid = (messageData && messageData.uid) ? messageData.uid.toString() : "";
@@ -959,9 +1167,13 @@ Rectangle {
 
         trackingAllowed = false;
 
-        // Force a load attempt on explicit selection changes; relying only on
-        // renderedHtml binding changes can miss transitions when data races.
-        htmlContainer.loadHtmlIfChanged("messageDataChanged");
+        // Only start a new transition when the message key changes.
+        // Background updates (mark-read, header refreshes) must not restart the animation.
+        const key = root.renderMessageKey;
+        if (key.length && key !== htmlContainer.pendingKey)
+            htmlContainer.startTransition(key);
+        // Queue HTML if available (handles case where data arrives before edgeKey).
+        htmlContainer.onHtmlUpdate();
     }
 
     TapHandler {
@@ -1184,7 +1396,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.topMargin: 28
             spacing: Kirigami.Units.smallSpacing
-            visible: !!root.messageData
+            visible: !!root.messageData && !root.isThreadView
 
             Item {
                 id: avatarWrap
@@ -1355,7 +1567,7 @@ Rectangle {
             Layout.bottomMargin: Kirigami.Units.largeSpacing * 2
             Layout.fillWidth: true
             spacing: Kirigami.Units.largeSpacing
-            visible: !!root.messageData && ((root.hasExternalImages && !root.imagesAllowed && !root.isTrustedSender) || (root.hasTrackingPixel && !root.trackingAllowed && root.imagesAllowed) || root.listUnsubscribeUrl.length > 0)
+            visible: !root.isThreadView && !!root.messageData && ((root.hasExternalImages && !root.imagesAllowed && !root.isTrustedSender) || (root.hasTrackingPixel && !root.trackingAllowed && root.imagesAllowed) || root.listUnsubscribeUrl.length > 0)
 
             // Unsubscribe Info Bar
             RowLayout {
@@ -1640,44 +1852,355 @@ Rectangle {
                 }
             }
         }
+        // ── Thread view ──────────────────────────────────────────────────────
+        Flickable {
+            id: threadFlickable
+
+            visible: root.isThreadView
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            contentWidth: width
+            contentHeight: threadScrollContent.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+
+            QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
+
+            Column {
+                id: threadScrollContent
+                width: threadFlickable.width
+                spacing: 8
+                topPadding: 0
+                bottomPadding: 12
+
+                // "Show N older messages" button
+                QQC2.Button {
+                    id: showOlderBtn
+                    visible: root.threadHiddenCount > 0
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: i18n("Show %1 older message(s)", root.threadHiddenCount)
+                    flat: true
+                    leftPadding: 16; rightPadding: 16
+                    topPadding: 6; bottomPadding: 6
+
+                    background: Rectangle {
+                        color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.15)
+                        radius: height / 2
+                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.5)
+                        border.width: 1
+                    }
+                    contentItem: QQC2.Label {
+                        text: parent.text
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.pixelSize: 12
+                    }
+                    onClicked: root.threadShowAll = true
+                }
+
+                // Message cards
+                Repeater {
+                    id: threadCardsRepeater
+                    model: root.visibleThreadMessages
+
+                    delegate: Rectangle {
+                        id: threadCard
+
+                        required property var modelData
+                        required property int index
+
+                        readonly property bool isExpanded: root._threadIsExpanded(index)
+                        readonly property string cardBodyHtml: root._threadBodyTextForCard(index)
+                        property real bodyHeight: 400
+
+                        width: threadScrollContent.width
+                        implicitHeight: cardHeaderRow.implicitHeight + 16
+                                        + (isExpanded ? bodyHeight + 12 : 0)
+                        radius: 8
+                        border.color: Qt.rgba(Kirigami.Theme.textColor.r,
+                                              Kirigami.Theme.textColor.g,
+                                              Kirigami.Theme.textColor.b, 0.12)
+                        border.width: 1
+                        color: isExpanded ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35) : Kirigami.Theme.backgroundColor
+
+                        onIsExpandedChanged: {
+                            if (isExpanded)
+                                root._threadOnCardExpanded(index)
+                        }
+
+                        // ── Card header ───────────────────────────────────────────
+                        MouseArea {
+                            x: 10; y: 8
+                            width: parent.width - 20
+                            height: cardHeaderRow.implicitHeight
+                            enabled: !threadCard.isExpanded
+                            cursorShape: Qt.PointingHandCursor
+                            propagateComposedEvents: true
+                            onClicked: root._threadToggleExpand(threadCard.index)
+                        }
+
+                        RowLayout {
+                            id: cardHeaderRow
+                            x: 10; y: 8
+                            width: parent.width - 20
+                            spacing: 10
+
+                            // Avatar
+                            Item {
+                                Layout.preferredWidth: 40
+                                Layout.preferredHeight: 40
+                                Layout.alignment: Qt.AlignTop
+
+                                AvatarBadge {
+                                    anchors.fill: parent
+                                    size: 40
+                                    displayName: root._threadSenderName(threadCard.modelData)
+                                    fallbackText: threadCard.modelData.sender || ""
+                                    avatarSources: root._threadAvatarSources(threadCard.modelData)
+                                }
+                            }
+
+                            // Sender / snippet / recipient
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+
+                                QQC2.Label {
+                                    text: root._threadSenderName(threadCard.modelData)
+                                    font.bold: true
+                                    font.pixelSize: 13
+                                    color: "#4ea3ff"
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+
+                                // Collapsed: snippet
+                                QQC2.Label {
+                                    visible: !threadCard.isExpanded
+                                    text: threadCard.modelData.snippet || ""
+                                    font.pixelSize: 12
+                                    opacity: 0.72
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+
+                                // Expanded: recipient line
+                                RowLayout {
+                                    visible: threadCard.isExpanded
+                                    spacing: 4
+                                    Layout.fillWidth: true
+
+                                    QQC2.Label {
+                                        text: i18n("to")
+                                        font.pixelSize: 12
+                                        opacity: 0.8
+                                    }
+                                    QQC2.Label {
+                                        text: root._threadRecipientName(threadCard.modelData)
+                                        color: "#4ea3ff"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            // Date + action buttons
+                            ColumnLayout {
+                                Layout.alignment: Qt.AlignTop
+                                spacing: 4
+
+                                QQC2.Label {
+                                    text: root._threadDate(threadCard.modelData)
+                                    font.pixelSize: 11
+                                    opacity: 0.75
+                                    horizontalAlignment: Text.AlignRight
+                                    Layout.alignment: Qt.AlignRight
+                                }
+
+                                RowLayout {
+                                    spacing: 4
+                                    visible: threadCard.isExpanded
+
+                                    MailActionButton {
+                                        iconName: "mail-reply-sender"
+                                        text: i18n("Reply")
+                                        menuItems: [
+                                            { text: i18n("Reply"),     icon: "mail-reply-sender" },
+                                            { text: i18n("Reply all"), icon: "mail-reply-all"    },
+                                            { text: i18n("Forward"),   icon: "mail-forward"      }
+                                        ]
+                                        onTriggered: function(actionText) {
+                                            const msg = threadCard.modelData
+                                            if (!msg) return
+                                            if (actionText === i18n("Reply all")) {
+                                                appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject)
+                                                appRoot.openComposerTo(msg.recipient || "", i18n("reply all"))
+                                            } else if (actionText === i18n("Forward")) {
+                                                appRoot.composeDraftTo = ""
+                                                appRoot.composeDraftSubject = i18n("Fwd: %1").arg(root.messageSubject)
+                                                appRoot.composeDraftBody = i18n("\n\n--- Forwarded message ---\nFrom: %1\nDate: %2\n\n%3").arg(msg.sender || "").arg(root._threadDate(msg)).arg(msg.snippet || "")
+                                                appRoot.openComposeDialog(i18n("forward"))
+                                            } else {
+                                                appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject)
+                                                appRoot.openComposerTo(msg.replyTo || msg.sender || "", i18n("reply"))
+                                            }
+                                        }
+                                    }
+
+                                    QQC2.Button {
+                                        icon.name: root._threadCardDarkMode(threadCard.index)
+                                                   ? "weather-clear-night" : "weather-clear"
+                                        text: root._threadCardDarkMode(threadCard.index)
+                                              ? i18n("Dark") : i18n("Light")
+                                        onClicked: root._threadToggleCardDark(threadCard.index)
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Expanded body ─────────────────────────────────────────
+                        Loader {
+                            id: bodyLoader
+                            active: threadCard.isExpanded
+                            x: 10
+                            y: cardHeaderRow.implicitHeight + 16
+                            width: threadCard.width - 20
+                            height: threadCard.bodyHeight
+
+                            sourceComponent: Component {
+                                WebEngineView {
+                                    id: threadBodyView
+                                    width: bodyLoader.width
+                                    settings.javascriptEnabled: false
+                                    settings.localContentCanAccessRemoteUrls: false
+                                    backgroundColor: Kirigami.Theme.backgroundColor
+
+                                    onLoadingChanged: function(req) {
+                                        if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
+                                            runJavaScript("Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
+                                                function(h) {
+                                                    if (h && h > 0)
+                                                        threadCard.bodyHeight = h + 16
+                                                })
+                                        }
+                                    }
+
+                                    onNavigationRequested: function(request) {
+                                        const url = request.url ? request.url.toString() : ""
+                                        if (request.navigationType === WebEngineNavigationRequest.LinkClickedNavigation
+                                                && (url.startsWith("http://") || url.startsWith("https://"))) {
+                                            request.action = WebEngineNavigationRequest.IgnoreRequest
+                                            Qt.openUrlExternally(url)
+                                        }
+                                    }
+
+                                    onNewWindowRequested: function(request) {
+                                        const url = request.requestedUrl ? request.requestedUrl.toString() : ""
+                                        if (url.startsWith("http://") || url.startsWith("https://"))
+                                            Qt.openUrlExternally(url)
+                                    }
+
+                                    Component.onCompleted: {
+                                        const html = threadCard.cardBodyHtml
+                                        if (html.length)
+                                            loadHtml(html, "file:///")
+                                    }
+                                }
+                            }
+
+                            onLoaded: {
+                                // reload when HTML changes (e.g., after hydration arrives)
+                            }
+                        }
+
+                        // Watch for body HTML becoming available after hydration
+                        Connections {
+                            target: threadCard
+                            function onCardBodyHtmlChanged() {
+                                if (!threadCard.isExpanded) return
+                                const html = threadCard.cardBodyHtml
+                                if (!html.length) return
+                                if (bodyLoader.item)
+                                    bodyLoader.item.loadHtml(html, "file:///")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Single message view ──────────────────────────────────────────────
         Rectangle {
             id: htmlContainer
+            visible: !root.isThreadView
 
+            // ── Fade & load state ─────────────────────────────────────────────
             property real bodyOpacity: 1.0
             property real flickVelocityY: 0
-            property string lastLoadedHtmlKey: ""
-            property string pendingHtml: ""
-            property string pendingLoadReason: ""
-            property string pendingMessageKey: ""
-            property string activeLoadMessageKey: ""
-            property double pendingLoadQueuedAtMs: 0
-            property double pendingLoadStartedAtMs: 0
-            property double pendingClickAtMs: 0
-            property double pendingLoadCompletedAtMs: 0
-            property string pendingCompletedReason: ""
-            property bool suppressNextLoadCommit: false
 
-            function loadHtmlIfChanged(reason) {
-                const t0 = Date.now();
-                if (!root.renderedHtml.length) {
-                    return;
-                }
-                if (root.selectedMessageEdgeKey.length > 0 && root.renderMessageKey !== root.selectedMessageEdgeKey) {
-                    return;
-                }
-                const key = root.renderMessageKey + "|" + (root.imagesAllowed ? "1" : "0") + "|" + root.renderedHtml;
-                if (key === lastLoadedHtmlKey) {
-                    return;
-                }
-                lastLoadedHtmlKey = key;
-                pendingHtml = root.renderedHtml;
-                pendingLoadReason = reason;
-                pendingMessageKey = root.renderMessageKey;
-                pendingLoadQueuedAtMs = t0;
-                pendingClickAtMs = (root.appRoot && root.appRoot.lastMessageClickAtMs) ? root.appRoot.lastMessageClickAtMs : 0;
-                const clickToQueue = pendingClickAtMs > 0 ? (pendingLoadQueuedAtMs - pendingClickAtMs) : -1;
-                fadeOutLoadTimer.restart();
+            // Key of the message we are transitioning to show.
+            property string pendingKey: ""
+            // HTML queued for pendingKey (empty until renderedHtml is available).
+            property string pendingHtml: ""
+            // Dedup key: prevents re-loading the same content twice.
+            property string lastHtmlKey: ""
+            // Key of the message currently being loaded by the WebEngineView.
+            property string loadingKey: ""
+            // True once the 250 ms fade-out animation has completed.
+            property bool fadedOut: false
+
+            // ── Begin an animated transition to a new message ────────────────
+            // Only call this when the message KEY changes. Background updates
+            // (mark-read, hydration result, etc.) go through onHtmlUpdate().
+            function startTransition(key) {
+                pendingKey = key;
+                pendingHtml = "";
+                lastHtmlKey = "";
+                fadedOut = false;
+                loadingKey = "";
+                bodyOpacity = 0.0;     // triggers 250 ms NumberAnimation
+                fadeTimer.restart();
             }
+
+            // ── Called whenever renderedHtml or imagesAllowed changes ─────────
+            function onHtmlUpdate() {
+                const key = root.renderMessageKey;
+                const html = root.renderedHtml;
+                if (!html.length || !key.length)
+                    return;
+                // Wait until messageData is consistent with the selection.
+                if (root.selectedMessageEdgeKey.length > 0 && key !== root.selectedMessageEdgeKey)
+                    return;
+
+                const dedup = key + "|" + (root.imagesAllowed ? "1" : "0") + "|" + html;
+                if (dedup === lastHtmlKey)
+                    return; // already loaded or queued this exact content
+
+                if (key !== pendingKey) {
+                    // HTML arrived for a message that has no transition in progress yet
+                    // (late data or refresh of currently-shown message).
+                    startTransition(key);
+                }
+
+                lastHtmlKey = dedup;
+                pendingHtml = html;
+                if (fadedOut)
+                    doLoad();
+                // If not yet faded: fadeTimer.onTriggered will call doLoad() once the
+                // fade-out animation completes.
+            }
+
+            // ── Hand the queued HTML to the WebEngineView ─────────────────────
+            function doLoad() {
+                if (!pendingHtml.length || pendingKey !== root.selectedMessageEdgeKey)
+                    return;
+                loadingKey = pendingKey;
+                htmlView.loadHtml(pendingHtml, "file:///");
+            }
+
+            // ── Scroll the web view programmatically ──────────────────────────
             function scrollHtmlBy(deltaY) {
                 if (!root.hasUsableBodyHtml)
                     return;
@@ -1690,7 +2213,6 @@ Rectangle {
             Layout.fillHeight: true
             Layout.fillWidth: true
             color: "transparent"
-            visible: !!root.messageData
 
             Behavior on bodyOpacity {
                 NumberAnimation {
@@ -1699,58 +2221,22 @@ Rectangle {
                 }
             }
 
+            // Fires when the 250 ms fade-out animation has completed.
             Timer {
-                id: fadeOutLoadTimer
-
-                interval: 0
-                repeat: false
-
-                onTriggered: {
-                    if (!htmlContainer.pendingHtml.length)
-                        return;
-                    if (htmlContainer.pendingMessageKey.length > 0 && htmlContainer.pendingMessageKey !== root.renderMessageKey) {
-                        htmlContainer.pendingHtml = "";
-                        htmlContainer.pendingMessageKey = "";
-                        return;
-                    }
-                    htmlContainer.bodyOpacity = 0.0;
-                    loadAfterFadeTimer.restart();
-                }
-            }
-
-            Timer {
-                id: loadAfterFadeTimer
-
+                id: fadeTimer
                 interval: 250
                 repeat: false
-
                 onTriggered: {
-                    if (!htmlContainer.pendingHtml.length)
+                    if (htmlContainer.pendingKey !== root.selectedMessageEdgeKey)
                         return;
-                    if (htmlContainer.pendingMessageKey.length > 0 && htmlContainer.pendingMessageKey !== root.renderMessageKey) {
-                        htmlContainer.pendingHtml = "";
-                        htmlContainer.pendingMessageKey = "";
-                        return;
-                    }
-                    htmlContainer.pendingLoadStartedAtMs = Date.now();
-                    htmlContainer.activeLoadMessageKey = htmlContainer.pendingMessageKey;
-                    htmlView.loadHtml(htmlContainer.pendingHtml, "file:///");
+                    htmlContainer.fadedOut = true;
+                    if (htmlContainer.pendingHtml.length)
+                        htmlContainer.doLoad();
+                    // If HTML not yet available, doLoad() will be called from onHtmlUpdate()
+                    // once renderedHtml becomes non-empty.
                 }
             }
 
-            Timer {
-                id: visiblePerfTimer
-                interval: 0
-                repeat: false
-                onTriggered: {
-                    const now = Date.now();
-                    const loadToVisible = htmlContainer.pendingLoadCompletedAtMs > 0 ? (now - htmlContainer.pendingLoadCompletedAtMs) : -1;
-                    const clickToVisible = htmlContainer.pendingClickAtMs > 0 ? (now - htmlContainer.pendingClickAtMs) : -1;
-                    htmlContainer.pendingLoadCompletedAtMs = 0;
-                    htmlContainer.pendingClickAtMs = 0;
-                    htmlContainer.pendingCompletedReason = "";
-                }
-            }
             WebEngineView {
                 id: htmlView
 
@@ -1762,39 +2248,19 @@ Rectangle {
                 settings.localContentCanAccessFileUrls: true
                 visible: root.hasUsableBodyHtml
 
-                Component.onCompleted: htmlContainer.loadHtmlIfChanged("component")
+                Component.onCompleted: htmlContainer.onHtmlUpdate()
                 onLoadingChanged: function (req) {
                     const st = req.status;
-                    if (st === WebEngineLoadingInfo.LoadSucceededStatus || st === WebEngineLoadingInfo.LoadFailedStatus) {
-                        const loadedForCurrent = htmlContainer.activeLoadMessageKey === root.selectedMessageEdgeKey;
-                        const hasNewerPending = htmlContainer.pendingMessageKey.length > 0
-                                              && htmlContainer.pendingMessageKey !== htmlContainer.activeLoadMessageKey;
-
-                        if (!loadedForCurrent || hasNewerPending) {
-                            // Ignore visual commit for stale completion or when a newer message is already queued.
-                            htmlContainer.activeLoadMessageKey = "";
-                            htmlContainer.pendingLoadReason = "";
-                            htmlContainer.pendingLoadQueuedAtMs = 0;
-                            htmlContainer.pendingLoadStartedAtMs = 0;
-                            return;
-                        }
-
-                        const tDone = Date.now();
-                        const loadMs = htmlContainer.pendingLoadStartedAtMs > 0 ? (tDone - htmlContainer.pendingLoadStartedAtMs) : -1;
-                        const totalMs = htmlContainer.pendingLoadQueuedAtMs > 0 ? (tDone - htmlContainer.pendingLoadQueuedAtMs) : -1;
-                        const clickToLoad = htmlContainer.pendingClickAtMs > 0 ? (tDone - htmlContainer.pendingClickAtMs) : -1;
-
-                        htmlContainer.pendingLoadCompletedAtMs = tDone;
-                        htmlContainer.pendingCompletedReason = htmlContainer.pendingLoadReason;
-                        htmlContainer.pendingHtml = "";
-                        htmlContainer.pendingMessageKey = "";
-                        htmlContainer.activeLoadMessageKey = "";
-                        htmlContainer.pendingLoadReason = "";
-                        htmlContainer.pendingLoadQueuedAtMs = 0;
-                        htmlContainer.pendingLoadStartedAtMs = 0;
-                        htmlContainer.bodyOpacity = 1.0;
-                        visiblePerfTimer.restart();
+                    if (st !== WebEngineLoadingInfo.LoadSucceededStatus && st !== WebEngineLoadingInfo.LoadFailedStatus)
+                        return;
+                    if (htmlContainer.loadingKey !== root.selectedMessageEdgeKey) {
+                        htmlContainer.loadingKey = "";
+                        return;
                     }
+                    htmlContainer.loadingKey = "";
+                    htmlContainer.pendingHtml = "";
+                    htmlContainer.fadedOut = false;
+                    htmlContainer.bodyOpacity = 1.0;
                 }
                 onNavigationRequested: function (request) {
                     const url = request.url ? request.url.toString() : "";
@@ -1825,14 +2291,9 @@ Rectangle {
                 }
 
                 Connections {
-                    function onImagesAllowedChanged() {
-                        htmlContainer.loadHtmlIfChanged("imagesAllowed");
-                    }
-                    function onRenderedHtmlChanged() {
-                        htmlContainer.loadHtmlIfChanged("renderedHtml");
-                    }
-
                     target: root
+                    function onImagesAllowedChanged() { htmlContainer.onHtmlUpdate(); }
+                    function onRenderedHtmlChanged()  { htmlContainer.onHtmlUpdate(); }
                 }
             }
         }

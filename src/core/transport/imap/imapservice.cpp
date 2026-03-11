@@ -58,6 +58,12 @@ std::function<QString(const QString &email)> g_poolTokenRefresher;
 constexpr int kOperationalPoolMax = 5;
 constexpr int kPoolAcquireTimeoutMs = 3500;
 
+// Dedicated hydration slot — one per account, established before the pool.
+// Used exclusively for user-click-initiated hydration to guarantee availability.
+QMutex g_hydrateMutex;
+QWaitCondition g_hydrateWait;
+std::vector<PooledConnSlot> g_hydrateSlots;
+
 static bool isBackgroundOwner(const QString &owner) {
     return owner.startsWith("bg-", Qt::CaseInsensitive)
         || owner.startsWith("background", Qt::CaseInsensitive)
@@ -138,6 +144,55 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
     }};
 }
 
+std::shared_ptr<Imap::Connection>
+ImapService::getDedicatedHydrateConnection(const QString &email) {
+    int slotIndex = -1;
+    {
+        QMutexLocker lock(&g_hydrateMutex);
+        for (int i = 0; i < static_cast<int>(g_hydrateSlots.size()); ++i) {
+            if (g_hydrateSlots[i].email.compare(email, Qt::CaseInsensitive) == 0 && !g_hydrateSlots[i].busy) {
+                g_hydrateSlots[i].busy = true;
+                g_hydrateSlots[i].owner = "hydrate-dedicated"_L1;
+                g_hydrateSlots[i].leasedAtMs = QDateTime::currentMSecsSinceEpoch();
+                slotIndex = i;
+                break;
+            }
+        }
+    }
+    if (slotIndex < 0)
+        return {};
+
+    Imap::Connection *raw = g_hydrateSlots[slotIndex].conn.get();
+    const QString slotEmail = g_hydrateSlots[slotIndex].email;
+    const QString slotHost  = g_hydrateSlots[slotIndex].host;
+    const int     slotPort  = g_hydrateSlots[slotIndex].port;
+
+    if (!raw->isConnected()) {
+        std::function<QString(const QString &)> refresher;
+        {
+            QMutexLocker rl(&g_poolMutex);
+            refresher = g_poolTokenRefresher;
+        }
+        const QString token = refresher ? refresher(slotEmail) : QString{};
+        if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token).success) {
+            QMutexLocker lock(&g_hydrateMutex);
+            g_hydrateSlots[slotIndex].busy = false;
+            g_hydrateWait.wakeOne();
+            return {};
+        }
+    }
+
+    return {raw, [slotIndex](Imap::Connection *) {
+        QMutexLocker rel(&g_hydrateMutex);
+        if (slotIndex >= 0 && slotIndex < static_cast<int>(g_hydrateSlots.size())) {
+            g_hydrateSlots[slotIndex].busy = false;
+            g_hydrateSlots[slotIndex].owner.clear();
+            g_hydrateSlots[slotIndex].leasedAtMs = 0;
+            g_hydrateWait.wakeOne();
+        }
+    }};
+}
+
 ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
     : QObject(parent)
     , m_accounts(accounts)
@@ -165,6 +220,28 @@ ImapService::initialize() {
 
         if (!m_accounts) return;
         const auto accounts = resolveAccounts(m_accounts->accounts());
+
+        // Establish dedicated hydration connections FIRST (one per account).
+        // These are reserved for user-click-initiated hydration to guarantee availability.
+        for (const auto &[email, host, accessToken, port] : accounts) {
+            runBackgroundTask([this, host, email, port, accessToken]() {
+                if (m_destroying.load())
+                    return;
+
+                auto conn = std::make_unique<Imap::Connection>();
+                conn->connectAndAuth(host, port, email, accessToken);
+
+                PooledConnSlot s;
+                s.email = email; s.host = host; s.port = port;
+                s.conn = std::move(conn); s.busy = false;
+
+                QMutexLocker lock(&g_hydrateMutex);
+                g_hydrateSlots.push_back(std::move(s));
+                g_hydrateWait.wakeOne();
+            });
+        }
+
+        // Then establish the general-purpose operational pool.
         for (const auto &[email, host, accessToken, port] : accounts) {
             for (int i = 0; i < kOperationalPoolMax; ++i) {
                 runBackgroundTask([this, host, email, port, accessToken]() {
@@ -1620,11 +1697,26 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
         const qint64 mapMs = hydrateTimer.elapsed();
 
-        const QString hydrateOwner = userInitiated ? "hydrate-user"_L1 : "bg-hydrate"_L1;
-        qint8 attempts = 0;
-        auto pooled = getPooledConnection(emailCopy, hydrateOwner);
-        while (!pooled && attempts++ < 10)
-            pooled = getPooledConnection(emailCopy, hydrateOwner + "-retry");
+        std::shared_ptr<Imap::Connection> pooled;
+        bool usedDedicated = false;
+        if (userInitiated) {
+            // Try the dedicated hydration connection first (non-blocking).
+            pooled = getDedicatedHydrateConnection(emailCopy);
+            if (pooled) {
+                usedDedicated = true;
+            } else {
+                // Dedicated slot busy — fall back to pool.
+                qint8 attempts = 0;
+                pooled = getPooledConnection(emailCopy, "hydrate-user"_L1);
+                while (!pooled && attempts++ < 10)
+                    pooled = getPooledConnection(emailCopy, "hydrate-user-fallback"_L1);
+            }
+        } else {
+            qint8 attempts = 0;
+            pooled = getPooledConnection(emailCopy, "bg-hydrate"_L1);
+            while (!pooled && attempts++ < 10)
+                pooled = getPooledConnection(emailCopy, "bg-hydrate-retry"_L1);
+        }
 
         const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
 
@@ -1635,7 +1727,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
                                  << "uid=" << uidNorm
                                  << "mapMs=" << mapMs
                                  << "acquireMs=" << acquireMs
-                                 << "attempts=" << attempts
                                  << "result=pool-timeout";
             return {};
         }
@@ -1646,6 +1737,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         const qint64 executeMs = totalMs - mapMs - acquireMs;
         qWarning().noquote() << "[perf-hydrate]"
                              << "uid=" << uidNorm
+                             << "source=" << (userInitiated ? (usedDedicated ? "user-dedicated" : "user-pool") : "bg")
                              << "mapMs=" << mapMs
                              << "acquireMs=" << acquireMs
                              << "executeMs=" << executeMs

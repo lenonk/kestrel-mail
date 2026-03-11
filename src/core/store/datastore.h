@@ -53,6 +53,7 @@ public:
                                                            const QString &folder,
                                                            const QString &uid) const;
     Q_INVOKABLE QVariantMap messageByKey(const QString &accountEmail, const QString &folder, const QString &uid) const;
+    Q_INVOKABLE QVariantList messagesForThread(const QString &accountEmail, const QString &threadId) const;
     Q_INVOKABLE bool hasUsableBodyForEdge(const QString &accountEmail, const QString &folder, const QString &uid) const;
     Q_INVOKABLE bool updateBodyForKey(const QString &accountEmail,
                                       const QString &folder,

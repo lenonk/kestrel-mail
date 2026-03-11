@@ -43,6 +43,7 @@ QString MessageHydrator::execute(const Request &req) {
         QElapsedTimer step;
         step.start();
         bool selectOk = true;
+        qInfo().noquote() << "[perf-hydrate-exec] folder compare:" << req.cxn->selectedFolder() << "<>" << folder;
         if (req.cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
             const auto sel = req.cxn->select(folder);
             selectOk = std::get<0>(sel);
@@ -55,6 +56,7 @@ QString MessageHydrator::execute(const Request &req) {
                                  << "folder=" << folder
                                  << "selectMs=" << selectMs
                                  << "result=select-failed";
+            assert(0);
             continue;
         }
 

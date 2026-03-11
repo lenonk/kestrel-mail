@@ -329,6 +329,10 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
         static const QRegularExpression gmMsgRe("X-GM-MSGID\\s+(\\d+)"_L1, QRegularExpression::CaseInsensitiveOption);
         h.insert("gmMsgId"_L1, gmMsgRe.match(fetchResp).captured(1).trimmed());
     }
+    {
+        static const QRegularExpression gmThrRe("X-GM-THRID\\s+(\\d+)"_L1, QRegularExpression::CaseInsensitiveOption);
+        h.insert("gmThrId"_L1, gmThrRe.match(fetchResp).captured(1).trimmed());
+    }
 
     const auto date = extractField(headerSource, "Date"_L1);
     auto dt = parseBestDateTime(date, fetchResp);
@@ -534,14 +538,15 @@ fetchUidBatch(SyncContext &ctx,
         uidSpec = ids.join(',');
     }
 
+    const QString gmailItems = ctx.isGmail() ? QStringLiteral("X-GM-LABELS X-GM-MSGID X-GM-THRID ") : QString{};
     const QString fetchCmd = QStringLiteral(
-        "UID FETCH %1 (UID FLAGS INTERNALDATE X-GM-LABELS X-GM-MSGID BODYSTRUCTURE "
+        "UID FETCH %1 (UID FLAGS INTERNALDATE %3BODYSTRUCTURE "
         "BODY.PEEK[HEADER.FIELDS (FROM TO SENDER REPLY-TO RETURN-PATH SUBJECT DATE MESSAGE-ID "
         "AUTHENTICATION-RESULTS X-MAILER IN-REPLY-TO REFERENCES RECEIVED "
         "X-MAILGUN-SID X-SG-EID X-SMTPAPI X-MC-USER X-KLAVIYO-MESSAGE-ID X-PM-MESSAGE-ID X-SES-OUTGOING "
         "LIST-ID LIST-UNSUBSCRIBE BIMI-LOCATION LIST-PREVIEW X-PREHEADER X-MC-PREVIEW-TEXT X-ALT-DESCRIPTION)] "
         "BODY.PEEK[]<0.%2>)"
-    ).arg(uidSpec).arg(kInitialBodyPeekBytes);
+    ).arg(uidSpec).arg(kInitialBodyPeekBytes).arg(gmailItems);
 
     QElapsedTimer fetchTimer;
     fetchTimer.start();

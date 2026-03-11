@@ -49,7 +49,9 @@ public:
         AvatarSourceRole,
         UnreadRole,
         HasAttachmentsRole,
-        HasTrackingPixelRole
+        HasTrackingPixelRole,
+        ThreadCountRole,
+        IsImportantRole
     };
 
     explicit MessageListModel(QObject *parent = nullptr);

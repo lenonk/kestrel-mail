@@ -546,6 +546,28 @@ Rectangle {
                                         Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                                         spacing: 4
 
+                                        // Thread count pill
+                                        Rectangle {
+                                            visible: (threadCount || 0) > 1
+                                            implicitWidth: threadCountLabel.implicitWidth + 10
+                                            implicitHeight: 18
+                                            radius: 9
+                                            color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.4)
+                                            border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.7)
+                                            border.width: 1
+                                            Layout.alignment: Qt.AlignVCenter
+
+                                            QQC2.Label {
+                                                id: threadCountLabel
+                                                anchors.centerIn: parent
+                                                text: (threadCount || 0).toString()
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                                color: Kirigami.Theme.textColor
+                                                opacity: 0.85
+                                            }
+                                        }
+
                                         Kirigami.Icon {
                                             source: "crosshairs"
                                             Layout.preferredWidth: 18
@@ -564,7 +586,30 @@ Rectangle {
                                     }
                                 }
 
-                                QQC2.Label { text: snippet || ""; opacity: 0.72; font.pixelSize: 12; color: Kirigami.Theme.textColor; visible: text.length > 0; elide: Text.ElideRight; wrapMode: Text.NoWrap; Layout.fillWidth: true }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+
+                                    Image {
+                                        visible: !!isImportant
+                                        source: "qrc:/qml/important.svg"
+                                        Layout.preferredWidth: 20
+                                        Layout.preferredHeight: 20
+                                        Layout.alignment: Qt.AlignVCenter
+                                        fillMode: Image.PreserveAspectFit
+                                    }
+
+                                    QQC2.Label {
+                                        text: snippet || ""
+                                        opacity: 0.72
+                                        font.pixelSize: 12
+                                        color: Kirigami.Theme.textColor
+                                        visible: text.length > 0 || !!isImportant
+                                        elide: Text.ElideRight
+                                        wrapMode: Text.NoWrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
                             }
 
                             ColumnLayout {
