@@ -2208,10 +2208,11 @@ Rectangle {
 
                                         onLoadingChanged: function(req) {
                                             if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
-                                                runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
+                                                runJavaScript("(function(){document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';const body=document.body;const bodyTop=body.getBoundingClientRect().top;let maxBottom=bodyTop;const nodes=body.querySelectorAll('*');for(let i=0;i<nodes.length;i++){const el=nodes[i];const cs=getComputedStyle(el);if(cs.position==='fixed') continue;const r=el.getBoundingClientRect();if(r.width===0&&r.height===0) continue;if(r.bottom>maxBottom) maxBottom=r.bottom;}const content=Math.ceil(Math.max(0,maxBottom-bodyTop));return content;})()",
                                                     function(h) {
-                                                        if (h && h > 0) {
-                                                            threadCard.bodyHeight = h + 16
+                                                        const v = Number(h)
+                                                        if (isFinite(v) && v > 0) {
+                                                            threadCard.bodyHeight = Math.max(24, v + 8)
                                                             root.threadScrollEpoch++
                                                         }
                                                     })
