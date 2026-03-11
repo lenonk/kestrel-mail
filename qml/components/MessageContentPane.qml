@@ -233,6 +233,7 @@ Rectangle {
         return msgs.slice(msgs.length - threadVisibleCount)
     }
     readonly property int threadHiddenCount: Math.max(0, threadMessages.length - visibleThreadMessages.length)
+    readonly property int threadScrolledOffTopCount: _threadScrolledOffTopCount()
 
     onVisibleThreadMessagesChanged: {
         Qt.callLater(function() { _threadClampScrollToLastCardTop() })
@@ -465,6 +466,24 @@ Rectangle {
         if (!item) return
         const yPos = item.mapToItem(threadScrollContent, 0, 0).y
         threadFlickable.contentY = Math.max(0, yPos - 8)
+    }
+
+    function _threadScrolledOffTopCount() {
+        const yTop = threadFlickable.contentY + 1
+        let count = 0
+        const total = visibleThreadMessages.length
+        for (let i = 0; i < total; i++) {
+            const item = threadCardsRepeater.itemAt(i)
+            if (!item)
+                continue
+            const y = item.mapToItem(threadScrollContent, 0, 0).y
+            const bottom = y + item.height
+            if (bottom <= yTop)
+                count++
+            else
+                break
+        }
+        return count
     }
 
     // ── End thread helpers ───────────────────────────────────────────────────
@@ -1941,31 +1960,6 @@ Rectangle {
                 topPadding: 0
                 bottomPadding: 12
 
-                // "Show N older messages" button
-                QQC2.Button {
-                    id: showOlderBtn
-                    visible: root.threadHiddenCount > 0
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: i18n("Show %1 older message(s)", root.threadHiddenCount)
-                    flat: true
-                    leftPadding: 16; rightPadding: 16
-                    topPadding: 6; bottomPadding: 6
-
-                    background: Rectangle {
-                        color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.15)
-                        radius: height / 2
-                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.5)
-                        border.width: 1
-                    }
-                    contentItem: QQC2.Label {
-                        text: parent.text
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 12
-                    }
-                    onClicked: root._threadLoadOlder(8)
-                }
-
                 // Message cards
                 Repeater {
                     id: threadCardsRepeater
@@ -2239,6 +2233,33 @@ Rectangle {
                         }
                     }
                 }
+            }
+
+            QQC2.Button {
+                id: showOlderFloatingBtn
+                z: 20
+                visible: root.threadScrolledOffTopCount > 0
+                anchors.top: parent.top
+                anchors.topMargin: 8
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: i18n("Show %1 older message(s)", root.threadScrolledOffTopCount)
+                flat: true
+                leftPadding: 16; rightPadding: 16
+                topPadding: 6; bottomPadding: 6
+
+                background: Rectangle {
+                    color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
+                    radius: height / 2
+                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.55)
+                    border.width: 1
+                }
+                contentItem: QQC2.Label {
+                    text: parent.text
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 12
+                }
+                onClicked: threadFlickable.contentY = Math.max(0, threadFlickable.contentY - Math.max(120, threadFlickable.height * 0.75))
             }
         }
 
