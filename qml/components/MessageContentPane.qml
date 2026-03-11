@@ -2050,9 +2050,10 @@ Rectangle {
 
                         // ── Card header ───────────────────────────────────────────
                         MouseArea {
-                            x: 10; y: cardHeaderRow.y
-                            width: parent.width - 20
-                            height: cardHeaderRow.implicitHeight
+                            x: 0
+                            y: 0
+                            width: parent.width
+                            height: threadCard.isExpanded ? (cardHeaderRow.y + cardHeaderRow.implicitHeight + 8) : parent.height
                             enabled: true
                             cursorShape: Qt.PointingHandCursor
                             propagateComposedEvents: true
