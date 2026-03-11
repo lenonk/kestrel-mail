@@ -221,19 +221,27 @@ Rectangle {
     }
     readonly property bool   isThreadView: threadMessages.length > 1
     property bool            threadShowAll: false
+    property int             threadVisibleCount: 5
+    property bool            threadLoadingOlder: false
     // null = default state (last card auto-expanded); otherwise an object used as a Set
     property var             threadExpandedSet: null
     property var             cardDarkModes: ({})      // index → bool, overrides global dark mode per card
 
     readonly property var visibleThreadMessages: {
         const msgs = threadMessages
-        if (threadShowAll || msgs.length <= 5) return msgs
-        return msgs.slice(msgs.length - 5)
+        if (threadShowAll || msgs.length <= threadVisibleCount) return msgs
+        return msgs.slice(msgs.length - threadVisibleCount)
     }
-    readonly property int threadHiddenCount: threadMessages.length - visibleThreadMessages.length
+    readonly property int threadHiddenCount: Math.max(0, threadMessages.length - visibleThreadMessages.length)
+
+    onVisibleThreadMessagesChanged: {
+        Qt.callLater(function() { _threadClampScrollToLastCardTop() })
+    }
 
     onThreadIdChanged: {
         threadShowAll = false
+        threadVisibleCount = 5
+        threadLoadingOlder = false
         threadExpandedSet = null
         cardDarkModes = ({})
     }
@@ -365,8 +373,46 @@ Rectangle {
 
     function _threadOnSelectedChanged() {
         threadShowAll = false
+        threadVisibleCount = 5
+        threadLoadingOlder = false
         threadExpandedSet = null
         cardDarkModes = ({})
+    }
+
+    function _threadLoadOlder(step) {
+        const inc = Math.max(1, step || 5)
+        if (threadLoadingOlder || threadHiddenCount <= 0)
+            return
+
+        const oldHeight = threadScrollContent.implicitHeight
+        const oldY = threadFlickable.contentY
+
+        threadLoadingOlder = true
+        threadVisibleCount = Math.min(threadMessages.length, threadVisibleCount + inc)
+
+        Qt.callLater(function() {
+            const delta = Math.max(0, threadScrollContent.implicitHeight - oldHeight)
+            threadFlickable.contentY = oldY + delta
+            threadLoadingOlder = false
+            _threadClampScrollToLastCardTop()
+        })
+    }
+
+    function _threadMaxContentY() {
+        const count = visibleThreadMessages.length
+        if (count <= 0)
+            return 0
+        const lastItem = threadCardsRepeater.itemAt(count - 1)
+        if (!lastItem)
+            return Math.max(0, threadScrollContent.implicitHeight - threadFlickable.height)
+        const yPos = lastItem.mapToItem(threadScrollContent, 0, 0).y
+        return Math.max(0, yPos)
+    }
+
+    function _threadClampScrollToLastCardTop() {
+        const maxY = _threadMaxContentY()
+        if (threadFlickable.contentY > maxY)
+            threadFlickable.contentY = maxY
     }
 
     function _threadParticipantsSummary() {
@@ -1865,6 +1911,14 @@ Rectangle {
             contentHeight: threadScrollContent.implicitHeight
             boundsBehavior: Flickable.StopAtBounds
 
+            onContentYChanged: {
+                if (contentY <= 24 && root.threadHiddenCount > 0)
+                    root._threadLoadOlder(6)
+                root._threadClampScrollToLastCardTop()
+            }
+            onHeightChanged: root._threadClampScrollToLastCardTop()
+            onMovementEnded: root._threadClampScrollToLastCardTop()
+
             QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
 
             Column {
@@ -1896,7 +1950,7 @@ Rectangle {
                         verticalAlignment: Text.AlignVCenter
                         font.pixelSize: 12
                     }
-                    onClicked: root.threadShowAll = true
+                    onClicked: root._threadLoadOlder(8)
                 }
 
                 // Message cards
