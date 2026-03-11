@@ -223,6 +223,7 @@ Rectangle {
     property bool            threadShowAll: false
     property int             threadVisibleCount: 5
     property bool            threadLoadingOlder: false
+    property int             threadScrollEpoch: 0
     // null = default state (last card auto-expanded); otherwise an object used as a Set
     property var             threadExpandedSet: null
     property var             cardDarkModes: ({})      // index → bool, overrides global dark mode per card
@@ -233,16 +234,23 @@ Rectangle {
         return msgs.slice(msgs.length - threadVisibleCount)
     }
     readonly property int threadHiddenCount: Math.max(0, threadMessages.length - visibleThreadMessages.length)
-    readonly property int threadScrolledOffTopCount: _threadScrolledOffTopCount()
+    readonly property int threadScrolledOffTopCount: {
+        void threadScrollEpoch
+        return _threadScrolledOffTopCount()
+    }
 
     onVisibleThreadMessagesChanged: {
-        Qt.callLater(function() { _threadClampScrollToLastCardTop() })
+        Qt.callLater(function() {
+            _threadClampScrollToLastCardTop()
+            threadScrollEpoch++
+        })
     }
 
     onThreadIdChanged: {
         threadShowAll = false
         threadVisibleCount = 5
         threadLoadingOlder = false
+        threadScrollEpoch = 0
         threadExpandedSet = null
         cardDarkModes = ({})
     }
@@ -335,6 +343,7 @@ Rectangle {
         else
             next[index] = true
         threadExpandedSet = next
+        Qt.callLater(function() { threadScrollEpoch++ })
     }
 
     function _threadCardDarkMode(index) {
@@ -376,6 +385,7 @@ Rectangle {
         threadShowAll = false
         threadVisibleCount = 5
         threadLoadingOlder = false
+        threadScrollEpoch = 0
         threadExpandedSet = null
         cardDarkModes = ({})
     }
@@ -1958,6 +1968,7 @@ Rectangle {
                 if (contentY <= 24 && root.threadHiddenCount > 0)
                     root._threadLoadOlder(6)
                 root._threadClampScrollToLastCardTop()
+                root.threadScrollEpoch++
             }
             onHeightChanged: root._threadClampScrollToLastCardTop()
             onMovementEnded: root._threadClampScrollToLastCardTop()
@@ -2189,8 +2200,10 @@ Rectangle {
                                             if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
                                                 runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
                                                     function(h) {
-                                                        if (h && h > 0)
+                                                        if (h && h > 0) {
                                                             threadCard.bodyHeight = h + 16
+                                                            root.threadScrollEpoch++
+                                                        }
                                                     })
                                             }
                                         }
