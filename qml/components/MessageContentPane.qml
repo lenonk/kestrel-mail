@@ -2210,8 +2210,9 @@ Rectangle {
                                             if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
                                                 runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';")
                                                 const h = Number(contentsSize.height)
-                                                if (isFinite(h) && h >= 0) {
-                                                    threadCard.bodyHeight = Math.max(24, h + 8)
+                                                const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24)
+                                                if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
+                                                    threadCard.bodyHeight = target
                                                     root.threadScrollEpoch++
                                                 }
                                             }
@@ -2219,8 +2220,9 @@ Rectangle {
 
                                         onContentsSizeChanged: {
                                             const h = Number(contentsSize.height)
-                                            if (isFinite(h) && h >= 0) {
-                                                threadCard.bodyHeight = Math.max(24, h + 8)
+                                            const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24)
+                                            if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
+                                                threadCard.bodyHeight = target
                                                 root.threadScrollEpoch++
                                             }
                                         }
