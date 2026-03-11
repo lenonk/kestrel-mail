@@ -2009,11 +2009,15 @@ Rectangle {
                 }
             }
 
-            QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
+            QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                id: threadVScroll
+                policy: QQC2.ScrollBar.AsNeeded
+            }
 
             Column {
                 id: threadScrollContent
-                width: threadFlickable.width
+                readonly property real rightGutter: (threadVScroll.visible ? (threadVScroll.width + 8) : 0)
+                width: Math.max(0, threadFlickable.width - rightGutter)
                 spacing: 8
                 topPadding: 0
                 bottomPadding: 12
