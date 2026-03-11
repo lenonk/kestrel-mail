@@ -2017,7 +2017,7 @@ Rectangle {
 
                         readonly property bool isExpanded: root._threadIsExpanded(index)
                         readonly property string cardBodyHtml: root._threadBodyTextForCard(index)
-                        property real bodyHeight: 400
+                        property real bodyHeight: 24
 
                         width: threadScrollContent.width
                         implicitHeight: cardHeaderRow.implicitHeight + 32
@@ -2208,14 +2208,20 @@ Rectangle {
 
                                         onLoadingChanged: function(req) {
                                             if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
-                                                runJavaScript("(function(){document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';const body=document.body;const bodyTop=body.getBoundingClientRect().top;let maxBottom=bodyTop;const nodes=body.querySelectorAll('*');for(let i=0;i<nodes.length;i++){const el=nodes[i];const cs=getComputedStyle(el);if(cs.position==='fixed') continue;const r=el.getBoundingClientRect();if(r.width===0&&r.height===0) continue;if(r.bottom>maxBottom) maxBottom=r.bottom;}const content=Math.ceil(Math.max(0,maxBottom-bodyTop));return content;})()",
-                                                    function(h) {
-                                                        const v = Number(h)
-                                                        if (isFinite(v) && v > 0) {
-                                                            threadCard.bodyHeight = Math.max(24, v + 8)
-                                                            root.threadScrollEpoch++
-                                                        }
-                                                    })
+                                                runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';")
+                                                const h = Number(contentsSize.height)
+                                                if (isFinite(h) && h >= 0) {
+                                                    threadCard.bodyHeight = Math.max(24, h + 8)
+                                                    root.threadScrollEpoch++
+                                                }
+                                            }
+                                        }
+
+                                        onContentsSizeChanged: {
+                                            const h = Number(contentsSize.height)
+                                            if (isFinite(h) && h >= 0) {
+                                                threadCard.bodyHeight = Math.max(24, h + 8)
+                                                root.threadScrollEpoch++
                                             }
                                         }
 
