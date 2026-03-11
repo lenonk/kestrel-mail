@@ -2138,6 +2138,19 @@ Rectangle {
                             width: threadCard.width - 20
                             height: threadCard.bodyHeight
 
+                            WheelHandler {
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                grabPermissions: PointerHandler.CanTakeOverFromAnything
+                                onWheel: function(ev) {
+                                    const delta = ev.angleDelta ? ev.angleDelta.y : 0
+                                    if (!delta)
+                                        return
+                                    const next = threadFlickable.contentY - (delta / 2)
+                                    threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()))
+                                    ev.accepted = true
+                                }
+                            }
+
                             sourceComponent: Component {
                                 WebEngineView {
                                     id: threadBodyView
