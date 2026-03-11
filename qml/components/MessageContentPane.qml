@@ -2202,7 +2202,8 @@ Rectangle {
                                         id: threadBodyView
                                         anchors.fill: parent
                                         settings.javascriptEnabled: false
-                                        settings.localContentCanAccessRemoteUrls: false
+                                        settings.autoLoadImages: true
+                                        settings.localContentCanAccessRemoteUrls: true
                                         backgroundColor: Kirigami.Theme.backgroundColor
 
                                         onLoadingChanged: function(req) {
