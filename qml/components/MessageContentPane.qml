@@ -2012,12 +2012,14 @@ Rectangle {
             QQC2.ScrollBar.vertical: QQC2.ScrollBar {
                 id: threadVScroll
                 policy: QQC2.ScrollBar.AsNeeded
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
             }
 
             Column {
                 id: threadScrollContent
-                readonly property real rightGutter: (threadVScroll.visible ? threadVScroll.width : 0)
-                width: Math.max(0, threadFlickable.width - rightGutter)
+                width: threadFlickable.width
                 spacing: 8
                 topPadding: 0
                 bottomPadding: 12
