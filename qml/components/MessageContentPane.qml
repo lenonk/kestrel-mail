@@ -2036,7 +2036,7 @@ Rectangle {
 
                         // ── Card header ───────────────────────────────────────────
                         MouseArea {
-                            x: 10; y: 8
+                            x: 10; y: cardHeaderRow.y
                             width: parent.width - 20
                             height: cardHeaderRow.implicitHeight
                             enabled: true
@@ -2047,7 +2047,8 @@ Rectangle {
 
                         RowLayout {
                             id: cardHeaderRow
-                            x: 10; y: 8
+                            x: 10
+                            y: threadCard.isExpanded ? 8 : Math.max(8, Math.round((threadCard.height - implicitHeight) / 2))
                             width: parent.width - 20
                             spacing: 10
 
