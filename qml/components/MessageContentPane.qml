@@ -271,9 +271,23 @@ Rectangle {
             html = html.replace("<head>", "<head>" + headInsert)
         else
             html = headInsert + html
-        // Wrap each blockquote in <details class="kq"> for collapsible quoted content
-        html = html.replace(/<blockquote(\b[^>]*)>/gi, '<details class="kq"><summary></summary><blockquote$1>')
-        html = html.replace(/<\/blockquote>/gi, '</blockquote></details>')
+        // Collapse all quoted block content behind a single native <details> toggle.
+        const quoteBlocks = []
+        let insertedMarker = false
+        html = html.replace(/<blockquote\b[\s\S]*?<\/blockquote>/gi, function(m) {
+            quoteBlocks.push(m)
+            if (!insertedMarker) {
+                insertedMarker = true
+                return "__KQ_SINGLE_QUOTE_BLOCK__"
+            }
+            return ""
+        })
+        if (quoteBlocks.length > 0) {
+            const merged = '<details class="kq"><summary></summary><div class="kq-wrap">'
+                         + quoteBlocks.join("")
+                         + '</div></details>'
+            html = html.replace("__KQ_SINGLE_QUOTE_BLOCK__", merged)
+        }
         return darkMode ? darkenHtml(html) : html
     }
 
