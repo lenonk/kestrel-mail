@@ -2819,7 +2819,8 @@ void DataStore::reloadInbox()
                  AND m2.thread_id = cm.thread_id
                  AND cm.thread_id IS NOT NULL
                  AND length(trim(COALESCE(cm.thread_id, ''))) > 0
-             ), 1) as thread_count
+             ), 1) as thread_count,
+             COALESCE(cm.gm_thr_id, '') as gm_thr_id
       FROM message_folder_map mfm
       JOIN messages cm ON cm.id = mfm.message_id
       ORDER BY cm.received_at DESC
@@ -2845,6 +2846,7 @@ void DataStore::reloadInbox()
         row.insert(QStringLiteral("unread"), q.value(14).toInt() == 1);
         row.insert(QStringLiteral("threadId"),    q.value(15).toString());
         row.insert(QStringLiteral("threadCount"), q.value(16).toInt());
+        row.insert(QStringLiteral("gmThrId"),     q.value(17).toString());
         m_inbox.push_back(row);
     }
 
@@ -2856,11 +2858,14 @@ void DataStore::reloadInbox()
         deduped.reserve(m_inbox.size());
         for (const QVariant &v : m_inbox) {
             const QVariantMap r  = v.toMap();
-            const QString tid    = r.value(QStringLiteral("threadId")).toString();
+            const QString tid    = r.value(QStringLiteral("threadId")).toString().trimmed();
+            const QString gtid   = r.value(QStringLiteral("gmThrId")).toString().trimmed();
             const QString acct   = r.value(QStringLiteral("accountEmail")).toString();
-            const QString key    = tid.isEmpty()
-                ? acct + QStringLiteral("|msg:") + r.value(QStringLiteral("messageId")).toString()
-                : acct + QStringLiteral("|tid:") + tid;
+            const QString key    = !gtid.isEmpty()
+                ? acct + QStringLiteral("|gtid:") + gtid
+                : (tid.isEmpty()
+                    ? acct + QStringLiteral("|msg:") + r.value(QStringLiteral("messageId")).toString()
+                    : acct + QStringLiteral("|tid:") + tid);
             if (seenThreads.contains(key)) continue;
             seenThreads.insert(key);
             deduped.push_back(v);
@@ -3157,7 +3162,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                      WHERE m2.account_email = cm.account_email
                                        AND m2.thread_id = cm.thread_id
                                        AND cm.thread_id IS NOT NULL
-                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count
+                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                           COALESCE(cm.gm_thr_id, '') as gm_thr_id
                     FROM message_folder_map mfm
                     JOIN messages cm ON cm.id = mfm.message_id
                     WHERE lower(mfm.folder)=:folder
@@ -3189,7 +3195,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                      WHERE m2.account_email = cm.account_email
                                        AND m2.thread_id = cm.thread_id
                                        AND cm.thread_id IS NOT NULL
-                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count
+                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                           COALESCE(cm.gm_thr_id, '') as gm_thr_id
                     FROM message_folder_map mfm
                     JOIN messages cm ON cm.id = mfm.message_id
                     WHERE lower(mfm.folder)=:folder
@@ -3210,12 +3217,15 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             if (qFolder.exec()) {
                 QSet<QString> seenFolderTids;
                 while (qFolder.next()) {
-                    const QString tid   = qFolder.value(15).toString();
+                    const QString tid   = qFolder.value(15).toString().trimmed();
+                    const QString gtid  = qFolder.value(17).toString().trimmed();
                     const QString acct  = qFolder.value(0).toString();
                     const QString mid   = qFolder.value(3).toString();
-                    const QString tkey  = tid.isEmpty()
-                        ? acct + QStringLiteral("|msg:") + mid
-                        : acct + QStringLiteral("|tid:") + tid;
+                    const QString tkey  = !gtid.isEmpty()
+                        ? acct + QStringLiteral("|gtid:") + gtid
+                        : (tid.isEmpty()
+                            ? acct + QStringLiteral("|msg:") + mid
+                            : acct + QStringLiteral("|tid:") + tid);
                     if (seenFolderTids.contains(tkey)) continue;
                     seenFolderTids.insert(tkey);
 
@@ -3237,6 +3247,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                     row.insert(QStringLiteral("unread"), qFolder.value(14).toInt() == 1);
                     row.insert(QStringLiteral("threadId"),    tid);
                     row.insert(QStringLiteral("threadCount"), qFolder.value(16).toInt());
+                    row.insert(QStringLiteral("gmThrId"),     gtid);
                     filtered.push_back(row);
                 }
             }
@@ -3351,7 +3362,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                  WHERE m2.account_email = cm.account_email
                                    AND m2.thread_id = cm.thread_id
                                    AND cm.thread_id IS NOT NULL
-                                   AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count
+                                   AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                       COALESCE(cm.gm_thr_id, '') as gm_thr_id
                 FROM message_folder_map mfm
                 JOIN messages cm ON cm.id = mfm.message_id
                 WHERE mfm.account_email=:account_email
@@ -3372,12 +3384,15 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                 qRow.bindValue(QStringLiteral(":preferred"), preferredFolderLike);
                 if (!qRow.exec() || !qRow.next()) continue;
 
-                const QString tid  = qRow.value(15).toString();
+                const QString tid  = qRow.value(15).toString().trimmed();
+                const QString gtid = qRow.value(17).toString().trimmed();
                 const QString acct = qRow.value(0).toString();
                 const QString mid  = qRow.value(3).toString();
-                const QString tkey = tid.isEmpty()
-                    ? acct + QStringLiteral("|msg:") + mid
-                    : acct + QStringLiteral("|tid:") + tid;
+                const QString tkey = !gtid.isEmpty()
+                    ? acct + QStringLiteral("|gtid:") + gtid
+                    : (tid.isEmpty()
+                        ? acct + QStringLiteral("|msg:") + mid
+                        : acct + QStringLiteral("|tid:") + tid);
                 if (seenCatTids.contains(tkey)) continue;
                 seenCatTids.insert(tkey);
 
@@ -3399,6 +3414,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                 row.insert(QStringLiteral("unread"), qRow.value(14).toInt() == 1);
                 row.insert(QStringLiteral("threadId"),    tid);
                 row.insert(QStringLiteral("threadCount"), qRow.value(16).toInt());
+                row.insert(QStringLiteral("gmThrId"),     gtid);
                 out.push_back(row);
             }
         }
