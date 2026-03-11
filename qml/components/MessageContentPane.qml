@@ -2133,9 +2133,21 @@ Rectangle {
                                     settings.localContentCanAccessRemoteUrls: false
                                     backgroundColor: Kirigami.Theme.backgroundColor
 
+                                    WheelHandler {
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                        onWheel: function(ev) {
+                                            const delta = ev.angleDelta ? ev.angleDelta.y : 0
+                                            if (!delta)
+                                                return
+                                            const next = threadFlickable.contentY - (delta / 2)
+                                            threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()))
+                                            ev.accepted = true
+                                        }
+                                    }
+
                                     onLoadingChanged: function(req) {
                                         if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
-                                            runJavaScript("Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
+                                            runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
                                                 function(h) {
                                                     if (h && h > 0)
                                                         threadCard.bodyHeight = h + 16
