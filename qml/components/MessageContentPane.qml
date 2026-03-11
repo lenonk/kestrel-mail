@@ -2286,7 +2286,7 @@ Rectangle {
         // ── Single message view ──────────────────────────────────────────────
         Rectangle {
             id: htmlContainer
-            visible: !root.isThreadView
+            visible: !root.isThreadView && !!root.messageData
 
             // ── Fade & load state ─────────────────────────────────────────────
             property real bodyOpacity: 1.0
