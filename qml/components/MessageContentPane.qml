@@ -2039,7 +2039,7 @@ Rectangle {
                             x: 10; y: 8
                             width: parent.width - 20
                             height: cardHeaderRow.implicitHeight
-                            enabled: !threadCard.isExpanded
+                            enabled: true
                             cursorShape: Qt.PointingHandCursor
                             propagateComposedEvents: true
                             onClicked: root._threadToggleExpand(threadCard.index)
