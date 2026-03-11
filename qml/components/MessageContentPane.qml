@@ -238,6 +238,7 @@ Rectangle {
         void threadScrollEpoch
         return _threadScrolledOffTopCount()
     }
+    readonly property int threadOffTopCount: threadHiddenCount + threadScrolledOffTopCount
 
     onVisibleThreadMessagesChanged: {
         Qt.callLater(function() {
@@ -1931,9 +1932,9 @@ Rectangle {
         // ── Thread view ──────────────────────────────────────────────────────
         QQC2.Button {
             id: showOlderFloatingBtn
-            visible: root.isThreadView && root.threadScrolledOffTopCount > 0
+            visible: root.isThreadView && root.threadOffTopCount > 0
             Layout.alignment: Qt.AlignHCenter
-            text: i18n("Show %1 older message(s)", root.threadScrolledOffTopCount)
+            text: i18n("Show %1 older message(s)", root.threadOffTopCount)
             flat: true
             leftPadding: 16; rightPadding: 16
             topPadding: 6; bottomPadding: 6
@@ -1950,7 +1951,12 @@ Rectangle {
                 verticalAlignment: Text.AlignVCenter
                 font.pixelSize: 12
             }
-            onClicked: threadFlickable.contentY = Math.max(0, threadFlickable.contentY - Math.max(120, threadFlickable.height * 0.75))
+            onClicked: {
+                if (root.threadHiddenCount > 0)
+                    root._threadLoadOlder(Math.min(12, root.threadHiddenCount))
+                else
+                    threadFlickable.contentY = Math.max(0, threadFlickable.contentY - Math.max(120, threadFlickable.height * 0.75))
+            }
         }
 
         Flickable {
