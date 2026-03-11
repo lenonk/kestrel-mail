@@ -265,7 +265,7 @@ Rectangle {
         const bgColor = Kirigami.Theme.backgroundColor.toString()
         // Collapse blockquotes behind a native <details> toggle (no JS needed)
         const quoteCss = '<style>details.kq{margin:4px 0}details.kq>summary{cursor:pointer;list-style:none;display:inline-block;background:rgba(128,128,128,0.15);border-radius:3px;padding:1px 8px;font-size:11px;opacity:.7;outline:none}details.kq>summary::-webkit-details-marker{display:none}details.kq>summary::before{content:"···"}</style>'
-        const bgStyle = "<style data-kestrel-bg='baseline'>html,body{background-color:" + bgColor + ";margin:8px 12px;}</style>"
+        const bgStyle = "<style data-kestrel-bg='baseline'>html,body{background-color:" + bgColor + ";margin:8px 12px 0 12px;}</style>"
         const headInsert = bgStyle + quoteCss
         if (html.indexOf("<head>") >= 0)
             html = html.replace("<head>", "<head>" + headInsert)
