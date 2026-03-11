@@ -469,7 +469,7 @@ Rectangle {
     }
 
     function _threadScrolledOffTopCount() {
-        const yTop = threadFlickable.contentY + 1
+        const yTop = threadFlickable.contentY
         let count = 0
         const total = visibleThreadMessages.length
         for (let i = 0; i < total; i++) {
@@ -477,8 +477,8 @@ Rectangle {
             if (!item)
                 continue
             const y = item.mapToItem(threadScrollContent, 0, 0).y
-            const bottom = y + item.height
-            if (bottom <= yTop)
+            // Count as off-top even if only partially clipped.
+            if (y < yTop)
                 count++
             else
                 break
@@ -1919,6 +1919,30 @@ Rectangle {
             }
         }
         // ── Thread view ──────────────────────────────────────────────────────
+        QQC2.Button {
+            id: showOlderFloatingBtn
+            visible: root.isThreadView && root.threadScrolledOffTopCount > 0
+            Layout.alignment: Qt.AlignHCenter
+            text: i18n("Show %1 older message(s)", root.threadScrolledOffTopCount)
+            flat: true
+            leftPadding: 16; rightPadding: 16
+            topPadding: 6; bottomPadding: 6
+
+            background: Rectangle {
+                color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
+                radius: height / 2
+                border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.55)
+                border.width: 1
+            }
+            contentItem: QQC2.Label {
+                text: parent.text
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.pixelSize: 12
+            }
+            onClicked: threadFlickable.contentY = Math.max(0, threadFlickable.contentY - Math.max(120, threadFlickable.height * 0.75))
+        }
+
         Flickable {
             id: threadFlickable
 
@@ -2235,32 +2259,6 @@ Rectangle {
                 }
             }
 
-            QQC2.Button {
-                id: showOlderFloatingBtn
-                z: 20
-                visible: root.threadScrolledOffTopCount > 0
-                anchors.top: parent.top
-                anchors.topMargin: 8
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: i18n("Show %1 older message(s)", root.threadScrolledOffTopCount)
-                flat: true
-                leftPadding: 16; rightPadding: 16
-                topPadding: 6; bottomPadding: 6
-
-                background: Rectangle {
-                    color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
-                    radius: height / 2
-                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.55)
-                    border.width: 1
-                }
-                contentItem: QQC2.Label {
-                    text: parent.text
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    font.pixelSize: 12
-                }
-                onClicked: threadFlickable.contentY = Math.max(0, threadFlickable.contentY - Math.max(120, threadFlickable.height * 0.75))
-            }
         }
 
         // ── Single message view ──────────────────────────────────────────────
