@@ -180,7 +180,7 @@ Rectangle {
         // theme background. No !important — emails with their own explicit backgrounds
         // will still override this. Reading the property here keeps the binding reactive.
         const bgColor = Kirigami.Theme.backgroundColor.toString();
-        const bgStyle = "<style data-kestrel-bg='baseline'>html,body{background-color:" + bgColor + ";}</style>";
+        const bgStyle = "<style data-kestrel-bg='baseline'>html,body{background-color:" + bgColor + ";min-height:calc(100vh + 1px);}</style>";
         if (sanitized.indexOf("<head>") >= 0)
             sanitized = sanitized.replace("<head>", "<head>" + bgStyle);
 
@@ -1984,7 +1984,7 @@ Rectangle {
             Layout.fillHeight: true
             clip: true
             contentWidth: width
-            contentHeight: threadScrollContent.implicitHeight
+            contentHeight: Math.max(height + 1, threadScrollContent.implicitHeight)
             boundsBehavior: Flickable.StopAtBounds
 
             onContentYChanged: {
