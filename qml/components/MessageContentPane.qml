@@ -2152,54 +2152,71 @@ Rectangle {
                             }
 
                             sourceComponent: Component {
-                                WebEngineView {
-                                    id: threadBodyView
+                                Item {
                                     width: bodyLoader.width
-                                    settings.javascriptEnabled: false
-                                    settings.localContentCanAccessRemoteUrls: false
-                                    backgroundColor: Kirigami.Theme.backgroundColor
+                                    height: bodyLoader.height
 
-                                    WheelHandler {
-                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                        onWheel: function(ev) {
-                                            const delta = ev.angleDelta ? ev.angleDelta.y : 0
-                                            if (!delta)
-                                                return
-                                            const next = threadFlickable.contentY - (delta / 2)
-                                            threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()))
-                                            ev.accepted = true
+                                    function loadHtmlDoc(html) {
+                                        threadBodyView.loadHtml(html, "file:///")
+                                    }
+
+                                    WebEngineView {
+                                        id: threadBodyView
+                                        anchors.fill: parent
+                                        settings.javascriptEnabled: false
+                                        settings.localContentCanAccessRemoteUrls: false
+                                        backgroundColor: Kirigami.Theme.backgroundColor
+
+                                        onLoadingChanged: function(req) {
+                                            if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
+                                                runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
+                                                    function(h) {
+                                                        if (h && h > 0)
+                                                            threadCard.bodyHeight = h + 16
+                                                    })
+                                            }
+                                        }
+
+                                        onNavigationRequested: function(request) {
+                                            const url = request.url ? request.url.toString() : ""
+                                            if (request.navigationType === WebEngineNavigationRequest.LinkClickedNavigation
+                                                    && (url.startsWith("http://") || url.startsWith("https://"))) {
+                                                request.action = WebEngineNavigationRequest.IgnoreRequest
+                                                Qt.openUrlExternally(url)
+                                            }
+                                        }
+
+                                        onNewWindowRequested: function(request) {
+                                            const url = request.requestedUrl ? request.requestedUrl.toString() : ""
+                                            if (url.startsWith("http://") || url.startsWith("https://"))
+                                                Qt.openUrlExternally(url)
+                                        }
+
+                                        Component.onCompleted: {
+                                            const html = threadCard.cardBodyHtml
+                                            if (html.length)
+                                                loadHtml(html, "file:///")
                                         }
                                     }
 
-                                    onLoadingChanged: function(req) {
-                                        if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
-                                            runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
-                                                function(h) {
-                                                    if (h && h > 0)
-                                                        threadCard.bodyHeight = h + 16
-                                                })
+                                    // Hard wheel-capture layer so thread pane scroll works even when cursor
+                                    // is over WebEngine content (which otherwise consumes wheel input).
+                                    Item {
+                                        anchors.fill: parent
+                                        z: 999
+
+                                        WheelHandler {
+                                            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                            grabPermissions: PointerHandler.CanTakeOverFromAnything
+                                            onWheel: function(ev) {
+                                                const delta = ev.angleDelta ? ev.angleDelta.y : 0
+                                                if (!delta)
+                                                    return
+                                                const next = threadFlickable.contentY - (delta / 2)
+                                                threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()))
+                                                ev.accepted = true
+                                            }
                                         }
-                                    }
-
-                                    onNavigationRequested: function(request) {
-                                        const url = request.url ? request.url.toString() : ""
-                                        if (request.navigationType === WebEngineNavigationRequest.LinkClickedNavigation
-                                                && (url.startsWith("http://") || url.startsWith("https://"))) {
-                                            request.action = WebEngineNavigationRequest.IgnoreRequest
-                                            Qt.openUrlExternally(url)
-                                        }
-                                    }
-
-                                    onNewWindowRequested: function(request) {
-                                        const url = request.requestedUrl ? request.requestedUrl.toString() : ""
-                                        if (url.startsWith("http://") || url.startsWith("https://"))
-                                            Qt.openUrlExternally(url)
-                                    }
-
-                                    Component.onCompleted: {
-                                        const html = threadCard.cardBodyHtml
-                                        if (html.length)
-                                            loadHtml(html, "file:///")
                                     }
                                 }
                             }
@@ -2216,8 +2233,8 @@ Rectangle {
                                 if (!threadCard.isExpanded) return
                                 const html = threadCard.cardBodyHtml
                                 if (!html.length) return
-                                if (bodyLoader.item)
-                                    bodyLoader.item.loadHtml(html, "file:///")
+                                if (bodyLoader.item && bodyLoader.item.loadHtmlDoc)
+                                    bodyLoader.item.loadHtmlDoc(html)
                             }
                         }
                     }
