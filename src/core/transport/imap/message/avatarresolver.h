@@ -42,7 +42,7 @@ QString resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &
  * @param url Avatar URL (HTTP/HTTPS)
  * @return Data URI (data:image/...) or empty string
  */
-QString fetchAvatarBlob(const QString &url);
+QString fetchAvatarBlob(const QString &url, const QString &bearerToken = {});
 
 /**
  * Extract List-ID domain for mailing list avatar lookups.

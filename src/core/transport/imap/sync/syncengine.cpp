@@ -394,15 +394,29 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     }
 
     if (!avatarUrl.isEmpty()) {
-        const QString avatarBlob = fetchAvatarBlob(avatarUrl);
+        // Pass the access token for Google People photo URLs — contact photos at
+        // lh3.googleusercontent.com/contacts/ require auth; without it the fetch
+        // returns HTML and the raw URL would be stored, then blocked by the UI guardrail.
+        const QString token = (avatarSource == "google-people"_L1) ? ctx.cxn->accessToken() : QString{};
+        const QString avatarBlob = fetchAvatarBlob(avatarUrl, token);
         // Google auto-generated monogram/default avatars are tiny (often < 2 KB).
         // Reject them so the UI falls back to initials instead of a generic placeholder.
         const bool tinyGoogleAvatar = avatarSource == "google-people"_L1
                                       && avatarBlob.startsWith("data:"_L1)
                                       && avatarBlob.size() < 3000;
+        // If fetchAvatarBlob couldn't convert to a data URI (returned raw URL), don't
+        // persist the raw URL — the UI's isGoogleProfileish guardrail would block it.
+        const bool resolvedToDataUri = avatarBlob.startsWith("data:"_L1);
         if (tinyGoogleAvatar) {
             qInfo().noquote() << "[avatar] discarding tiny google-people avatar for" << senderEmail;
-        } else {
+        } else if (resolvedToDataUri) {
+            h.insert("avatarUrl"_L1,    avatarBlob);
+            h.insert("avatarSource"_L1, avatarSource);
+        } else if (avatarSource != "google-people"_L1) {
+            // For non-Google sources (BIMI header, favicon): the URL itself is the result
+            // (already a data URI from resolveFaviconLogoUrl / resolveBimiLogoUrlViaDoh).
+            // This branch normally won't be hit since those functions return data URIs,
+            // but handle it defensively.
             h.insert("avatarUrl"_L1,    avatarBlob);
             h.insert("avatarSource"_L1, avatarSource);
         }

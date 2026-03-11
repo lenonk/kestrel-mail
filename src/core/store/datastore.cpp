@@ -681,6 +681,16 @@ bool DataStore::init()
         }
     }
 
+    // Clear raw HTTPS Google profile photo URLs from contact_avatars — they require auth
+    // and are blocked by the UI's isGoogleProfileish guardrail. Clearing them forces
+    // a re-fetch on the next sync (now with proper Bearer token support).
+    // Use an ancient timestamp so avatarShouldRefresh immediately allows a retry.
+    q.exec(QStringLiteral(
+        "UPDATE contact_avatars SET avatar_url='', failure_count=0, last_checked_at='2000-01-01T00:00:00' "
+        "WHERE source='google-people' "
+        "AND (avatar_url LIKE 'https://%' OR avatar_url LIKE 'http://%')"
+    ));
+
     // Clear stale esp_vendor values produced by the old Received-chain heuristic.
     // Only values from definitive X-* header markers are kept; everything else is
     // garbage (sender's own infrastructure, ugly subdomains like "Zillowmail", etc.).
@@ -1505,16 +1515,19 @@ void DataStore::upsertHeader(const QVariantMap &header)
             VALUES (:email, :avatar_url, :source, datetime('now'), 1)
             ON CONFLICT(email) DO UPDATE SET
               avatar_url=CASE
-                           WHEN length(trim(contact_avatars.avatar_url)) = 0
-                                AND excluded.avatar_url IS NOT NULL
+                           -- Keep data URIs — they are fully resolved and good.
+                           WHEN contact_avatars.avatar_url LIKE 'data:%'
+                           THEN contact_avatars.avatar_url
+                           -- Replace raw HTTPS URLs (fetch failed / auth needed) with favicon fallback.
+                           WHEN excluded.avatar_url IS NOT NULL
                                 AND length(trim(excluded.avatar_url)) > 0
                            THEN excluded.avatar_url
                            ELSE contact_avatars.avatar_url
                          END,
               source=CASE
-                       WHEN length(trim(contact_avatars.avatar_url)) = 0
-                            AND excluded.source IS NOT NULL
-                            AND length(trim(excluded.source)) > 0
+                       WHEN contact_avatars.avatar_url LIKE 'data:%'
+                       THEN contact_avatars.source
+                       WHEN excluded.source IS NOT NULL AND length(trim(excluded.source)) > 0
                        THEN excluded.source
                        ELSE contact_avatars.source
                      END,
@@ -3715,7 +3728,12 @@ bool DataStore::avatarShouldRefresh(const QString &email, int ttlSeconds, int ma
     const QString checked = q.value(1).toString().trimmed();
     const int failures = q.value(2).toInt();
 
-    if (!avatarUrl.isEmpty()) return false;
+    // Data URIs are fully resolved — no need to refresh.
+    if (!avatarUrl.isEmpty() && !avatarUrl.startsWith(QStringLiteral("https://"))
+            && !avatarUrl.startsWith(QStringLiteral("http://")))
+        return false;
+    // Raw HTTPS URLs were likely stored when the fetch failed (e.g. auth required).
+    // Allow retry so we can eventually store a proper data URI.
 
     const QDateTime checkedAt = QDateTime::fromString(checked, Qt::ISODate);
     const QDateTime now = QDateTime::currentDateTimeUtc();
@@ -3726,6 +3744,57 @@ bool DataStore::avatarShouldRefresh(const QString &email, int ttlSeconds, int ma
         return age >= backoff;
     }
     return age >= ttlSeconds;
+}
+
+QStringList DataStore::staleGooglePeopleEmails(int limit) const
+{
+    if (QThread::currentThread() != thread()) return {};
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return {};
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        SELECT email FROM contact_avatars
+        WHERE source='google-people'
+          AND (length(trim(avatar_url)) = 0
+               OR avatar_url LIKE 'https://%'
+               OR avatar_url LIKE 'http://%')
+          AND (last_checked_at IS NULL
+               OR datetime(last_checked_at) < datetime('now', '-1 hour'))
+        ORDER BY last_checked_at ASC
+        LIMIT :lim
+    )"));
+    q.bindValue(QStringLiteral(":lim"), limit);
+    if (!q.exec()) return {};
+
+    QStringList result;
+    while (q.next())
+        result << q.value(0).toString().trimmed().toLower();
+    return result;
+}
+
+void DataStore::updateContactAvatar(const QString &email, const QString &avatarUrl, const QString &source)
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return;
+    const QString e = email.trimmed().toLower();
+    if (e.isEmpty()) return;
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        INSERT INTO contact_avatars (email, avatar_url, source, last_checked_at, failure_count)
+        VALUES (:email, :avatar_url, :source, datetime('now'), 0)
+        ON CONFLICT(email) DO UPDATE SET
+          avatar_url=excluded.avatar_url,
+          source=excluded.source,
+          last_checked_at=datetime('now'),
+          failure_count=0
+    )"));
+    q.bindValue(QStringLiteral(":email"), e);
+    q.bindValue(QStringLiteral(":avatar_url"), avatarUrl.trimmed());
+    q.bindValue(QStringLiteral(":source"), source.trimmed().isEmpty()
+                ? QStringLiteral("google-people") : source.trimmed().toLower());
+    q.exec();
 }
 
 bool DataStore::hasCachedHeadersForFolder(const QString &rawFolderName, int minCount) const

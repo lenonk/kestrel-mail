@@ -1,4 +1,7 @@
 #include "messagehydrator.h"
+
+#include <iostream>
+
 #include "bodyprocessor.h"
 
 #include <QDebug>
@@ -44,9 +47,13 @@ QString MessageHydrator::execute(const Request &req) {
         step.start();
         bool selectOk = true;
         qInfo().noquote() << "[perf-hydrate-exec] folder compare:" << req.cxn->selectedFolder() << "<>" << folder;
+        std::flush(std::cerr);
+        std::flush(std::cout);
+        QString msg;
         if (req.cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
             const auto sel = req.cxn->select(folder);
             selectOk = std::get<0>(sel);
+            msg = std::get<1>(sel);
         }
         const qint64 selectMs = step.elapsed();
 
@@ -55,7 +62,9 @@ QString MessageHydrator::execute(const Request &req) {
                                  << "uid=" << uid
                                  << "folder=" << folder
                                  << "selectMs=" << selectMs
-                                 << "result=select-failed";
+                                 << "result=" << msg;
+            std::flush(std::cerr);
+            std::flush(std::cout);
             assert(0);
             continue;
         }

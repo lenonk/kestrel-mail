@@ -359,7 +359,16 @@ Rectangle {
                                                              || selectedFolderNorm.indexOf("/sent") >= 0
                                                              || selectedFolderNorm.indexOf("/sent ") >= 0
                                                              || selectedFolderNorm.indexOf("/draft") >= 0
-                        readonly property string mailboxForAvatar: showRecipient ? (recipient || "") : (sender || "")
+                        readonly property string mailboxForAvatar: {
+                            if (showRecipient) return recipient || ""
+                            // When thread-dedup picks the user's own reply as the latest message,
+                            // the sender is self — fall back to recipient for avatar lookup.
+                            const sEmail = root.appRoot ? root.appRoot.senderEmail(sender || "") : ""
+                            const acct   = (accountEmail || "").toString().trim().toLowerCase()
+                            if (sEmail.length && acct.length && sEmail === acct)
+                                return recipient || ""
+                            return sender || ""
+                        }
                         readonly property string nameLabel: showRecipient
                                                       ? i18n("To: %1", root.appRoot.displayRecipientNames(recipient, accountEmail))
                                                       : root.appRoot.displaySenderName(sender, accountEmail)

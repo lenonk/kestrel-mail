@@ -84,6 +84,8 @@ public:
     Q_INVOKABLE QString preferredSelfDisplayName(const QString &accountEmail) const;
     Q_INVOKABLE QVariantMap migrationStats() const;
     Q_INVOKABLE bool avatarShouldRefresh(const QString &email, int ttlSeconds = 3600, int maxFailures = 3) const;
+    Q_INVOKABLE QStringList staleGooglePeopleEmails(int limit = 20) const;
+    Q_INVOKABLE void updateContactAvatar(const QString &email, const QString &avatarUrl, const QString &source);
     Q_INVOKABLE bool isSenderTrusted(const QString &domain) const;
     Q_INVOKABLE void setTrustedSenderDomain(const QString &domain);
     Q_INVOKABLE QVariantList attachmentsForMessage(const QString &accountEmail, const QString &folder, const QString &uid) const;

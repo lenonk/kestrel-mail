@@ -234,7 +234,8 @@ Rectangle {
 
     onThreadIdChanged: {
         threadShowAll = false
-        threadExpandedIndex = -1
+        threadExpandedSet = null
+        cardDarkModes = ({})
     }
 
     function renderedHtmlForThread(bodyHtml, darkMode) {
@@ -1914,7 +1915,7 @@ Rectangle {
                         property real bodyHeight: 400
 
                         width: threadScrollContent.width
-                        implicitHeight: cardHeaderRow.implicitHeight + 16
+                        implicitHeight: cardHeaderRow.implicitHeight + 32
                                         + (isExpanded ? bodyHeight + 12 : 0)
                         radius: 8
                         border.color: Qt.rgba(Kirigami.Theme.textColor.r,
@@ -1949,7 +1950,7 @@ Rectangle {
                             Item {
                                 Layout.preferredWidth: 40
                                 Layout.preferredHeight: 40
-                                Layout.alignment: Qt.AlignTop
+                                Layout.alignment: Qt.AlignVCenter
 
                                 AvatarBadge {
                                     anchors.fill: parent
@@ -1963,6 +1964,7 @@ Rectangle {
                             // Sender / snippet / recipient
                             ColumnLayout {
                                 Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
                                 spacing: 2
 
                                 QQC2.Label {

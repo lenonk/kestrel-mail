@@ -270,7 +270,7 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
 }
 
 QString
-fetchAvatarBlob(const QString &url) {
+fetchAvatarBlob(const QString &url, const QString &bearerToken) {
     static QMutex mutex;
     static QHash<QString, AvatarBlobCacheEntry> cache;
 
@@ -291,6 +291,8 @@ fetchAvatarBlob(const QString &url) {
     QNetworkAccessManager nam;
     QNetworkRequest req { QUrl(u) };
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("kestrel-mail/1.0"));
+    if (!bearerToken.isEmpty())
+        req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(bearerToken).toUtf8());
 
     QNetworkReply *reply = nam.get(req);
     QEventLoop loop;

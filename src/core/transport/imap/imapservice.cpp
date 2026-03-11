@@ -36,8 +36,11 @@
 
 #include "sync/idlewatcher.h"
 #include "sync/kestreltimer.h"
+#include "message/avatarresolver.h"
 
 using namespace Qt::Literals::StringLiterals;
+using Imap::AvatarResolver::resolveGooglePeopleAvatarUrl;
+using Imap::AvatarResolver::fetchAvatarBlob;
 
 namespace {
 struct PooledConnSlot {
@@ -2032,7 +2035,12 @@ ImapService::syncAll(bool announce) {
                 flushTimer.restart();
             };
 
+            QString googleAccessToken;
             for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
+                if (googleAccessToken.isEmpty()
+                        && (host.contains("gmail.com"_L1) || host.contains("google"_L1)))
+                    googleAccessToken = accessToken;
+
                 if (m_cancelRequested.load()) {
                     SyncResult r;
                     r.message = "Refresh aborted.";
@@ -2142,6 +2150,27 @@ ImapService::syncAll(bool announce) {
             }
 
             flush();
+
+            // Re-fetch Google People contact photos that are stale or missing.
+            // Runs after the main sync so the access token is known and valid.
+            if (!m_cancelRequested.load() && !googleAccessToken.isEmpty()) {
+                QStringList staleEmails;
+                QMetaObject::invokeMethod(this, [this, &staleEmails]() {
+                    if (m_store) staleEmails = m_store->staleGooglePeopleEmails();
+                }, Qt::BlockingQueuedConnection);
+
+                for (const QString &sEmail : staleEmails) {
+                    if (m_cancelRequested.load()) break;
+                    const QString url = resolveGooglePeopleAvatarUrl(sEmail, googleAccessToken);
+                    if (url.isEmpty()) continue;
+                    const QString blob = fetchAvatarBlob(url, googleAccessToken);
+                    if (!blob.startsWith("data:"_L1)) continue;
+                    QMetaObject::invokeMethod(this, [this, sEmail, blob]() {
+                        if (m_store) m_store->updateContactAvatar(sEmail, blob, "google-people"_L1);
+                    }, Qt::BlockingQueuedConnection);
+                }
+            }
+
             result.ok      = true;
             result.inserted = inboxInserted;
             result.message  = QStringLiteral("All folders synced: %1 inbox messages.").arg(inboxInserted);
