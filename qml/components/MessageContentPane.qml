@@ -2128,7 +2128,7 @@ Rectangle {
 
                                 RowLayout {
                                     spacing: 4
-                                    visible: threadCard.isExpanded
+                                    visible: true
 
                                     MailActionButton {
                                         iconName: "mail-reply-sender"
