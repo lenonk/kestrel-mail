@@ -97,6 +97,9 @@ Rectangle {
 
     onSelectedMessageEdgeKeyChanged: {
         const key = root.selectedMessageEdgeKey;
+        // Always reset thread view paging/expanded state on header selection,
+        // even when staying within the same thread id.
+        _threadOnSelectedChanged();
         if (key.length && key !== htmlContainer.pendingKey)
             htmlContainer.startTransition(key);
         // Also try to queue HTML now in case messageData is already consistent.
