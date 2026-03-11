@@ -2859,8 +2859,10 @@ void DataStore::reloadInbox()
         for (const QVariant &v : m_inbox) {
             const QVariantMap r  = v.toMap();
             const QString tid    = r.value(QStringLiteral("threadId")).toString().trimmed();
-            const QString gtid   = r.value(QStringLiteral("gmThrId")).toString().trimmed();
+            QString gtid         = r.value(QStringLiteral("gmThrId")).toString().trimmed();
             const QString acct   = r.value(QStringLiteral("accountEmail")).toString();
+            if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
+                gtid = tid.mid(3).trimmed();
             const QString key    = !gtid.isEmpty()
                 ? acct + QStringLiteral("|gtid:") + gtid
                 : (tid.isEmpty()
@@ -3218,9 +3220,11 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                 QSet<QString> seenFolderTids;
                 while (qFolder.next()) {
                     const QString tid   = qFolder.value(15).toString().trimmed();
-                    const QString gtid  = qFolder.value(17).toString().trimmed();
+                    QString gtid        = qFolder.value(17).toString().trimmed();
                     const QString acct  = qFolder.value(0).toString();
                     const QString mid   = qFolder.value(3).toString();
+                    if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
+                        gtid = tid.mid(3).trimmed();
                     const QString tkey  = !gtid.isEmpty()
                         ? acct + QStringLiteral("|gtid:") + gtid
                         : (tid.isEmpty()
@@ -3385,9 +3389,11 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                 if (!qRow.exec() || !qRow.next()) continue;
 
                 const QString tid  = qRow.value(15).toString().trimmed();
-                const QString gtid = qRow.value(17).toString().trimmed();
+                QString gtid       = qRow.value(17).toString().trimmed();
                 const QString acct = qRow.value(0).toString();
                 const QString mid  = qRow.value(3).toString();
+                if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
+                    gtid = tid.mid(3).trimmed();
                 const QString tkey = !gtid.isEmpty()
                     ? acct + QStringLiteral("|gtid:") + gtid
                     : (tid.isEmpty()
