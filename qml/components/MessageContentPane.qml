@@ -2016,7 +2016,7 @@ Rectangle {
 
             Column {
                 id: threadScrollContent
-                readonly property real rightGutter: (threadVScroll.visible ? (threadVScroll.width + 8) : 0)
+                readonly property real rightGutter: (threadVScroll.visible ? threadVScroll.width : 0)
                 width: Math.max(0, threadFlickable.width - rightGutter)
                 spacing: 8
                 topPadding: 0
