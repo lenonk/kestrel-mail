@@ -1919,6 +1919,19 @@ Rectangle {
             onHeightChanged: root._threadClampScrollToLastCardTop()
             onMovementEnded: root._threadClampScrollToLastCardTop()
 
+            WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                grabPermissions: PointerHandler.CanTakeOverFromAnything
+                onWheel: function(ev) {
+                    const delta = ev.angleDelta ? ev.angleDelta.y : 0
+                    if (!delta)
+                        return
+                    const next = threadFlickable.contentY - (delta / 2)
+                    threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()))
+                    ev.accepted = true
+                }
+            }
+
             QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
 
             Column {
