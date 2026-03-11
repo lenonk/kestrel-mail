@@ -2194,8 +2194,20 @@ Rectangle {
                                     width: bodyLoader.width
                                     height: bodyLoader.height
 
+                                    function recomputeBodyHeight() {
+                                        threadBodyView.runJavaScript("(function(){const body=document.body;if(!body) return 24;const bodyRect=body.getBoundingClientRect();let maxBottom=bodyRect.top;const walker=document.createTreeWalker(body, NodeFilter.SHOW_ELEMENT);while(walker.nextNode()){const el=walker.currentNode;const cs=getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden') continue;if(cs.position==='fixed') continue;const r=el.getBoundingClientRect();if(r.width===0&&r.height===0) continue;if(r.bottom>maxBottom) maxBottom=r.bottom;}const h=Math.ceil(Math.max(0,maxBottom-bodyRect.top));return h;})()", function(h) {
+                                            const v = Number(h)
+                                            const target = Math.max(24, isFinite(v) && v >= 0 ? v : 24)
+                                            if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
+                                                threadCard.bodyHeight = target
+                                                root.threadScrollEpoch++
+                                            }
+                                        })
+                                    }
+
                                     function loadHtmlDoc(html) {
                                         threadBodyView.loadHtml(html, "file:///")
+                                        Qt.callLater(recomputeBodyHeight)
                                     }
 
                                     WebEngineView {
@@ -2209,23 +2221,11 @@ Rectangle {
                                         onLoadingChanged: function(req) {
                                             if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
                                                 runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';")
-                                                const h = Number(contentsSize.height)
-                                                const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24)
-                                                if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
-                                                    threadCard.bodyHeight = target
-                                                    root.threadScrollEpoch++
-                                                }
+                                                recomputeBodyHeight()
                                             }
                                         }
 
-                                        onContentsSizeChanged: {
-                                            const h = Number(contentsSize.height)
-                                            const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24)
-                                            if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
-                                                threadCard.bodyHeight = target
-                                                root.threadScrollEpoch++
-                                            }
-                                        }
+                                        onContentsSizeChanged: recomputeBodyHeight()
 
                                         onNavigationRequested: function(request) {
                                             const url = request.url ? request.url.toString() : ""
