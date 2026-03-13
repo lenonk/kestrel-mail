@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "Messages"
 
 Rectangle {
     id: root
@@ -21,65 +22,21 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: root.appRoot.selectedFolderCategories.length > 0
+            visible: (root.appRoot && root.appRoot.selectedFolderCategories && root.appRoot.selectedFolderCategories.length > 0)
             spacing: Kirigami.Units.smallSpacing
 
             Repeater {
-                model: root.appRoot.selectedFolderCategories
-                delegate: Item {
-                    implicitWidth: categoryLabel.implicitWidth + 50
-                    implicitHeight: Math.round((categoryLabel.implicitHeight + 3) * 1.5)
-
-                    MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: false
-                        onClicked: {
-                            root.appRoot.categorySelectionExplicit = true
-                            root.appRoot.selectedCategoryIndex = index
-                        }
-                    }
-
-                    QQC2.Label {
-                        id: categoryLabel
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData
-                        font.bold: index === root.appRoot.selectedCategoryIndex
-                        opacity: index === root.appRoot.selectedCategoryIndex ? 1 : 0.75
-                    }
-
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        height: 2
-                        color: index === root.appRoot.selectedCategoryIndex ? root.systemPalette.highlight : "transparent"
-                    }
+                id: gMailCategoryRepeater
+                model: (root.appRoot && root.appRoot.selectedFolderCategories) ? root.appRoot.selectedFolderCategories : []
+                delegate: MessageCategoryButton {
+                    appRoot: root.appRoot
+                    systemPalette: root.systemPalette
+                    categoryName: String((gMailCategoryRepeater.model && gMailCategoryRepeater.model[index] !== undefined) ? gMailCategoryRepeater.model[index] : "")
+                    categoryIndex: index
                 }
             }
 
             Item { Layout.fillWidth: true }
-        }
-
-        QQC2.Label {
-            visible: (typeof kestrelDebugBuild !== "undefined") && !!kestrelDebugBuild
-            Layout.fillWidth: true
-            leftPadding: Kirigami.Units.smallSpacing
-            rightPadding: Kirigami.Units.smallSpacing
-            bottomPadding: 2
-            opacity: 0.7
-            elide: Text.ElideRight
-            font.pointSize: Math.max(8, Kirigami.Theme.defaultFont.pointSize - 1)
-            text: {
-                const m = root.appRoot.messageListModelObj
-                if (!m) return ""
-                return i18n("Displayed: %1 messages (%2 rows) · Built: %3 rows · Page: %4 · %5",
-                            m.visibleMessageCount,
-                            m.visibleRowCount,
-                            m.totalRowCount,
-                            m.pageSize,
-                            m.hasMore ? i18n("more available") : i18n("end"))
-            }
         }
 
         ListView {
@@ -99,23 +56,6 @@ Rectangle {
             property string lastFolderKey: (root.appRoot && root.appRoot.selectedFolderKey)
                                            ? root.appRoot.selectedFolderKey.toString()
                                            : ""
-
-            property bool debugHoverPopupEnabled: false
-            property string debugHoverPayload: ""
-
-            function showDebugHoverPopup(payload, globalX, globalY) {
-                if (!debugHoverPopupEnabled)
-                    return
-                debugHoverPayload = payload
-                debugHoverPopup.toolTipText = payload
-                debugHoverPopup.preferredX = globalX + 4
-                debugHoverPopup.preferredY = globalY + 4
-                debugHoverPopup.show()
-            }
-
-            function hideDebugHoverPopup() {
-                debugHoverPopup.hide()
-            }
 
             function queueRestoreScroll() {
                 if (!restorePending)
@@ -198,65 +138,6 @@ Rectangle {
 
             onContentHeightChanged: queueRestoreScroll()
 
-            TextToolTip {
-                id: debugHoverPopup
-                parent: QQC2.Overlay.overlay
-                delay: 0
-                clampToOverlay: true
-
-                contentItem: Column {
-                    spacing: 6
-
-                    QQC2.Label {
-                        text: groupedMessageList.debugHoverPayload
-                        leftPadding: 8
-                        rightPadding: 8
-                        topPadding: 6
-                        bottomPadding: 0
-                        font.family: "monospace"
-                    }
-
-                    QQC2.Button {
-                        text: i18n("Copy")
-                        anchors.right: parent.right
-                        anchors.rightMargin: 8
-                        anchors.bottomMargin: 6
-                        onClicked: {
-                            copyBuffer.text = groupedMessageList.debugHoverPayload
-                            copyBuffer.selectAll()
-                            copyBuffer.copy()
-                        }
-                    }
-
-                    HoverHandler {
-                        id: debugPopupHover
-                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                        onHoveredChanged: {
-                            if (hovered)
-                                debugPopupHideTimer.stop()
-                            else
-                                debugPopupHideTimer.start()
-                        }
-                    }
-                }
-
-                TextEdit {
-                    id: copyBuffer
-                    visible: false
-                }
-            }
-
-            Timer {
-                id: debugPopupHideTimer
-                interval: 250
-                repeat: false
-                property bool rowHovered: false
-                onTriggered: {
-                    if (!rowHovered && !debugPopupHover.hovered)
-                        groupedMessageList.hideDebugHoverPopup()
-                }
-            }
-
             Rectangle {
                 anchors.fill: parent
                 z: -1
@@ -293,6 +174,7 @@ Rectangle {
             }
 
             delegate: Item {
+                id: rootDelegate
                 width: groupedMessageList.width
                 readonly property bool isHeaderRow: !!isHeader
                 readonly property int topGap: 0
@@ -319,339 +201,37 @@ Rectangle {
                         opacity: 0.55
                     }
 
-                    QQC2.Button {
+                    MessageListHeader {
                         id: headerButton
-                        visible: isHeaderRow
-                        width: parent.width
-                        implicitHeight: Kirigami.Units.gridUnit + 2
-                        y: 10
-                        flat: true
-                        leftPadding: 0
-                        rightPadding: 0
-                        hoverEnabled: false
-                        background: Item {}
-                        contentItem: RowLayout {
-                            anchors.fill: parent
-                            spacing: Kirigami.Units.smallSpacing
-                            Kirigami.Icon {
-                                source: expanded ? "go-down-symbolic" : "go-next-symbolic"
-                                Layout.preferredWidth: 14
-                                Layout.preferredHeight: 14
-                            }
-                            QQC2.Label { text: title || ""; font.bold: true }
-                            Item { Layout.fillWidth: true }
-                        }
-                        onClicked: root.appRoot.setBucketExpanded(bucketKey, !expanded)
+                        isHeaderRow: rootDelegate.isHeaderRow
+                        modelTitle: (typeof title !== "undefined") ? title : ""
+                        modelExpanded: (typeof expanded !== "undefined") ? expanded : false
+                        modelBucketKey: (typeof bucketKey !== "undefined") ? bucketKey : null
+                        appRoot: root.appRoot
                     }
 
-                    Rectangle {
+                    MessageCard {
                         id: messageCard
-                        visible: !isHeaderRow
-                        width: parent.width
-                        readonly property string messageKeyValue: messageKey || ""
-                        readonly property string selectedFolderKey: (root.appRoot && root.appRoot.selectedFolderKey) ? root.appRoot.selectedFolderKey.toString().toLowerCase() : ""
-                        readonly property string selectedFolderNorm: (root.appRoot && root.appRoot.normalizedFolderFromKey)
-                                                                     ? root.appRoot.normalizedFolderFromKey(root.appRoot.selectedFolderKey).toString().toLowerCase()
-                                                                     : ""
-                        readonly property bool showRecipient: selectedFolderNorm === "sent"
-                                                             || selectedFolderNorm === "draft"
-                                                             || selectedFolderNorm === "drafts"
-                                                             || selectedFolderNorm.indexOf("/sent") >= 0
-                                                             || selectedFolderNorm.indexOf("/sent ") >= 0
-                                                             || selectedFolderNorm.indexOf("/draft") >= 0
-                        readonly property string mailboxForAvatar: {
-                            if (showRecipient) return recipient || ""
-                            // When thread-dedup picks the user's own reply as the latest message,
-                            // the sender is self — fall back to recipient for avatar lookup.
-                            const sEmail = root.appRoot ? root.appRoot.senderEmail(sender || "") : ""
-                            const acct   = (accountEmail || "").toString().trim().toLowerCase()
-                            if (sEmail.length && acct.length && sEmail === acct)
-                                return recipient || ""
-                            return sender || ""
-                        }
-                        readonly property string nameLabel: showRecipient
-                                                      ? i18n("To: %1", root.appRoot.displayRecipientNames(recipient, accountEmail))
-                                                      : root.appRoot.displaySenderName(sender, accountEmail)
-                        height: Kirigami.Units.gridUnit * 3 + Kirigami.Units.smallSpacing + 14
-                        radius: 0
-                        clip: true
-                        readonly property bool isChecked: !!(root.appRoot.selectedMessageKeys
-                                                            && root.appRoot.selectedMessageKeys[messageKeyValue])
-                        color: isChecked
-                               ? Qt.lighter(root.systemPalette.highlight, 1.35)
-                               : root.appRoot.selectedMessageKey === messageKeyValue
-                                 ? Qt.lighter(root.systemPalette.highlight, 1.18) : "transparent"
-                        border.color: "transparent"
+                        isHeaderRow: rootDelegate.isHeaderRow
+                        appRoot: root.appRoot
+                        systemPalette: root.systemPalette
+                        groupedMessageList: groupedMessageList
 
-                        HoverHandler {
-                            id: rowHover
-                            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                            onHoveredChanged: {
-                                debugPopupHideTimer.rowHovered = hovered
-                                if (hovered) {
-                                    debugPopupHideTimer.stop()
-                                    const payload = "messageKey=" + (messageCard.messageKeyValue || "") + "\n"
-                                                  + "accountEmail=" + (accountEmail || "") + "\n"
-                                                  + "folder=" + (folder || "") + "\n"
-                                                  + "uid=" + (uid || "") + "\n"
-                                                  + "receivedAt=" + (receivedAt || "") + "\n"
-                                                  + "sender=" + (sender || "") + "\n"
-                                                  + "subject=" + (subject || "")
-                                    const overlay = QQC2.Overlay.overlay
-                                    const p = messageCard.mapToItem(overlay, messageMouseArea.mouseX, messageMouseArea.mouseY)
-                                    groupedMessageList.showDebugHoverPopup(payload, p.x, p.y)
-                                } else {
-                                    debugPopupHideTimer.start()
-                                }
-                            }
-                        }
-
-                        MouseArea {
-                            id: messageMouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-
-                            onPositionChanged: function(mouse) {
-                                if (debugHoverPopup.visible && !debugPopupHover.hovered) {
-                                    const overlay = QQC2.Overlay.overlay
-                                    const p = messageCard.mapToItem(overlay, mouse.x, mouse.y)
-                                    debugHoverPopup.preferredX = p.x + 4
-                                    debugHoverPopup.preferredY = p.y + 4
-                                }
-                            }
-
-                            onClicked: function(mouse) {
-                                if (mouse.modifiers & Qt.ShiftModifier
-                                        && root.appRoot.lastClickedMessageIndex >= 0
-                                        && root.appRoot.messageListModelObj) {
-                                    // Shift+click: range-select all message rows between anchor and here
-                                    const from = Math.min(index, root.appRoot.lastClickedMessageIndex)
-                                    const to   = Math.max(index, root.appRoot.lastClickedMessageIndex)
-                                    const next = Object.assign({}, root.appRoot.selectedMessageKeys)
-                                    const mdl  = root.appRoot.messageListModelObj
-                                    for (let i = from; i <= to; ++i) {
-                                        const row = mdl.rowAt(i)
-                                        if (row && !row.isHeader && row.messageKey)
-                                            next[row.messageKey] = true
-                                    }
-                                    root.appRoot.selectedMessageKeys = next
-                                } else if (mouse.modifiers & Qt.ControlModifier) {
-                                    // Ctrl+click: toggle in multiselect set without changing content view
-                                    root.appRoot.lastClickedMessageIndex = index
-                                    const next = Object.assign({}, root.appRoot.selectedMessageKeys)
-                                    if (next[messageCard.messageKeyValue])
-                                        delete next[messageCard.messageKeyValue]
-                                    else
-                                        next[messageCard.messageKeyValue] = true
-                                    root.appRoot.selectedMessageKeys = next
-                                } else {
-                                    // Normal click: open message, clear multiselect
-                                    root.appRoot.lastClickedMessageIndex = index
-                                    root.appRoot.lastMessageClickAtMs = Date.now()
-                                    root.appRoot.selectedMessageKeys = ({})
-                                    root.appRoot.selectedMessageKey = messageCard.messageKeyValue
-                                }
-                            }
-                        }
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: Kirigami.Units.smallSpacing
-                            spacing: Kirigami.Units.smallSpacing
-
-                            ColumnLayout {
-                                Layout.preferredWidth: 18
-                                Layout.fillHeight: true
-                                spacing: 4
-
-                                Item { Layout.fillHeight: true }
-
-                                // Unread dot
-                                Rectangle {
-                                    Layout.alignment: Qt.AlignHCenter
-                                    width: 9
-                                    height: 9
-                                    radius: 4.5
-                                    color: root.systemPalette.highlight
-                                    opacity: !!unread ? 1 : 0.25
-                                    visible: !!unread
-                                }
-
-                                // Flag icon on hover
-                                Item {
-                                    Layout.alignment: Qt.AlignHCenter
-                                    Layout.preferredWidth: 16
-                                    Layout.preferredHeight: 16
-                                    visible: rowHover.hovered
-
-                                    Kirigami.Icon {
-                                        anchors.fill: parent
-                                        source: "flag-symbolic"
-                                        opacity: 0.85
-                                    }
-                                }
-
-                                Item { Layout.fillHeight: true }
-                            }
-
-                            Item {
-                                id: avatarWrap
-                                width: Kirigami.Units.iconSizes.medium + 4
-                                height: Kirigami.Units.iconSizes.medium + 4
-
-                                property var avatarSources: root.appRoot.senderAvatarSources(
-                                                               messageCard.mailboxForAvatar,
-                                                               "",
-                                                               "",
-                                                               accountEmail)
-
-                                AvatarBadge {
-                                    anchors.fill: parent
-                                    size: avatarWrap.width
-                                    displayName: messageCard.showRecipient
-                                                 ? root.appRoot.displayRecipientNames(recipient, accountEmail)
-                                                 : root.appRoot.displaySenderName(sender, accountEmail)
-                                    fallbackText: messageCard.mailboxForAvatar
-                                    avatarSources: avatarWrap.avatarSources
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 1
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Kirigami.Units.smallSpacing
-                                    QQC2.Label {
-                                        text: messageCard.nameLabel
-                                        elide: Text.ElideRight
-                                        wrapMode: Text.NoWrap
-                                        Layout.fillWidth: true
-                                        font.bold: true
-                                        font.pixelSize: 14
-                                    }
-                                    QQC2.Label {
-                                        text: root.appRoot.formatListDate(receivedAt)
-                                        opacity: 0.7
-                                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                    }
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-
-                                    QQC2.Label {
-                                        text: (subject || i18n("(No subject)"))
-                                        elide: Text.ElideRight
-                                        wrapMode: Text.NoWrap
-                                        font.bold: !!unread
-                                        font.pixelSize: 13
-                                        color: Kirigami.Theme.textColor
-                                        Layout.fillWidth: true
-                                    }
-
-                                    RowLayout {
-                                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                        spacing: 4
-
-                                        // Thread count pill
-                                        Rectangle {
-                                            visible: (threadCount || 0) > 1
-                                            implicitWidth: threadCountLabel.implicitWidth + 10
-                                            implicitHeight: 18
-                                            radius: 9
-                                            color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.4)
-                                            border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.7)
-                                            border.width: 1
-                                            Layout.alignment: Qt.AlignVCenter
-
-                                            QQC2.Label {
-                                                id: threadCountLabel
-                                                anchors.centerIn: parent
-                                                text: (threadCount || 0).toString()
-                                                font.pixelSize: 11
-                                                font.bold: true
-                                                color: Kirigami.Theme.textColor
-                                                opacity: 0.85
-                                            }
-                                        }
-
-                                        Kirigami.Icon {
-                                            source: "crosshairs"
-                                            Layout.preferredWidth: 18
-                                            Layout.preferredHeight: 18
-                                            opacity: 0.78
-                                            visible: !!hasTrackingPixel
-                                        }
-
-                                        Kirigami.Icon {
-                                            source: "mail-attachment"
-                                            Layout.preferredWidth: 18
-                                            Layout.preferredHeight: 18
-                                            opacity: 0.75
-                                            visible: !!hasAttachments
-                                        }
-                                    }
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 4
-
-                                    Image {
-                                        visible: !!isImportant
-                                        source: "qrc:/qml/important.svg"
-                                        Layout.preferredWidth: 20
-                                        Layout.preferredHeight: 20
-                                        Layout.alignment: Qt.AlignVCenter
-                                        fillMode: Image.PreserveAspectFit
-                                    }
-
-                                    QQC2.Label {
-                                        text: snippet || ""
-                                        opacity: 0.72
-                                        font.pixelSize: 12
-                                        color: Kirigami.Theme.textColor
-                                        visible: text.length > 0 || !!isImportant
-                                        elide: Text.ElideRight
-                                        wrapMode: Text.NoWrap
-                                        Layout.fillWidth: true
-                                    }
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.preferredWidth: 18
-                                Layout.fillHeight: true
-                                spacing: 4
-
-                                Item { Layout.fillHeight: true }
-
-                                Item {
-                                    Layout.alignment: Qt.AlignHCenter
-                                    Layout.preferredWidth: 16
-                                    Layout.preferredHeight: 16
-                                    visible: rowHover.hovered
-
-                                    Kirigami.Icon {
-                                        anchors.fill: parent
-                                        source: "user-trash-symbolic"
-                                        opacity: 0.85
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: function(mouse) {
-                                            mouse.accepted = true
-                                            root.appRoot.deleteSelectedMessages()
-                                        }
-                                    }
-                                }
-
-                                Item { Layout.fillHeight: true }
-                            }
-                        }
+                        modelMessageKey: (typeof model !== "undefined" && typeof model.messageKey !== "undefined") ? model.messageKey : ""
+                        modelSender: (typeof model !== "undefined" && typeof model.sender !== "undefined") ? model.sender : ""
+                        modelRecipient: (typeof model !== "undefined" && typeof model.recipient !== "undefined") ? model.recipient : ""
+                        modelSubject: (typeof model !== "undefined" && typeof model.subject !== "undefined") ? model.subject : ""
+                        modelUnread: (typeof model !== "undefined" && typeof model.unread !== "undefined") ? model.unread : false
+                        modelThreadCount: (typeof model !== "undefined" && typeof model.threadCount !== "undefined") ? model.threadCount : 0
+                        modelHasTrackingPixel: (typeof model !== "undefined" && typeof model.hasTrackingPixel !== "undefined") ? model.hasTrackingPixel : false
+                        modelHasAttachments: (typeof model !== "undefined" && typeof model.hasAttachments !== "undefined") ? model.hasAttachments : false
+                        modelIsImportant: (typeof model !== "undefined" && typeof model.isImportant !== "undefined") ? model.isImportant : false
+                        modelSnippet: (typeof model !== "undefined" && typeof model.snippet !== "undefined") ? model.snippet : ""
+                        modelAccountEmail: (typeof model !== "undefined" && typeof model.accountEmail !== "undefined") ? model.accountEmail : ""
+                        modelFolder: (typeof model !== "undefined" && typeof model.folder !== "undefined") ? model.folder : ""
+                        modelUid: (typeof model !== "undefined" && typeof model.uid !== "undefined") ? model.uid : ""
+                        modelReceivedAt: (typeof model !== "undefined" && typeof model.receivedAt !== "undefined") ? model.receivedAt : ""
+                        modelIndex: index
                     }
                 }
             }
