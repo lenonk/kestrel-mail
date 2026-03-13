@@ -13,14 +13,14 @@ Item {
 
     required property var appRoot
     required property var systemPalette
-    required property string categoryName
-    required property int categoryIndex
+    required property int index
+    required property var modelData
 
     Rectangle {
         anchors.fill: parent
-        color: root.categoryIndex === root.appRoot.selectedCategoryIndex ? root.systemPalette.highlight : "transparent"
+        color: root.index === root.appRoot.selectedCategoryIndex ? root.systemPalette.highlight : "transparent"
         opacity: 0.1
-        visible: root.categoryIndex === root.appRoot.selectedCategoryIndex
+        visible: root.index === root.appRoot.selectedCategoryIndex
     }
 
     MouseArea {
@@ -29,7 +29,7 @@ Item {
         cursorShape: containsMouse ? Qt.PointingHandCursor : Qt.ArrowCursor
         onClicked: {
             root.appRoot.categorySelectionExplicit = true
-            root.appRoot.selectedCategoryIndex = root.categoryIndex
+            root.appRoot.selectedCategoryIndex = root.index
         }
     }
 
@@ -37,9 +37,9 @@ Item {
         id: categoryLabel
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        text: root.categoryName
-        font.bold: root.categoryIndex === root.appRoot.selectedCategoryIndex
-        opacity: root.categoryIndex === root.appRoot.selectedCategoryIndex ? 1 : 0.75
+        text: String(root.modelData || "")
+        font.bold: root.index === root.appRoot.selectedCategoryIndex
+        opacity: root.index === root.appRoot.selectedCategoryIndex ? 1 : 0.75
         color: Kirigami.Theme.textColor
     }
 
@@ -48,6 +48,6 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         height: 2
-        color: root.categoryIndex === root.appRoot.selectedCategoryIndex ? root.systemPalette.highlight : "transparent"
+        color: root.index === root.appRoot.selectedCategoryIndex ? root.systemPalette.highlight : "transparent"
     }
 }
