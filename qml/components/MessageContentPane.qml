@@ -2370,9 +2370,9 @@ Rectangle {
 
                 lastHtmlKey = dedup;
                 pendingHtml = html;
-                if (fadedOut)
+                if (fadedOut || !fadeTimer.running)
                     doLoad();
-                // If not yet faded: fadeTimer.onTriggered will call doLoad() once the
+                // If fading out: fadeTimer.onTriggered will call doLoad() once the
                 // fade-out animation completes.
             }
 

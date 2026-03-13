@@ -2,21 +2,18 @@ import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-ColumnLayout {
+Item {
     id: root
-    Layout.preferredWidth: 18
-    Layout.fillHeight: true
-    spacing: 4
 
     default property alias content: innerLayout.data
 
-    Item { Layout.fillHeight: true }
+    Layout.fillHeight: true
+    Layout.preferredWidth: 21
 
     ColumnLayout {
         id: innerLayout
-        Layout.alignment: Qt.AlignHCenter
+
+        anchors.centerIn: parent
         spacing: 4
     }
-
-    Item { Layout.fillHeight: true }
 }

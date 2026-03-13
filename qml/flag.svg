@@ -3,7 +3,7 @@
 <!-- Created using Karbon, part of Calligra: http://www.calligra.org/karbon -->
 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
     <g stroke="#ffffff" stroke-width="1" fill="#ffffff" stroke-linecap="square" stroke-linejoin="miter">
-        <line x1="3" y1="1" x2="3" y2="18"/>
-        <path d="M3 3 L11 3 L9 6 L11 9 L3 9"/>
+        <line x1="6" y1="1" x2="6" y2="18"/>
+        <path d="M6 3 L14 3 L12 6 L14 9 L6 9"/>
     </g>
 </svg>

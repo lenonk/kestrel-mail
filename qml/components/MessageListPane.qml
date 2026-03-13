@@ -58,7 +58,14 @@ Rectangle {
             function queueRestoreScroll() {
                 if (!restorePending)
                     return
-                Qt.callLater(function() {
+                scrollRestoreTimer.restart()
+            }
+
+            Timer {
+                id: scrollRestoreTimer
+                interval: 50
+                repeat: false
+                onTriggered: {
                     if (groupedMessageList.pendingRestoreIndex >= 0
                             && groupedMessageList.pendingRestoreIndex < groupedMessageList.count) {
                         groupedMessageList.positionViewAtIndex(groupedMessageList.pendingRestoreIndex, ListView.Beginning)
@@ -69,7 +76,7 @@ Rectangle {
                     groupedMessageList.pendingRestoreIndex = -1
                     groupedMessageList.restorePending = false
                     groupedMessageList.restoreTargetLocked = false
-                })
+                }
             }
 
             Connections {

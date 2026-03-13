@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
     <g stroke="#838383" stroke-width="1" fill="none" stroke-linecap="square" stroke-linejoin="miter">
         <!-- lid handle -->
-        <line x1="6" y1="2" x2="10" y2="2"/>
-        <line x1="6" y1="2" x2="6" y2="4"/>
-        <line x1="10" y1="2" x2="10" y2="4"/>
+        <line x1="7" y1="1" x2="13" y2="1"/>
+        <line x1="7" y1="1" x2="7" y2="4"/>
+        <line x1="13" y1="1" x2="13" y2="4"/>
 
         <!-- lid -->
-        <line x1="3" y1="4" x2="13" y2="4"/>
+        <line x1="2.5" y1="4" x2="17.5" y2="4"/>
 
         <!-- bin body -->
-        <rect x="4" y="4" width="8" height="10"/>
+        <rect x="4" y="4" width="12" height="15"/>
 
         <!-- inner slats -->
-        <line x1="7" y1="6" x2="7" y2="12"/>
-        <line x1="9" y1="6" x2="9" y2="12"/>
+        <line x1="8.5" y1="7" x2="8.5" y2="16"/>
+        <line x1="11.5" y1="7" x2="11.5" y2="16"/>
 
     </g>
 </svg>

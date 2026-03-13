@@ -2,75 +2,65 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import Qt5Compat.GraphicalEffects
 import ".."
 
 Rectangle {
     id: messageCard
-    visible: !isHeaderRow
-    width: parent.width
 
-    // Model properties passed in from delegate
-    property var modelMessageKey
-    property var modelSender
-    property var modelRecipient
-    property var modelSubject
-    property bool modelUnread
-    property int modelThreadCount
-    property bool modelHasTrackingPixel
-    property bool modelHasAttachments
-    property bool modelIsImportant
-    property var modelSnippet
-    property var modelAccountEmail
-    property var modelFolder
-    property var modelUid
-    property var modelReceivedAt
-    property int modelIndex
+    property var appRoot
+    property var groupedMessageList // Pointer to the ListView
+
+    readonly property bool isChecked: !!(appRoot && appRoot.selectedMessageKeys && appRoot.selectedMessageKeys[messageKeyValue])
 
     // Necessary for layout and logic
     property bool isHeaderRow
-    property var appRoot
-    property var systemPalette
-    property var groupedMessageList // Pointer to the ListView
-
-    readonly property string messageKeyValue: modelMessageKey || ""
-    readonly property string selectedFolderKey: (appRoot && appRoot.selectedFolderKey) ? appRoot.selectedFolderKey.toString().toLowerCase() : ""
-    readonly property string selectedFolderNorm: (appRoot && appRoot.normalizedFolderFromKey)
-                                                 ? appRoot.normalizedFolderFromKey(appRoot.selectedFolderKey).toString().toLowerCase()
-                                                 : ""
-                                                 || ""
-    readonly property bool showRecipient: selectedFolderNorm === "sent"
-                                         || selectedFolderNorm === "draft"
-                                         || selectedFolderNorm === "drafts"
-                                         || selectedFolderNorm.indexOf("/sent") >= 0
-                                         || selectedFolderNorm.indexOf("/sent ") >= 0
-                                         || selectedFolderNorm.indexOf("/draft") >= 0
     readonly property string mailboxForAvatar: {
-        if (showRecipient) return modelRecipient || ""
+        if (showRecipient)
+            return modelRecipient || "";
         // When thread-dedup picks the user's own reply as the latest message,
         // the sender is self — fall back to recipient for avatar lookup.
-        const sEmail = appRoot ? appRoot.senderEmail(modelSender || "") : ""
-        const acct   = (modelAccountEmail || "").toString().trim().toLowerCase()
+        const sEmail = appRoot ? appRoot.senderEmail(modelSender || "") : "";
+        const acct = (modelAccountEmail || "").toString().trim().toLowerCase();
         if (sEmail.length && acct.length && sEmail === acct)
-            return modelRecipient || ""
-        return modelSender || ""
+            return modelRecipient || "";
+        return modelSender || "";
     }
+    readonly property string messageKeyValue: modelMessageKey || ""
+    property var modelAccountEmail
+    property var modelFolder
+    property bool modelHasAttachments
+    property bool modelHasTrackingPixel
+    property int modelIndex
+    property bool modelIsImportant
+
+    // Model properties passed in from delegate
+    property var modelMessageKey
+    property var modelReceivedAt
+    property var modelRecipient
+    property var modelSender
+    property var modelSnippet
+    property var modelSubject
+    property int modelThreadCount
+    property var modelUid
+    property bool modelUnread
     readonly property string nameLabel: {
-        if (!appRoot) return ""
-        return showRecipient
-                ? i18n("To: %1", appRoot.displayRecipientNames(modelRecipient, modelAccountEmail))
-                : appRoot.displaySenderName(modelSender, modelAccountEmail)
+        if (!appRoot)
+            return "";
+        return showRecipient ? i18n("To: %1", appRoot.displayRecipientNames(modelRecipient, modelAccountEmail)) : appRoot.displaySenderName(modelSender, modelAccountEmail);
     }
+    readonly property string selectedFolderKey: (appRoot && appRoot.selectedFolderKey) ? appRoot.selectedFolderKey.toString().toLowerCase() : ""
+    readonly property string selectedFolderNorm: (appRoot && appRoot.normalizedFolderFromKey) ? appRoot.normalizedFolderFromKey(appRoot.selectedFolderKey).toString().toLowerCase() : "" || ""
+    readonly property bool showRecipient: selectedFolderNorm === "sent" || selectedFolderNorm === "draft" || selectedFolderNorm === "drafts" || selectedFolderNorm.indexOf("/sent") >= 0 || selectedFolderNorm.indexOf("/sent ") >= 0 || selectedFolderNorm.indexOf("/draft") >= 0
+    property var systemPalette
+
+    border.color: "transparent"
+    clip: true
+    color: isChecked ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.35) : "transparent") : (appRoot && appRoot.selectedMessageKey === messageKeyValue) ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.18) : "transparent") : "transparent"
     height: Kirigami.Units.gridUnit * 3 + Kirigami.Units.smallSpacing + 14
     radius: 0
-    clip: true
-    readonly property bool isChecked: !!(appRoot && appRoot.selectedMessageKeys
-                                        && appRoot.selectedMessageKeys[messageKeyValue])
-    color: isChecked
-           ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.35) : "transparent")
-           : (appRoot && appRoot.selectedMessageKey === messageKeyValue)
-             ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.18) : "transparent")
-             : "transparent"
-    border.color: "transparent"
+    visible: !isHeaderRow
+    width: parent.width
 
     HoverHandler {
         id: rowHover
@@ -79,40 +69,40 @@ Rectangle {
 
     MouseArea {
         id: messageMouseArea
+
         anchors.fill: parent
         hoverEnabled: true
 
-        onClicked: function(mouse) {
-            if (!appRoot) return
-            if (mouse.modifiers & Qt.ShiftModifier
-                    && appRoot.lastClickedMessageIndex >= 0
-                    && appRoot.messageListModelObj) {
+        onClicked: function (mouse) {
+            if (!appRoot)
+                return;
+            if (mouse.modifiers & Qt.ShiftModifier && appRoot.lastClickedMessageIndex >= 0 && appRoot.messageListModelObj) {
                 // Shift+click: range-select all message rows between anchor and here
-                const from = Math.min(modelIndex, appRoot.lastClickedMessageIndex)
-                const to   = Math.max(modelIndex, appRoot.lastClickedMessageIndex)
-                const next = Object.assign({}, appRoot.selectedMessageKeys)
-                const mdl  = appRoot.messageListModelObj
+                const from = Math.min(modelIndex, appRoot.lastClickedMessageIndex);
+                const to = Math.max(modelIndex, appRoot.lastClickedMessageIndex);
+                const next = Object.assign({}, appRoot.selectedMessageKeys);
+                const mdl = appRoot.messageListModelObj;
                 for (let i = from; i <= to; ++i) {
-                    const row = mdl.rowAt(i)
+                    const row = mdl.rowAt(i);
                     if (row && !row.isHeader && row.messageKey)
-                        next[row.messageKey] = true
+                        next[row.messageKey] = true;
                 }
-                appRoot.selectedMessageKeys = next
+                appRoot.selectedMessageKeys = next;
             } else if (mouse.modifiers & Qt.ControlModifier) {
                 // Ctrl+click: toggle in multiselect set without changing content view
-                appRoot.lastClickedMessageIndex = modelIndex
-                const next = Object.assign({}, appRoot.selectedMessageKeys)
+                appRoot.lastClickedMessageIndex = modelIndex;
+                const next = Object.assign({}, appRoot.selectedMessageKeys);
                 if (next[messageCard.messageKeyValue])
-                    delete next[messageCard.messageKeyValue]
+                    delete next[messageCard.messageKeyValue];
                 else
-                    next[messageCard.messageKeyValue] = true
-                appRoot.selectedMessageKeys = next
+                    next[messageCard.messageKeyValue] = true;
+                appRoot.selectedMessageKeys = next;
             } else {
                 // Normal click: open message, clear multiselect
-                appRoot.lastClickedMessageIndex = modelIndex
-                appRoot.lastMessageClickAtMs = Date.now()
-                appRoot.selectedMessageKeys = ({})
-                appRoot.selectedMessageKey = messageCard.messageKeyValue
+                appRoot.lastClickedMessageIndex = modelIndex;
+                appRoot.lastMessageClickAtMs = Date.now();
+                appRoot.selectedMessageKeys = ({});
+                appRoot.selectedMessageKey = messageCard.messageKeyValue;
             }
         }
     }
@@ -126,67 +116,73 @@ Rectangle {
             // Unread dot
             Rectangle {
                 Layout.alignment: Qt.AlignHCenter
-                width: 9
+                color: systemPalette ? systemPalette.highlight : "transparent"
                 height: 9
                 radius: 4.5
-                color: systemPalette ? systemPalette.highlight : "transparent"
-                opacity: !!modelUnread ? 1 : 0.25
                 visible: !!modelUnread
+                width: 9
             }
 
             // Flag icon on hover
             Item {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: 16
-                Layout.preferredHeight: 16
+                Layout.preferredHeight: 20
+                Layout.preferredWidth: 20
+                visible: rowHover.hovered
 
-                HoverHandler {
-                    id: flagHover
-                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                MouseArea {
+                    id: flagHoverArea
+                    anchors.fill: parent
+                    enabled: rowHover.hovered
+                    hoverEnabled: true
                 }
 
-                Kirigami.Icon {
-                    anchors.fill: parent
+                Image {
+                    id: flagImage
+                    anchors.centerIn: parent
+                    fillMode: Image.PreserveAspectFit
+                    layer.enabled: true
                     source: "qrc:/qml/flag.svg"
-                    isMask: true
-                    opacity: rowHover.hovered ? 1.0 : 0.0
-                    color: flagHover.hovered
-                           ? Kirigami.Theme.textColor
-                           : Qt.darker(Kirigami.Theme.textColor, 1.25)
+                    sourceSize: Qt.size(20, 20)
+                }
+
+                ColorOverlay {
+                    anchors.fill: flagImage
+                    color: flagHoverArea.containsMouse ? Kirigami.Theme.textColor : Qt.darker(Kirigami.Theme.textColor, 1.25)
+                    source: flagImage
                 }
             }
         }
 
         MessageCardAvatar {
-            appRoot: messageCard.appRoot
-            mailbox: messageCard.mailboxForAvatar
             accountEmail: modelAccountEmail
-            displayName: appRoot
-                         ? (messageCard.showRecipient
-                            ? appRoot.displayRecipientNames(modelRecipient, modelAccountEmail)
-                            : appRoot.displaySenderName(modelSender, modelAccountEmail))
-                         : ""
+            appRoot: messageCard.appRoot
+            displayName: appRoot ? (messageCard.showRecipient ? appRoot.displayRecipientNames(modelRecipient, modelAccountEmail) : appRoot.displaySenderName(modelSender, modelAccountEmail)) : ""
             fallbackText: messageCard.mailboxForAvatar
+            mailbox: messageCard.mailboxForAvatar
         }
 
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 1
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
+
                 QQC2.Label {
-                    text: messageCard.nameLabel
-                    elide: Text.ElideRight
-                    wrapMode: Text.NoWrap
                     Layout.fillWidth: true
+                    elide: Text.ElideRight
                     font.bold: true
                     font.pixelSize: 14
+                    text: messageCard.nameLabel
+                    wrapMode: Text.NoWrap
                 }
+
                 QQC2.Label {
-                    text: (appRoot) ? appRoot.formatListDate(modelReceivedAt) : ""
-                    opacity: 0.7
                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                    opacity: 0.7
+                    text: (appRoot) ? appRoot.formatListDate(modelReceivedAt) : ""
                 }
             }
 
@@ -195,20 +191,20 @@ Rectangle {
                 spacing: 6
 
                 QQC2.Label {
-                    text: (modelSubject || i18n("(No subject)"))
+                    Layout.fillWidth: true
+                    color: Kirigami.Theme.textColor
                     elide: Text.ElideRight
-                    wrapMode: Text.NoWrap
                     font.bold: !!modelUnread
                     font.pixelSize: 13
-                    color: Kirigami.Theme.textColor
-                    Layout.fillWidth: true
+                    text: (modelSubject || i18n("(No subject)"))
+                    wrapMode: Text.NoWrap
                 }
 
                 MessageCardIndicators {
                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                    threadCount: modelThreadCount || 0
-                    hasTrackingPixel: !!modelHasTrackingPixel
                     hasAttachments: !!modelHasAttachments
+                    hasTrackingPixel: !!modelHasTrackingPixel
+                    threadCount: modelThreadCount || 0
                 }
             }
 
@@ -217,52 +213,66 @@ Rectangle {
                 spacing: 4
 
                 Image {
-                    visible: !!modelIsImportant
-                    source: "qrc:/qml/important.svg"
-                    Layout.preferredWidth: 20
-                    Layout.preferredHeight: 20
                     Layout.alignment: Qt.AlignVCenter
+                    Layout.preferredHeight: 20
+                    Layout.preferredWidth: 20
                     fillMode: Image.PreserveAspectFit
+                    source: "qrc:/qml/important.svg"
+                    sourceSize: Qt.size(20, 20)
+                    visible: !!modelIsImportant
                 }
 
                 QQC2.Label {
-                    text: modelSnippet || ""
-                    opacity: 0.72
-                    font.pixelSize: 12
-                    color: Kirigami.Theme.textColor
-                    visible: text.length > 0 || !!modelIsImportant
-                    elide: Text.ElideRight
-                    wrapMode: Text.NoWrap
                     Layout.fillWidth: true
+                    color: Kirigami.Theme.textColor
+                    elide: Text.ElideRight
+                    font.pixelSize: 12
+                    opacity: 0.72
+                    text: modelSnippet || ""
+                    visible: text.length > 0 || !!modelIsImportant
+                    wrapMode: Text.NoWrap
                 }
             }
         }
 
         MessageCardStatusColumn {
+            // Trash icon on hover
             Item {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: 16
-                Layout.preferredHeight: 16
+                Layout.preferredHeight: 20
+                Layout.preferredWidth: 20
+                visible: rowHover.hovered
 
-                Kirigami.Icon {
-                    anchors.fill: parent
+                Image {
+                    id: trashImage
+                    anchors.centerIn: parent
+                    fillMode: Image.PreserveAspectFit
+                    layer.enabled: true
                     source: "qrc:/qml/trash.svg"
-                    isMask: true
-                    opacity: rowHover.hovered ? 1.0 : 0.0
-                    color: trashMouseArea.containsMouse
-                           ? Kirigami.Theme.textColor
-                           : Qt.darker(Kirigami.Theme.textColor, 1.25)
+                    sourceSize: Qt.size(20, 20)
+                }
+
+                ColorOverlay {
+                    anchors.fill: trashImage
+                    color: trashMouseArea.containsMouse ? Kirigami.Theme.textColor : Qt.darker(Kirigami.Theme.textColor, 1.25)
+                    source: trashImage
                 }
 
                 MouseArea {
                     id: trashMouseArea
+
                     anchors.fill: parent
                     enabled: rowHover.hovered
                     hoverEnabled: true
-                    onClicked: function(mouse) {
-                        mouse.accepted = true
-                        if (appRoot)
-                            appRoot.deleteSelectedMessages()
+
+                    onClicked: function (mouse) {
+                        mouse.accepted = true;
+                        if (!messageCard.appRoot) return;
+                        // If nothing is multi-selected, select this card so
+                        // deleteSelectedMessages() targets it specifically.
+                        if (Object.keys(messageCard.appRoot.selectedMessageKeys).length === 0)
+                            messageCard.appRoot.selectedMessageKeys = ({ [messageCard.messageKeyValue]: true });
+                        messageCard.appRoot.deleteSelectedMessages();
                     }
                 }
             }

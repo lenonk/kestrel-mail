@@ -54,6 +54,49 @@ QString extractFirstEmail(const QString &raw)
     return m.hasMatch() ? m.captured(1).trimmed().toLower() : QString();
 }
 
+static bool computeHasTrackingPixel(const QString &bodyHtml, const QString &senderRaw)
+{
+    if (bodyHtml.isEmpty())
+        return false;
+
+    const QString email = extractFirstEmail(senderRaw);
+    QString senderDomain;
+    {
+        const int at = email.lastIndexOf('@');
+        if (at >= 0) {
+            senderDomain = email.mid(at + 1).toLower().trimmed();
+            const int colon = senderDomain.indexOf(':');
+            if (colon > 0) senderDomain = senderDomain.left(colon);
+        }
+    }
+
+    static const QRegularExpression imgTagRe(QStringLiteral("<img\\b[^>]*>"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression srcRe(QStringLiteral("\\bsrc\\s*=\\s*[\"'](https?://[^\"']+)[\"']"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression widthRe(QStringLiteral("\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"']"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression heightRe(QStringLiteral("\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"']"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression hostRe(QStringLiteral("^https?://([^/?#]+)"), QRegularExpression::CaseInsensitiveOption);
+
+    QRegularExpressionMatchIterator it = imgTagRe.globalMatch(bodyHtml);
+    while (it.hasNext()) {
+        const QString tag = it.next().captured(0);
+        if (!widthRe.match(tag).hasMatch() || !heightRe.match(tag).hasMatch())
+            continue;
+        const auto srcM = srcRe.match(tag);
+        if (!srcM.hasMatch()) continue;
+        const QString src = srcM.captured(1);
+        const auto hostM = hostRe.match(src);
+        if (!hostM.hasMatch()) continue;
+        QString pixelHost = hostM.captured(1).toLower().trimmed();
+        const int colon = pixelHost.indexOf(':');
+        if (colon > 0) pixelHost = pixelHost.left(colon);
+        if (!senderDomain.isEmpty() && !pixelHost.isEmpty()
+                && (pixelHost == senderDomain || pixelHost.endsWith("." + senderDomain)))
+            continue;
+        return true;
+    }
+    return false;
+}
+
 int displayNameScoreForEmail(const QString &nameRaw, const QString &emailRaw)
 {
     const QString name = nameRaw.trimmed();
@@ -634,6 +677,7 @@ bool DataStore::init()
           avatar_url TEXT,
           avatar_source TEXT,
           unread INTEGER DEFAULT 1,
+          has_tracking_pixel INTEGER DEFAULT 0,
           UNIQUE(account_email, logical_key)
         )
     )"))) {
@@ -660,6 +704,7 @@ bool DataStore::init()
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(account_email, thread_id)"));
     q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN gm_thr_id TEXT"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_gm_thr ON messages(account_email, gm_thr_id)"));
+    q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN has_tracking_pixel INTEGER DEFAULT 0"));
 
     // Backfill thread_id for existing messages (new ones get it in upsertHeader).
     {
@@ -1167,7 +1212,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
     if (weakIdentity && !uidValue.trimmed().isEmpty()) {
         QSqlQuery qExisting(database);
         qExisting.prepare(QStringLiteral(R"(
-            SELECT m.id
+            SELECT m.id, m.sender
             FROM message_folder_map mfm
             JOIN messages m ON m.id = mfm.message_id AND m.account_email = mfm.account_email
             WHERE mfm.account_email=:account_email
@@ -1187,6 +1232,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
         qExisting.bindValue(QStringLiteral(":uid"), uidValue);
         if (qExisting.exec() && qExisting.next()) {
             const int existingMessageId = qExisting.value(0).toInt();
+            const QString existingSender = qExisting.value(1).toString();
             qInfo().noquote() << "[upsert-weak-reuse]"
                               << "account=" << accountEmail
                               << "folder=" << folderValue
@@ -1196,6 +1242,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
             // Hydration path often arrives as uid-only with body_html; keep body update.
             if (!bodyHtmlValue.trimmed().isEmpty()) {
+                const int hasTP = computeHasTrackingPixel(bodyHtmlValue, existingSender) ? 1 : 0;
                 QSqlQuery qBody(database);
                 qBody.prepare(QStringLiteral(R"(
                     UPDATE messages
@@ -1205,10 +1252,12 @@ void DataStore::upsertHeader(const QVariantMap &header)
                                       THEN :body_html
                                       ELSE body_html
                                     END,
+                        has_tracking_pixel = :has_tp,
                         unread = :unread
                     WHERE id=:message_id AND account_email=:account_email
                 )"));
                 qBody.bindValue(QStringLiteral(":body_html"), bodyHtmlValue);
+                qBody.bindValue(QStringLiteral(":has_tp"), hasTP);
                 qBody.bindValue(QStringLiteral(":unread"), unreadValue);
                 qBody.bindValue(QStringLiteral(":message_id"), existingMessageId);
                 qBody.bindValue(QStringLiteral(":account_email"), accountEmail);
@@ -1241,8 +1290,8 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
     QSqlQuery qCanon(database);
     qCanon.prepare(QStringLiteral(R"(
-        INSERT INTO messages (account_email, logical_key, sender, recipient, subject, received_at, snippet, body_html, message_id_header, gm_msg_id, unread, list_unsubscribe, reply_to, return_path, auth_results, x_mailer, in_reply_to, references_header, esp_vendor, thread_id, gm_thr_id)
-        VALUES (:account_email, :logical_key, :sender, :recipient, :subject, :received_at, :snippet, :body_html, :message_id_header, :gm_msg_id, :unread, :list_unsubscribe, :reply_to, :return_path, :auth_results, :x_mailer, :in_reply_to, :references_header, :esp_vendor, :thread_id, :gm_thr_id)
+        INSERT INTO messages (account_email, logical_key, sender, recipient, subject, received_at, snippet, body_html, message_id_header, gm_msg_id, unread, list_unsubscribe, reply_to, return_path, auth_results, x_mailer, in_reply_to, references_header, esp_vendor, thread_id, gm_thr_id, has_tracking_pixel)
+        VALUES (:account_email, :logical_key, :sender, :recipient, :subject, :received_at, :snippet, :body_html, :message_id_header, :gm_msg_id, :unread, :list_unsubscribe, :reply_to, :return_path, :auth_results, :x_mailer, :in_reply_to, :references_header, :esp_vendor, :thread_id, :gm_thr_id, :has_tracking_pixel)
         ON CONFLICT(account_email, logical_key) DO UPDATE SET
           sender = excluded.sender,
           recipient = CASE
@@ -1307,7 +1356,13 @@ void DataStore::upsertHeader(const QVariantMap &header)
                         THEN excluded.thread_id ELSE messages.thread_id END,
           gm_thr_id = CASE
                         WHEN excluded.gm_thr_id IS NOT NULL AND length(trim(excluded.gm_thr_id)) > 0
-                        THEN excluded.gm_thr_id ELSE messages.gm_thr_id END
+                        THEN excluded.gm_thr_id ELSE messages.gm_thr_id END,
+          has_tracking_pixel = CASE
+                                  WHEN excluded.body_html IS NOT NULL
+                                       AND length(trim(excluded.body_html)) > 0
+                                  THEN excluded.has_tracking_pixel
+                                  ELSE messages.has_tracking_pixel
+                                END
     )"));
     qCanon.bindValue(QStringLiteral(":account_email"), accountEmail);
     qCanon.bindValue(QStringLiteral(":logical_key"), lkey);
@@ -1329,6 +1384,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
     qCanon.bindValue(QStringLiteral(":references_header"),  referencesValue.isEmpty()     ? QVariant() : QVariant(referencesValue));
     qCanon.bindValue(QStringLiteral(":esp_vendor"),         espVendorValue.isEmpty()      ? QVariant() : QVariant(espVendorValue));
     qCanon.bindValue(QStringLiteral(":gm_thr_id"),          gmThrIdValue.isEmpty()         ? QVariant() : QVariant(gmThrIdValue));
+    qCanon.bindValue(QStringLiteral(":has_tracking_pixel"), computeHasTrackingPixel(bodyHtmlValue, senderValue) ? 1 : 0);
     {
         // For Gmail messages with X-GM-THRID, use it as the canonical thread ID.
         // This groups all messages in the same Gmail conversation correctly even
@@ -1930,7 +1986,8 @@ void DataStore::pruneFolderToUids(const QString &accountEmail, const QString &fo
                       << "removedFolderRows=" << removedFolderRows
                       << "removedCanonicalRows=" << removedCanonicalRows;
 
-    reloadInbox();
+    if (removedFolderRows > 0 || removedCanonicalRows > 0)
+        scheduleReloadInbox();
 }
 
 void DataStore::removeAccountUidsEverywhere(const QString &accountEmail, const QStringList &uids,
@@ -1994,7 +2051,8 @@ void DataStore::removeAccountUidsEverywhere(const QString &accountEmail, const Q
                       << "removedFolderRows=" << removedFolderRows
                       << "removedCanonicalRows=" << removedCanonicalRows;
 
-    reloadInbox();
+    if (removedFolderRows > 0 || removedCanonicalRows > 0)
+        scheduleReloadInbox();
 }
 
 void DataStore::markMessageRead(const QString &accountEmail, const QString &uid)
@@ -2031,8 +2089,8 @@ void DataStore::markMessageRead(const QString &accountEmail, const QString &uid)
     qMsg.exec();
 
     emit messageMarkedRead(acc, uid);
-    reloadInbox();
-
+    if (qMsg.numRowsAffected() > 0)
+        scheduleReloadInbox();
 }
 
 void DataStore::reconcileReadFlags(const QString &accountEmail, const QString &folder,
@@ -2114,11 +2172,12 @@ void DataStore::deleteSingleFolderEdge(const QString &accountEmail,
 {
     auto database = db();
     if (!database.isValid() || !database.isOpen()) return;
-    deleteFolderEdge(database, accountEmail, folder, uid);
+    const int removed = deleteFolderEdge(database, accountEmail, folder, uid);
     // Remove any messages now orphaned (no remaining folder edges).
     QSqlQuery q(database);
     q.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
-    reloadInbox();
+    if (removed > 0 || q.numRowsAffected() > 0)
+        scheduleReloadInbox();
 }
 
 void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId,
@@ -2159,9 +2218,11 @@ void DataStore::removeAllEdgesForMessageId(const QString &accountEmail, qint64 m
     q.bindValue(":acc"_L1, accountEmail);
     q.bindValue(":mid"_L1, messageId);
     q.exec();
+    const int removedEdges = q.numRowsAffected();
     QSqlQuery qOrphan(database);
     qOrphan.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
-    reloadInbox();
+    if (removedEdges > 0 || qOrphan.numRowsAffected() > 0)
+        scheduleReloadInbox();
 }
 
 QStringList DataStore::folderUids(const QString &accountEmail, const QString &folder) const
@@ -2701,10 +2762,12 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
     if (!database.isValid() || !database.isOpen()) return false;
 
     int prevLen = -1;
+    int prevTP = 0;
+    QString senderForTP;
     {
         QSqlQuery qPrev(database);
         qPrev.prepare(QStringLiteral(R"(
-            SELECT length(trim(COALESCE(m.body_html, '')))
+            SELECT length(trim(COALESCE(m.body_html, ''))), m.sender, COALESCE(m.has_tracking_pixel, 0)
             FROM messages m
             WHERE m.id = (
                 SELECT mfm.message_id
@@ -2718,9 +2781,14 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
         qPrev.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
         qPrev.bindValue(QStringLiteral(":folder"), folder.trimmed());
         qPrev.bindValue(QStringLiteral(":uid"), uid.trimmed());
-        if (qPrev.exec() && qPrev.next())
+        if (qPrev.exec() && qPrev.next()) {
             prevLen = qPrev.value(0).toInt();
+            senderForTP = qPrev.value(1).toString();
+            prevTP = qPrev.value(2).toInt();
+        }
     }
+
+    const int hasTP = computeHasTrackingPixel(html, senderForTP) ? 1 : 0;
 
     QSqlQuery q(database);
     q.prepare(QStringLiteral(R"(
@@ -2730,7 +2798,8 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
                                AND length(trim(:body_html)) > length(trim(COALESCE(body_html, '')))
                           THEN :body_html
                           ELSE body_html
-                        END
+                        END,
+            has_tracking_pixel = :has_tp
         WHERE id = (
             SELECT mfm.message_id
             FROM message_folder_map mfm
@@ -2741,6 +2810,7 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
         )
     )"));
     q.bindValue(QStringLiteral(":body_html"), html);
+    q.bindValue(QStringLiteral(":has_tp"), hasTP);
     q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
     q.bindValue(QStringLiteral(":folder"), folder.trimmed());
     q.bindValue(QStringLiteral(":uid"), uid.trimmed());
@@ -2770,15 +2840,19 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
                              << "hasMimeHeaders=" << hasMimeHeaders;
     }
 
-    if (changed) {
+    // Only reload the list if the tracking pixel flag actually changed — body_html
+    // is loaded on demand and is not part of the list model.
+    if (changed && hasTP != prevTP)
         scheduleReloadInbox();
-    }
+
     return changed;
 }
 
 void DataStore::scheduleReloadInbox()
 {
-    if (m_reloadInboxScheduled) return;
+    if (m_reloadInboxScheduled)
+        return;
+
     m_reloadInboxScheduled = true;
     QTimer::singleShot(40, this, [this]() {
         m_reloadInboxScheduled = false;
@@ -2807,7 +2881,6 @@ void DataStore::reloadInbox()
              '' as recipient_avatar_url,
              cm.received_at,
              cm.snippet,
-             cm.body_html,
              '' as avatar_domain,
              '' as avatar_url,
              '' as avatar_source,
@@ -2820,7 +2893,8 @@ void DataStore::reloadInbox()
                  AND cm.thread_id IS NOT NULL
                  AND length(trim(COALESCE(cm.thread_id, ''))) > 0
              ), 1) as thread_count,
-             COALESCE(cm.gm_thr_id, '') as gm_thr_id
+             COALESCE(cm.gm_thr_id, '') as gm_thr_id,
+             COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel
       FROM message_folder_map mfm
       JOIN messages cm ON cm.id = mfm.message_id
       ORDER BY cm.received_at DESC
@@ -2839,14 +2913,14 @@ void DataStore::reloadInbox()
         row.insert(QStringLiteral("recipientAvatarUrl"), q.value(7));
         row.insert(QStringLiteral("receivedAt"), q.value(8));
         row.insert(QStringLiteral("snippet"), q.value(9));
-        row.insert(QStringLiteral("bodyHtml"), q.value(10));
-        row.insert(QStringLiteral("avatarDomain"), q.value(11));
-        row.insert(QStringLiteral("avatarUrl"), q.value(12));
-        row.insert(QStringLiteral("avatarSource"), q.value(13));
-        row.insert(QStringLiteral("unread"), q.value(14).toInt() == 1);
-        row.insert(QStringLiteral("threadId"),    q.value(15).toString());
-        row.insert(QStringLiteral("threadCount"), q.value(16).toInt());
-        row.insert(QStringLiteral("gmThrId"),     q.value(17).toString());
+        row.insert(QStringLiteral("avatarDomain"), q.value(10));
+        row.insert(QStringLiteral("avatarUrl"), q.value(11));
+        row.insert(QStringLiteral("avatarSource"), q.value(12));
+        row.insert(QStringLiteral("unread"), q.value(13).toInt() == 1);
+        row.insert(QStringLiteral("threadId"),         q.value(14).toString());
+        row.insert(QStringLiteral("threadCount"),      q.value(15).toInt());
+        row.insert(QStringLiteral("gmThrId"),          q.value(16).toString());
+        row.insert(QStringLiteral("hasTrackingPixel"), q.value(17).toInt() == 1);
         m_inbox.push_back(row);
     }
 
@@ -2970,66 +3044,12 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             }
         }
 
-        static const QRegularExpression imgTagRe(QStringLiteral("<img\\b[^>]*>"), QRegularExpression::CaseInsensitiveOption);
-        static const QRegularExpression srcRe(QStringLiteral("\\bsrc\\s*=\\s*[\"'](https?://[^\"']+)[\"']"), QRegularExpression::CaseInsensitiveOption);
-        // Match MessageContentPane tracker criteria more strictly: quoted width/height="1".
-        static const QRegularExpression widthRe(QStringLiteral("\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"']"), QRegularExpression::CaseInsensitiveOption);
-        static const QRegularExpression heightRe(QStringLiteral("\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"']"), QRegularExpression::CaseInsensitiveOption);
-        static const QRegularExpression hostRe(QStringLiteral("^https?://([^/?#]+)"), QRegularExpression::CaseInsensitiveOption);
-
-        auto normalizedHost = [](const QString &hostRaw) {
-            QString host = hostRaw.toLower().trimmed();
-            const int colon = host.indexOf(':');
-            if (colon > 0)
-                host = host.left(colon);
-            return host;
-        };
-
-        auto senderDomainFromRow = [&](const QVariantMap &row) {
-            const QString sender = row.value(QStringLiteral("sender")).toString();
-            const QString email = extractFirstEmail(sender);
-            const int at = email.lastIndexOf('@');
-            if (at < 0)
-                return QString();
-            return normalizedHost(email.mid(at + 1));
-        };
-
         for (int i = 0; i < list.size(); ++i) {
             QVariantMap row = list.at(i).toMap();
             const QString mid = row.value(QStringLiteral("messageId")).toString();
-            row.insert(QStringLiteral("hasAttachments"), withAttachments.contains(mid));
-            row.insert(QStringLiteral("isImportant"), importantMessageIds.contains(mid));
-
-            const QString bodyHtml = row.value(QStringLiteral("bodyHtml")).toString();
-            const QString senderDomain = senderDomainFromRow(row);
-            bool hasTrackingPixel = false;
-
-            QRegularExpressionMatchIterator it = imgTagRe.globalMatch(bodyHtml);
-            while (it.hasNext()) {
-                const QString tag = it.next().captured(0);
-                if (!widthRe.match(tag).hasMatch() || !heightRe.match(tag).hasMatch())
-                    continue;
-
-                const auto srcM = srcRe.match(tag);
-                if (!srcM.hasMatch())
-                    continue;
-
-                const QString src = srcM.captured(1);
-                const auto hostM = hostRe.match(src);
-                if (!hostM.hasMatch())
-                    continue;
-
-                const QString pixelHost = normalizedHost(hostM.captured(1));
-                if (!senderDomain.isEmpty() && !pixelHost.isEmpty()
-                    && (pixelHost == senderDomain || pixelHost.endsWith("." + senderDomain))) {
-                    continue; // first-party pixel: don't mark as tracker
-                }
-
-                hasTrackingPixel = true;
-                break;
-            }
-
-            row.insert(QStringLiteral("hasTrackingPixel"), hasTrackingPixel);
+            row.insert(QStringLiteral("hasAttachments"),    withAttachments.contains(mid));
+            row.insert(QStringLiteral("isImportant"),       importantMessageIds.contains(mid));
+            row.insert(QStringLiteral("hasTrackingPixel"),  row.value(QStringLiteral("hasTrackingPixel")).toBool());
             list[i] = row;
         }
     };
@@ -3154,7 +3174,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                            '' as recipient_avatar_url,
                            cm.received_at,
                            cm.snippet,
-                           cm.body_html,
+                           COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
                            '' as avatar_domain,
                            '' as avatar_url,
                            '' as avatar_source,
@@ -3187,7 +3207,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                            '' as recipient_avatar_url,
                            cm.received_at,
                            cm.snippet,
-                           cm.body_html,
+                           COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
                            '' as avatar_domain,
                            '' as avatar_url,
                            '' as avatar_source,
@@ -3243,9 +3263,9 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                     row.insert(QStringLiteral("recipient"), qFolder.value(6));
                     row.insert(QStringLiteral("recipientAvatarUrl"), qFolder.value(7));
                     row.insert(QStringLiteral("receivedAt"), qFolder.value(8));
-                    row.insert(QStringLiteral("snippet"), qFolder.value(9));
-                    row.insert(QStringLiteral("bodyHtml"), qFolder.value(10));
-                    row.insert(QStringLiteral("avatarDomain"), qFolder.value(11));
+                    row.insert(QStringLiteral("snippet"),          qFolder.value(9));
+                    row.insert(QStringLiteral("hasTrackingPixel"), qFolder.value(10).toInt() == 1);
+                    row.insert(QStringLiteral("avatarDomain"),     qFolder.value(11));
                     row.insert(QStringLiteral("avatarUrl"), qFolder.value(12));
                     row.insert(QStringLiteral("avatarSource"), qFolder.value(13));
                     row.insert(QStringLiteral("unread"), qFolder.value(14).toInt() == 1);
@@ -3356,7 +3376,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                        '' as recipient_avatar_url,
                        cm.received_at,
                        cm.snippet,
-                       cm.body_html,
+                       COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
                        '' as avatar_domain,
                        '' as avatar_url,
                        '' as avatar_source,
@@ -3412,9 +3432,9 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                 row.insert(QStringLiteral("recipient"), qRow.value(6));
                 row.insert(QStringLiteral("recipientAvatarUrl"), qRow.value(7));
                 row.insert(QStringLiteral("receivedAt"), qRow.value(8));
-                row.insert(QStringLiteral("snippet"), qRow.value(9));
-                row.insert(QStringLiteral("bodyHtml"), qRow.value(10));
-                row.insert(QStringLiteral("avatarDomain"), qRow.value(11));
+                row.insert(QStringLiteral("snippet"),          qRow.value(9));
+                row.insert(QStringLiteral("hasTrackingPixel"), qRow.value(10).toInt() == 1);
+                row.insert(QStringLiteral("avatarDomain"),     qRow.value(11));
                 row.insert(QStringLiteral("avatarUrl"), qRow.value(12));
                 row.insert(QStringLiteral("avatarSource"), qRow.value(13));
                 row.insert(QStringLiteral("unread"), qRow.value(14).toInt() == 1);
