@@ -131,6 +131,8 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/Messages/MessageCategoryButton.qml
         qml/components/Messages/MessageListHeader.qml
         qml/important.svg
+        qml/flag.svg
+        qml/trash.svg
 )
 
 set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json")

@@ -142,7 +142,7 @@ Rectangle {
 
                 Kirigami.Icon {
                     anchors.fill: parent
-                    source: "flag-symbolic"
+                    source: "qrc:/qml/flag.svg"
                     opacity: rowHover.hovered ? 0.85 : 0.0
                 }
             }
@@ -237,7 +237,7 @@ Rectangle {
 
                 Kirigami.Icon {
                     anchors.fill: parent
-                    source: "user-trash-symbolic"
+                    source: "qrc:/qml/trash.svg"
                     opacity: rowHover.hovered ? 0.85 : 0.0
                 }
 
