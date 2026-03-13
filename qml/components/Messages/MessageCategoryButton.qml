@@ -16,17 +16,9 @@ Item {
     required property int index
     required property var modelData
 
-    Rectangle {
-        anchors.fill: parent
-        color: root.index === root.appRoot.selectedCategoryIndex ? root.systemPalette.highlight : "transparent"
-        opacity: 0.1
-        visible: root.index === root.appRoot.selectedCategoryIndex
-    }
-
     MouseArea {
         anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: containsMouse ? Qt.PointingHandCursor : Qt.ArrowCursor
+        hoverEnabled: false
         onClicked: {
             root.appRoot.categorySelectionExplicit = true
             root.appRoot.selectedCategoryIndex = root.index
@@ -37,10 +29,9 @@ Item {
         id: categoryLabel
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        text: String(root.modelData || "")
+        text: root.modelData
         font.bold: root.index === root.appRoot.selectedCategoryIndex
         opacity: root.index === root.appRoot.selectedCategoryIndex ? 1 : 0.75
-        color: Kirigami.Theme.textColor
     }
 
     Rectangle {
