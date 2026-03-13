@@ -140,10 +140,19 @@ Rectangle {
                 Layout.preferredWidth: 16
                 Layout.preferredHeight: 16
 
+                HoverHandler {
+                    id: flagHover
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                }
+
                 Kirigami.Icon {
                     anchors.fill: parent
                     source: "qrc:/qml/flag.svg"
-                    opacity: rowHover.hovered ? 0.85 : 0.0
+                    isMask: true
+                    opacity: rowHover.hovered ? 1.0 : 0.0
+                    color: flagHover.hovered
+                           ? Kirigami.Theme.textColor
+                           : Qt.darker(Kirigami.Theme.textColor, 1.25)
                 }
             }
         }
@@ -238,12 +247,18 @@ Rectangle {
                 Kirigami.Icon {
                     anchors.fill: parent
                     source: "qrc:/qml/trash.svg"
-                    opacity: rowHover.hovered ? 0.85 : 0.0
+                    isMask: true
+                    opacity: rowHover.hovered ? 1.0 : 0.0
+                    color: trashMouseArea.containsMouse
+                           ? Kirigami.Theme.textColor
+                           : Qt.darker(Kirigami.Theme.textColor, 1.25)
                 }
 
                 MouseArea {
+                    id: trashMouseArea
                     anchors.fill: parent
                     enabled: rowHover.hovered
+                    hoverEnabled: true
                     onClicked: function(mouse) {
                         mouse.accepted = true
                         if (appRoot)
