@@ -124,6 +124,12 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/CollapsedPaneRail.qml
         qml/components/MessageListPane.qml
         qml/components/MessageContentPane.qml
+        qml/components/Messages/MessageCard.qml
+        qml/components/Messages/MessageCardAvatar.qml
+        qml/components/Messages/MessageCardIndicators.qml
+        qml/components/Messages/MessageCardStatusColumn.qml
+        qml/components/Messages/MessageCategoryButton.qml
+        qml/components/Messages/MessageListHeader.qml
         qml/important.svg
 )
 
