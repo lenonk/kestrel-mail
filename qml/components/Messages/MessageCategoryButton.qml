@@ -8,9 +8,6 @@ Item {
     implicitWidth: categoryLabel.implicitWidth + 50
     implicitHeight: Math.round((categoryLabel.implicitHeight + 3) * 1.5)
 
-    Layout.preferredWidth: implicitWidth
-    Layout.preferredHeight: implicitHeight
-
     required property var appRoot
     required property var systemPalette
     required property int index
