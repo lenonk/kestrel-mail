@@ -139,12 +139,11 @@ Rectangle {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: 16
                 Layout.preferredHeight: 16
-                visible: rowHover.hovered
 
                 Kirigami.Icon {
                     anchors.fill: parent
                     source: "flag-symbolic"
-                    opacity: 0.85
+                    opacity: rowHover.hovered ? 0.85 : 0.0
                 }
             }
         }
@@ -235,16 +234,16 @@ Rectangle {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: 16
                 Layout.preferredHeight: 16
-                visible: rowHover.hovered
 
                 Kirigami.Icon {
                     anchors.fill: parent
                     source: "user-trash-symbolic"
-                    opacity: 0.85
+                    opacity: rowHover.hovered ? 0.85 : 0.0
                 }
 
                 MouseArea {
                     anchors.fill: parent
+                    enabled: rowHover.hovered
                     onClicked: function(mouse) {
                         mouse.accepted = true
                         if (appRoot)
