@@ -31,8 +31,8 @@ Rectangle {
                 delegate: MessageCategoryButton {
                     appRoot: root.appRoot
                     systemPalette: root.systemPalette
-                    categoryName: String((gMailCategoryRepeater.model && gMailCategoryRepeater.model[index] !== undefined) ? gMailCategoryRepeater.model[index] : "")
-                    categoryIndex: index
+                    categoryName: String((typeof modelData !== "undefined") ? modelData : "")
+                    categoryIndex: (typeof model !== "undefined" && typeof model.index !== "undefined") ? model.index : 0
                 }
             }
 
