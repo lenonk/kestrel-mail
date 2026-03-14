@@ -7,6 +7,8 @@ import QtCore
 import org.kde.kirigami as Kirigami
 
 import "components" as Components
+import "components/MessageList" as MessageList
+import "components/MessageContent" as MessageContent
 
 Kirigami.ApplicationWindow {
     id: root
@@ -1767,7 +1769,7 @@ Kirigami.ApplicationWindow {
                     }
                 }
             }
-            Components.MessageListPane {
+            MessageList.MessageListPane {
                 id: messageListPane
                 opacity: root.contentPaneHoverExpandActive ? 0 : 1
 
@@ -1781,7 +1783,7 @@ Kirigami.ApplicationWindow {
                 systemPalette: systemPalette
             }
 
-            Components.MessageContentPane {
+            MessageContent.MessageContentPane {
                 id: messageContentPane
                 QQC2.SplitView.minimumWidth: 420
                 QQC2.SplitView.preferredWidth: 520

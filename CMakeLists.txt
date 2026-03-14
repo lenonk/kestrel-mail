@@ -83,6 +83,7 @@ qt_add_executable(kestrel-mail
     src/core/accounts/accountsetupcontroller.cpp
     src/core/auth/filetokenvault.cpp
     src/core/auth/oauthservice.cpp
+    src/core/htmlprocessor.cpp
     src/core/store/datastore.cpp
     src/core/store/messagelistmodel.cpp
     src/core/transport/imap/imapservice.cpp
@@ -122,14 +123,14 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/InviteCard.qml
         qml/components/PaneIconStrip.qml
         qml/components/CollapsedPaneRail.qml
-        qml/components/MessageListPane.qml
-        qml/components/MessageContentPane.qml
-        qml/components/Messages/MessageCard.qml
-        qml/components/Messages/MessageCardAvatar.qml
-        qml/components/Messages/MessageCardIndicators.qml
-        qml/components/Messages/MessageCardStatusColumn.qml
-        qml/components/Messages/MessageCategoryButton.qml
-        qml/components/Messages/MessageListHeader.qml
+        qml/components/MessageList/MessageListPane.qml
+        qml/components/MessageList/MessageCard.qml
+        qml/components/MessageList/MessageCardAvatar.qml
+        qml/components/MessageList/MessageCardIndicators.qml
+        qml/components/MessageList/MessageCardStatusColumn.qml
+        qml/components/MessageList/MessageCategoryButton.qml
+        qml/components/MessageList/MessageListHeader.qml
+        qml/components/MessageContent/MessageContentPane.qml
         qml/important.svg
         qml/flag.svg
         qml/trash.svg

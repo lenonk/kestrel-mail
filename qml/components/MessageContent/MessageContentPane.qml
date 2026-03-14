@@ -3,6 +3,7 @@ import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import QtWebEngine
 import org.kde.kirigami as Kirigami
+import ".."
 
 Rectangle {
     id: root
@@ -130,28 +131,22 @@ Rectangle {
     readonly property string renderedHtml: {
         if (!root.hasUsableBodyHtml)
             return "";
-        const base = root.htmlForMessage();
 
-        let sanitized = root.sanitizeRenderHtml(base);
+        // Sync theme colors to C++ processor (reading these creates reactive deps).
+        htmlProcessor.darkBg      = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
+        htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
+        htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
+        htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
 
-        // Neutralize tracking pixels unless the user has explicitly allowed them.
-        // Reading root.trackingAllowed here makes this binding reactive to that property.
+        let html = htmlProcessor.sanitize(root.htmlForMessage());
+
         if (!root.trackingAllowed)
-            sanitized = root.neutralizeTrackingPixels(sanitized);
+            html = htmlProcessor.neutralizeTrackingPixels(html, root.senderDomain || "");
 
-        // Keep inline local images renderable while external images remain blocked.
         if (!root.imagesAllowed)
-            sanitized = root.neutralizeExternalImages(sanitized);
+            html = htmlProcessor.neutralizeExternalImages(html);
 
-        // Inject a white baseline background for unstyled emails. Emails with their
-        // own explicit backgrounds will still override this (no !important).
-        // Also lock color-scheme to light so WebEngine never auto-darkens content —
-        // darkenHtml handles dark mode entirely when forceDarkHtml is true.
-        const baselineHead = "<meta name='color-scheme' content='light only'><style data-kestrel-bg='baseline'>html,body{background-color:white;min-height:calc(100vh + 1px);}</style>";
-        if (sanitized.indexOf("<head>") >= 0)
-            sanitized = sanitized.replace("<head>", "<head>" + baselineHead);
-
-        return root.forceDarkHtml ? root.darkenHtml(sanitized) : sanitized;
+        return htmlProcessor.prepare(html, root.forceDarkHtml);
     }
     property string selectedAttachmentKey: ""
     readonly property string selectedMessageEdgeKey: {
@@ -260,6 +255,10 @@ Rectangle {
         const count = visibleThreadMessages.length;
         if (count <= 0)
             return;
+        // When the last card is expanded the user needs to scroll into its body,
+        // so don't clamp the scroll position.
+        if (_threadIsExpanded(count - 1))
+            return;
         const lastItem = threadCardsRepeater.itemAt(count - 1);
         if (!lastItem)
             // delegates not yet created = skip to avoid resetting scroll position
@@ -320,6 +319,9 @@ Rectangle {
         const count = visibleThreadMessages.length;
         if (count <= 0)
             return 0;
+        // When the last card is expanded allow scrolling to the natural content bottom.
+        if (_threadIsExpanded(count - 1))
+            return Math.max(0, threadScrollContent.implicitHeight - threadFlickable.height);
         const lastItem = threadCardsRepeater.itemAt(count - 1);
         if (!lastItem)
             return Math.max(0, threadScrollContent.implicitHeight - threadFlickable.height);
@@ -479,77 +481,8 @@ Rectangle {
         }
         return out;
     }
-    function darkenHtml(html) {
-        const darkBg = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
-        const surfaceBg = Kirigami.Theme.alternateBackgroundColor.toString();
-        const lightText = Kirigami.Theme.textColor.toString();
-        const borderColor = Kirigami.Theme.disabledTextColor.toString();
-
-        const style = "<style data-dark-mode='baseline'>" + "html, body { background-color:" + darkBg + " !important; color:" + lightText + " !important; }" + "* { color:" + lightText + " !important; }" + "[color] { color:" + lightText + " !important; }" + "td[style*='border'], div[style*='border'], table[style*='border'] { border-color:" + borderColor + " !important; }" + "hr { border-color:" + borderColor + " !important; }" + "img, svg, canvas, video, picture, iframe { filter:none !important; mix-blend-mode:normal !important; opacity:1 !important; }" + "</style>";
-
-        const script = "<script>(function(){" + "var DARK_BG='" + darkBg + "',SURFACE_BG='" + surfaceBg + "',LIGHT_TEXT='" + lightText + "',BORDER_COLOR='" + borderColor + "';" + "var MEDIA={IMG:1,SVG:1,CANVAS:1,VIDEO:1,PICTURE:1,IFRAME:1};" + "function parseRGB(c){if(!c)return null;var m=c.match(/rgba?\\(\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)/);return m?[+m[1],+m[2],+m[3]]:null;}" + "function lum(r,g,b){var a=[r/255,g/255,b/255];for(var i=0;i<3;i++){a[i]=a[i]<=0.03928?a[i]/12.92:Math.pow((a[i]+0.055)/1.055,2.4);}return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2];}" + "function isLight(c){var r=parseRGB(c);return r?lum(r[0],r[1],r[2])>0.35:false;}" + "function isTransparent(c){if(!c)return true;return c==='transparent'||/rgba?\\(.*,\\s*0\\)$/.test(c);}" +
-        // isSaturated: R/G/B spread > 20 means a real design color, not a neutral gray.
-        // Threshold at 20 (not 30) preserves subtle tints like avatar circle backgrounds
-        // (#CAD3E5, spread=27) as well as vivid accent colours (#4CD681, spread=138).
-        "function isSaturated(rgb){return Math.max(rgb[0],rgb[1],rgb[2])-Math.min(rgb[0],rgb[1],rgb[2])>20;}" +
-        // isImageShell: element contains only media — no real text at any depth.
-        // Uses \s+ which matches U+00A0 (&nbsp;), unlike String.trim().
-        "function isImageShell(el){if(!el.querySelector||!el.querySelector('img,svg,canvas,video,picture'))return false;return(el.textContent||'').replace(/\\s+/g,'').length===0;}" +
-        // isTextLink: <a> that contains no block-level elements is a genuine hyperlink
-        // (→ blue); an <a> that wraps a card/section of content is a layout wrapper
-        // (→ LIGHT_TEXT, so its children keep their own inline colors).
-        "function isTextLink(el){return !el.querySelector('div,table,p,h1,h2,h3,h4,h5,h6,section,article,header,footer');}" +
-        // effectiveBg: walk up the DOM to find the nearest non-transparent background.
-        // Elements are processed in document order, so parent backgrounds already reflect
-        // our darkening changes by the time any child is visited.
-        "function effectiveBg(el,doc){var cur=el;while(cur){var b=doc.defaultView.getComputedStyle(cur).backgroundColor;if(!isTransparent(b))return b;cur=cur.parentElement;}return DARK_BG;}" + "function processEl(el,doc){" + "if(MEDIA[el.tagName])return;" + "var cs=doc.defaultView.getComputedStyle(el);if(!cs)return;" + "var bg=cs.backgroundColor,fg=cs.color,hasBgImg=(cs.backgroundImage&&cs.backgroundImage!=='none')||el.hasAttribute('background');" +
-        // Background: leave elements with CSS background-image or saturated accent colors alone.
-        // Make pure image shells with neutral light bg transparent; darken neutral light bg otherwise.
-        "if(!isTransparent(bg)&&!hasBgImg){" + "var rgb=parseRGB(bg);" + "if(rgb&&lum(rgb[0],rgb[1],rgb[2])>0.7&&!isSaturated(rgb)){" + "if(isImageShell(el)){el.style.setProperty('background-color','transparent','important');}" + "else{var tgt=lum(rgb[0],rgb[1],rgb[2])>0.97?DARK_BG:SURFACE_BG;el.style.setProperty('background','none','important');el.style.setProperty('background-color',tgt,'important');}" + "}" + "}" +
-        // Text color: only intervene when the actual WCAG contrast ratio between
-        // the text and its effective background is below 3:1.  Text that is already
-        // readable (including intentional link blues, branded colours, etc.) is left
-        // completely untouched.  Text that is genuinely invisible on the dark surface
-        // (e.g. black on #2d2d2d) gets lifted to:
-        //   • LIGHT_TEXT — for block wrapper <a> tags and neutral-colored text
-        //   • #7ab4f5   — for genuine text hyperlinks and saturated-color inline text
-        //                 (e.g. <span style="color:#0076B6">See more</span>)
-        "var fgR=parseRGB(fg);if(fgR){var fgL=lum(fgR[0],fgR[1],fgR[2]);if(fgL<0.35){var eff=effectiveBg(el,doc);var effR=parseRGB(eff)||[30,30,30];var effL=lum(effR[0],effR[1],effR[2]);var lo=Math.min(fgL,effL),hi=Math.max(fgL,effL);if((hi+0.05)/(lo+0.05)<3){var target=LIGHT_TEXT;if(el.tagName==='A'){target=isTextLink(el)?'#7ab4f5':LIGHT_TEXT;}else if(Math.max(fgR[0],fgR[1],fgR[2])-Math.min(fgR[0],fgR[1],fgR[2])>150){target='#7ab4f5';}el.style.setProperty('color',target,'important');}}}" + "var bc=cs.borderColor;if(bc&&isLight(bc))el.style.setProperty('border-color',BORDER_COLOR,'important');" + "}" + "function run(){try{var d=document;if(!d||!d.body)return;var all=d.querySelectorAll('*');for(var i=0;i<all.length;i++)processEl(all[i],d);}catch(e){console.log('kestrel-dark-error',e);}}" + "if(document.readyState==='complete'||document.readyState==='interactive')run();else document.addEventListener('DOMContentLoaded',run,{once:true});" + "})();</script>";
-
-        const inject = style + script;
-        if (html.indexOf("<head>") >= 0) {
-            const out = html.replace("<head>", "<head>" + inject);
-            return out;
-        }
-        if (html.indexOf("<html") >= 0) {
-            const out = html.replace(/<html[^>]*>/i, function (m) {
-                return m + "<head>" + inject + "</head>";
-            });
-            return out;
-        }
-        const out = "<html><head>" + inject + "</head><body>" + html + "</body></html>";
-        return out;
-    }
     function decodeMailtoComponent(s) {
         return decodeURIComponent((s || "").replace(/\+/g, "%20"));
-    }
-    function decodeQuotedPrintableText(input) {
-        let s = (input || "").toString();
-        if (!s.length)
-            return s;
-
-        // Soft line breaks.
-        s = s.replace(/=\r?\n/g, "");
-
-        // Hex escapes (=3D, =0A, ...).
-        s = s.replace(/=([0-9A-Fa-f]{2})/g, function (_, hex) {
-            const code = parseInt(hex, 16);
-            if (isNaN(code))
-                return _;
-            return String.fromCharCode(code);
-        });
-
-        return s;
     }
     function escapeHtml(text) {
         return (text || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -611,19 +544,6 @@ Rectangle {
         return out;
     }
 
-    // If a URL contains a query param whose value is itself a full HTTP URL, return that value.
-    // No domain allowlist — any URL with redirect=https://... is a redirect and should be unwrapped.
-    function extractTrackingRedirectUrl(href) {
-        const m = /[?&](?:redirect|url|to|link|target|dest|goto)=(https?(?:%3A%2F%2F|:\/\/)[^&]*)/i.exec(href);
-        if (m) {
-            try {
-                return decodeURIComponent(m[1]);
-            } catch (e) {
-                return m[1];
-            }
-        }
-        return null;
-    }
     function fileUrlFromLocalPath(localPath) {
         let p = (localPath || "").toString();
         if (!p.length)
@@ -788,49 +708,6 @@ Rectangle {
         return urlSld === senderSld;
     }
 
-    // Replace external image sources with a transparent placeholder while preserving file://,
-    // data:, and cid: sources (so inline local images can still render).
-    function neutralizeExternalImages(html) {
-        const blank = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-        return html.replace(/<img\b[^>]*>/gi, function (tag) {
-            const srcM = tag.match(/\bsrc\s*=\s*(["'])([^"']+)\1/i);
-            if (!srcM)
-                return tag;
-            const src = srcM[2] || "";
-            if (/^(file:|data:|cid:)/i.test(src))
-                return tag;
-            if (!/^https?:/i.test(src))
-                return tag;
-            return tag.replace(/(\bsrc\s*=\s*)(["'])[^"']+\2/i, '$1"' + blank + '"');
-        });
-    }
-
-    // Replace the src of any 1×1 external third-party tracking pixel with a transparent data
-    // URI so the beacon never fires, even when autoLoadImages is true. Uses the same detection
-    // criteria as _trackerInfo (including first-party skip). The original src is preserved in
-    // data-tracking-src for later restore.
-    function neutralizeTrackingPixels(html) {
-        const blank = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-        const senderDom = root.senderDomain || "";
-        let count = 0;
-        const result = html.replace(/<img\b[^>]*>/gi, function (tag) {
-            if (!/\bsrc\s*=\s*["']https?:/i.test(tag))
-                return tag;
-            if (!/\bwidth\s*=\s*["']\s*1\s*["']/i.test(tag))
-                return tag;
-            if (!/\bheight\s*=\s*["']\s*1\s*["']/i.test(tag))
-                return tag;
-            const srcM = tag.match(/\bsrc\s*=\s*["']([^"']+)/i);
-            const src = srcM ? srcM[1] : "(unknown)";
-            if (isFirstPartyUrl(src, senderDom)) {
-                return tag;
-            }
-            const vendor = root.trackerVendor || "unknown";
-            return tag.replace(/(\bsrc\s*=\s*(["']))([^"']+)\2/i, '$1' + blank + '$2');
-        });
-        if (count === 0)
-            return result;
-    }
     function normalizedEdgeKey(account, folder, uid) {
         const a = (account || "").toString().toLowerCase();
         const f = (folder || "").toString().toLowerCase();
@@ -911,153 +788,12 @@ Rectangle {
     function renderedHtmlForThread(bodyHtml, darkMode) {
         if (!bodyHtml || !bodyHtml.length)
             return "";
-        let html = bodyHtml;
-        // Collapse blockquotes behind a native <details> toggle (no JS needed)
-        const quoteCss = '<style>details.kq{margin:4px 0}details.kq>summary{cursor:pointer;list-style:none;display:inline-block;background:rgba(128,128,128,0.15);border-radius:3px;padding:1px 8px;font-size:11px;opacity:.7;outline:none}details.kq>summary::-webkit-details-marker{display:none}details.kq>summary::before{content:"···"}</style>';
-        const baselineHead = "<meta name='color-scheme' content='light only'><style data-kestrel-bg='baseline'>html,body{background-color:white;margin:8px 12px 0 12px;}</style>";
-        const headInsert = baselineHead + quoteCss;
-        if (html.indexOf("<head>") >= 0)
-            html = html.replace("<head>", "<head>" + headInsert);
-        else
-            html = headInsert + html;
-        // Collapse all quoted block content behind a single native <details> toggle.
-        const quoteBlocks = [];
-        let insertedMarker = false;
-        html = html.replace(/<blockquote\b[\s\S]*?<\/blockquote>/gi, function (m) {
-            quoteBlocks.push(m);
-            if (!insertedMarker) {
-                insertedMarker = true;
-                return "__KQ_SINGLE_QUOTE_BLOCK__";
-            }
-            return "";
-        });
-        if (quoteBlocks.length > 0) {
-            const merged = '<details class="kq"><summary></summary><div class="kq-wrap">' + quoteBlocks.join("") + '</div></details>';
-            html = html.replace("__KQ_SINGLE_QUOTE_BLOCK__", merged);
-        }
-        return darkMode ? darkenHtml(html) : html;
-    }
-    function sanitizeRenderHtml(rawHtml) {
-        let html = (rawHtml || "").toString();
-        if (!html.length)
-            return "<html><body></body></html>";
-
-        html = html.replace(/\r\n/g, "\n");
-
-        // Remove binary/control garbage that can break WebEngine parsing.
-        html = html.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
-
-        // Strip external scripts: prevents blocking DOMContentLoaded (e.g. tracking/analytics
-        // scripts that time out) and is correct security hygiene for email HTML.
-        html = html.replace(/<script\b[^>]*\bsrc\s*=[^>]*>[\s\S]*?<\/script>/gi, "");
-
-        // Strip external stylesheet links (especially web fonts) to avoid render stalls
-        // waiting on third-party CSS/font hosts.
-        html = html.replace(/<link\b[^>]*\brel\s*=\s*["']?stylesheet["']?[^>]*>/gi, "");
-
-        // Rewrite known tracking redirect links to their real destination URLs.
-        html = sanitizeTrackingLinks(html);
-
-        // Some senders hand us text/plain bodies wrapped as HTML with markdown links
-        // like [label](https://...). Convert those into real anchors for rendering.
-        html = html.replace(/\[([^\]\n]{1,240})\]\((https?:\/\/[^\s)]+)\)/gi, function (_, label, url) {
-            return '<a href="' + url + '">' + label + '</a>';
-        });
-
-        // If we already have a full HTML document, avoid destructive rewrites.
-        const trimmed = html.trim();
-        if (/<html\b/i.test(trimmed) && /<\/html>\s*$/i.test(trimmed)) {
-            return trimmed;
-        }
-
-        // If we got MIME-ish payload, cut to content after first header break.
-        const mimeHeaderLike = /^(mime-version:|content-type:|content-transfer-encoding:|x-[a-z0-9-]+:)/im.test(html);
-        if (mimeHeaderLike) {
-            const splitAt = html.search(/\n\n/);
-            if (splitAt >= 0 && splitAt < html.length - 2) {
-                html = html.slice(splitAt + 2);
-            }
-        }
-
-        // Drop obvious IMAP protocol lines that occasionally leak into payload.
-        html = html.split("\n").filter(function (line) {
-            const t = line.trim();
-            if (!t.length)
-                return true;
-            if (/^\*\s+\d+\s+fetch\s*\(/i.test(t))
-                return false;
-            if (/^[a-z]\d+\s+(ok|no|bad)\b/i.test(t))
-                return false;
-            if (/^body\[header\.fields/i.test(t))
-                return false;
-            return true;
-        }).join("\n");
-
-        // Decode quoted-printable artifacts when present.
-        if (/=\r?\n|=[0-9A-Fa-f]{2}/.test(html)) {
-            html = decodeQuotedPrintableText(html);
-        }
-
-        // Strip MIME preamble lines that sometimes leak into body content.
-        const lines = html.split("\n");
-        const kept = [];
-        let stripping = true;
-        for (let i = 0; i < lines.length; ++i) {
-            const t = lines[i].trim();
-            const headerLike = /^content-|^mime-version:|^x-/i.test(t);
-            const boundaryLike = /^--[_=A-Za-z0-9.:-]+$/.test(t);
-            if (stripping && (headerLike || boundaryLike || t === "")) {
-                if (t === "" && i > 0)
-                    stripping = false;
-                continue;
-            }
-            stripping = false;
-            kept.push(lines[i]);
-        }
-        html = kept.join("\n").trim();
-
-        // Ensure we always hand WebEngine a full document.
-        const hasHtmlTag = /<html\b/i.test(html);
-        const hasBodyTag = /<body\b/i.test(html);
-        const hasHtmlish = /<html|<body|<div|<table|<p|<br|<span|<img|<a\b/i.test(html);
-
-        if (!hasHtmlish) {
-            const escaped = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            return "<!doctype html><html><head><meta charset='utf-8'></head><body><pre style='white-space:pre-wrap;font-family:sans-serif;'>" + escaped + "</pre></body></html>";
-        }
-
-        if (hasHtmlTag) {
-            if (!/<head\b/i.test(html)) {
-                html = html.replace(/<html[^>]*>/i, function (m) {
-                    return m + "<head><meta charset='utf-8'></head>";
-                });
-            } else if (!/<meta\s+charset=/i.test(html)) {
-                html = html.replace(/<head[^>]*>/i, function (m) {
-                    return m + "<meta charset='utf-8'>";
-                });
-            }
-            if (!hasBodyTag) {
-                html = html.replace(/<\/html>\s*$/i, "<body></body></html>");
-            }
-            return html;
-        }
-
-        if (hasBodyTag) {
-            return "<!doctype html><html><head><meta charset='utf-8'></head>" + html + "</html>";
-        }
-
-        return "<!doctype html><html><head><meta charset='utf-8'></head><body>" + html + "</body></html>";
-    }
-
-    // Replace known tracking redirect hrefs with their final destination URLs.
-    function sanitizeTrackingLinks(html) {
-        return html.replace(/(<a\b[^>]*\bhref\s*=\s*)(["'])(https?:\/\/[^"']{20,})\2/gi, function (match, pre, quote, href) {
-            const dest = extractTrackingRedirectUrl(href);
-            if (dest) {
-                return pre + quote + dest + quote;
-            }
-            return match;
-        });
+        htmlProcessor.darkBg      = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
+        htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
+        htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
+        htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
+        const collapsed = htmlProcessor.collapseBlockquotes(bodyHtml);
+        return htmlProcessor.prepareThread(collapsed, darkMode);
     }
     function setCurrentTags(tags) {
         const key = appRoot.selectedMessageKey || "";

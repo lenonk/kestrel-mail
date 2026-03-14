@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
+#include "core/htmlprocessor.h"
 #include "core/accounts/accountrepository.h"
 #include "core/accounts/accountsetupcontroller.h"
 #include "core/accounts/providerprofileservice.h"
@@ -67,6 +68,7 @@ int main(int argc, char *argv[])
     dataStore.init();
     MessageListModel messageListModel(&engine);
     messageListModel.setDataStore(&dataStore);
+    HtmlProcessor htmlProcessor(&engine);
     ImapService imapService(&accountRepository, &dataStore, &tokenVault, &engine);
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &imapService, &ImapService::shutdown);
 
@@ -75,6 +77,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("accountRepository", &accountRepository);
     engine.rootContext()->setContextProperty("dataStore", &dataStore);
     engine.rootContext()->setContextProperty("messageListModel", &messageListModel);
+    engine.rootContext()->setContextProperty("htmlProcessor", &htmlProcessor);
     engine.rootContext()->setContextProperty("imapService", &imapService);
 #if defined(NDEBUG)
     engine.rootContext()->setContextProperty("kestrelDebugBuild", false);
