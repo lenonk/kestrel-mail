@@ -485,7 +485,7 @@ Rectangle {
         const lightText = Kirigami.Theme.textColor.toString();
         const borderColor = Kirigami.Theme.disabledTextColor.toString();
 
-        const style = "<style data-dark-mode='baseline'>" + "html, body { background-color:" + darkBg + " !important; color:" + lightText + " !important; }" + "[color] { color:" + lightText + " !important; }" + "td[style*='border'], div[style*='border'], table[style*='border'] { border-color:" + borderColor + " !important; }" + "hr { border-color:" + borderColor + " !important; }" + "img, svg, canvas, video, picture, iframe { filter:none !important; mix-blend-mode:normal !important; opacity:1 !important; }" + "</style>";
+        const style = "<style data-dark-mode='baseline'>" + "html, body { background-color:" + darkBg + " !important; color:" + lightText + " !important; }" + "* { color:" + lightText + " !important; }" + "[color] { color:" + lightText + " !important; }" + "td[style*='border'], div[style*='border'], table[style*='border'] { border-color:" + borderColor + " !important; }" + "hr { border-color:" + borderColor + " !important; }" + "img, svg, canvas, video, picture, iframe { filter:none !important; mix-blend-mode:normal !important; opacity:1 !important; }" + "</style>";
 
         const script = "<script>(function(){" + "var DARK_BG='" + darkBg + "',SURFACE_BG='" + surfaceBg + "',LIGHT_TEXT='" + lightText + "',BORDER_COLOR='" + borderColor + "';" + "var MEDIA={IMG:1,SVG:1,CANVAS:1,VIDEO:1,PICTURE:1,IFRAME:1};" + "function parseRGB(c){if(!c)return null;var m=c.match(/rgba?\\(\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)/);return m?[+m[1],+m[2],+m[3]]:null;}" + "function lum(r,g,b){var a=[r/255,g/255,b/255];for(var i=0;i<3;i++){a[i]=a[i]<=0.03928?a[i]/12.92:Math.pow((a[i]+0.055)/1.055,2.4);}return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2];}" + "function isLight(c){var r=parseRGB(c);return r?lum(r[0],r[1],r[2])>0.35:false;}" + "function isTransparent(c){if(!c)return true;return c==='transparent'||/rgba?\\(.*,\\s*0\\)$/.test(c);}" +
         // isSaturated: R/G/B spread > 20 means a real design color, not a neutral gray.
@@ -1964,50 +1964,48 @@ Rectangle {
         Item {
             id: threadFlickableWa
 
-            Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.fillWidth: true
             Layout.rightMargin: -20
             visible: root.isThreadView
 
             Flickable {
                 id: threadFlickable
 
+                QQC2.ScrollBar.vertical: threadVScroll
                 anchors.fill: parent
                 anchors.rightMargin: threadVScroll.width + Kirigami.Units.largeSpacing * 2
-                clip: true
-                contentWidth: width
-                contentHeight: Math.max(height + 1, threadScrollContent.implicitHeight)
                 boundsBehavior: Flickable.StopAtBounds
-
-                QQC2.ScrollBar.vertical: threadVScroll
+                clip: true
+                contentHeight: Math.max(height + 1, threadScrollContent.implicitHeight)
+                contentWidth: width
 
                 onContentYChanged: {
                     if (contentY <= 24 && root.threadHiddenCount > 0 && !root.threadLoadingOlder)
-                        root._threadLoadOlder(6)
+                        root._threadLoadOlder(6);
                     if (!root.threadLoadingOlder)
-                        root._threadClampScrollToLastCardTop()
-                    root.threadScrollEpoch++
+                        root._threadClampScrollToLastCardTop();
+                    root.threadScrollEpoch++;
                 }
-
                 onHeightChanged: root._threadClampScrollToLastCardTop()
                 onMovementEnded: root._threadClampScrollToLastCardTop()
 
                 WheelHandler {
                     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                     grabPermissions: PointerHandler.CanTakeOverFromAnything
-                    onWheel: function(ev) {
-                       const delta = ev.angleDelta ? ev.angleDelta.y : 0
+
+                    onWheel: function (ev) {
+                        const delta = ev.angleDelta ? ev.angleDelta.y : 0;
                         if (!delta)
-                            return
-                        const next = threadFlickable.contentY - (delta / 2)
+                            return;
+                        const next = threadFlickable.contentY - (delta / 2);
                         // Scrolling up past contentY=0 with hidden older messages: load them
                         if (next < 0 && root.threadHiddenCount > 0 && !root.threadLoadingOlder)
-                            root._threadLoadOlder(6)
-                        threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()))
-                        ev.accepted = true
+                            root._threadLoadOlder(6);
+                        threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()));
+                        ev.accepted = true;
                     }
                 }
-
                 Column {
                     id: threadScrollContent
 
@@ -2314,16 +2312,16 @@ Rectangle {
                     }
                 }
             }
-
             QQC2.ScrollBar {
                 id: threadVScroll
-                policy: QQC2.ScrollBar.AsNeeded
-                anchors.right: parent.right
-                anchors.top: parent.top
+
                 anchors.bottom: parent.bottom
+                anchors.right: parent.right
                 anchors.rightMargin: 5
-                width: 5
+                anchors.top: parent.top
+                policy: QQC2.ScrollBar.AsNeeded
                 visible: false
+                width: 5
             }
         }
 

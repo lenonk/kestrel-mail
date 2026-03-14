@@ -950,11 +950,21 @@ ImapService::stopIdleWatcher(const bool waitForStop) const {
     if (!m_idleWatcher || !m_idleThread)
         return;
 
-    QMetaObject::invokeMethod(m_idleWatcher, "stop", Qt::QueuedConnection);
+    // Call stop() directly — it only stores to an atomic_bool so it is safe
+    // to call from any thread.  A QueuedConnection would never be delivered
+    // because start() runs a tight blocking loop that never yields to the
+    // thread's event loop.
+    m_idleWatcher->stop();
     m_idleThread->quit();
 
-    if (waitForStop)
-        m_idleThread->wait();
+    if (waitForStop) {
+        // Pump the main-thread event loop in short bursts while waiting.
+        // This prevents a deadlock if the idle thread is currently blocked
+        // on a BlockingQueuedConnection signal waiting for the main thread
+        // to respond.
+        while (!m_idleThread->wait(100))
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+    }
 }
 
 void
@@ -1047,11 +1057,14 @@ ImapService::stopBackgroundWorker(const bool waitForStop) const {
     if (!m_backgroundWorker || !m_backgroundThread)
         return;
 
-    QMetaObject::invokeMethod(m_backgroundWorker, "stop", Qt::QueuedConnection);
+    // Same reasoning as stopIdleWatcher: call stop() directly on the atomic.
+    m_backgroundWorker->stop();
     m_backgroundThread->quit();
 
-    if (waitForStop)
-        m_backgroundThread->wait();
+    if (waitForStop) {
+        while (!m_backgroundThread->wait(100))
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+    }
 }
 
 QVariantList
