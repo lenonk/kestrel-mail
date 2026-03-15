@@ -557,6 +557,7 @@ Item {
 
                             property real attachFlowH: (isExpanded && cardAttachFlow._items.length > 0) ? (cardAttachFlow.implicitHeight + 8) : 0
                             property real bodyHeight: 24
+                            readonly property real collapsedHeight: cardHeaderRow.implicitHeight + 32
                             readonly property string cardBodyHtml: root._threadBodyTextForCard(index)
                             required property int index
                             readonly property bool isExpanded: root._threadIsExpanded(index)
@@ -566,7 +567,7 @@ Item {
                             border.width: 1
                             color: isExpanded ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35) : Kirigami.Theme.backgroundColor
                             height: implicitHeight
-                            implicitHeight: cardHeaderRow.implicitHeight + 32 + (isExpanded ? attachFlowH + bodyHeight + 12 : 0)
+                            implicitHeight: collapsedHeight + (isExpanded ? attachFlowH + bodyHeight + 12 : 0)
                             radius: 8
                             width: threadScrollContent.width
 
@@ -593,14 +594,15 @@ Item {
                                 spacing: 10
                                 width: parent.width - 20
                                 x: 10
-                                y: threadCard.isExpanded ? 8 : Math.max(8, Math.round((threadCard.height - implicitHeight) / 2))
+                                y: (threadCard.collapsedHeight - cardAvatar.implicitHeight) / 2
 
                                 Item {
                                     Layout.alignment: Qt.AlignTop
-                                    Layout.preferredHeight: 40
-                                    Layout.preferredWidth: 40
+                                    Layout.preferredHeight: cardAvatar.implicitHeight
+                                    Layout.preferredWidth: cardAvatar.implicitWidth
 
                                     AvatarBadge {
+                                        id: cardAvatar
                                         anchors.fill: parent
                                         avatarSources: root._threadAvatarSources(threadCard.modelData)
                                         displayName: root._threadSenderName(threadCard.modelData)
@@ -611,7 +613,7 @@ Item {
 
                                 ColumnLayout {
                                     Layout.alignment: Qt.AlignTop
-                                    Layout.fillWidth: true
+                                    Layout.fillWidth: false
                                     spacing: 2
 
                                     QQC2.Label {
@@ -697,9 +699,13 @@ Item {
                                     }
                                 }
 
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
                                 // Date + action buttons
                                 ColumnLayout {
-                                    Layout.alignment: Qt.AlignTop
+                                    Layout.alignment: Qt.AlignTop | Qt.AlignRight
                                     Layout.fillWidth: false
                                     spacing: 4
 
@@ -711,6 +717,7 @@ Item {
                                         text: root._threadDate(threadCard.modelData)
                                     }
                                     RowLayout {
+                                        Layout.alignment: Qt.AlignTop | Qt.AlignRight
                                         spacing: 4
 
                                         MailActionButton {

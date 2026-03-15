@@ -109,7 +109,7 @@ Item {
             ctx.lineTo(ax + root.arrowWidth, root.arrowHeight);
             ctx.closePath();
             ctx.lineWidth = 1;
-            ctx.strokeStyle = cssColor(Qt.lighter(Kirigami.Theme.backgroundColor, 1.35));
+            ctx.strokeStyle = cssColor(Qt.darker(Kirigami.Theme.disabledTextColor, 2));
             ctx.stroke();
         }
     }
