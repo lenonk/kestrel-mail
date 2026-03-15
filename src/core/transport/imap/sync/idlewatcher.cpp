@@ -123,53 +123,77 @@ IdleWatcher::start() {
     QString lastAccessToken;
     QString lastEmail;
 
+    // Persistent connection reused across IDLE cycles — avoids a full
+    // TCP+TLS handshake + AUTHENTICATE on every 5-minute timeout.
+    std::shared_ptr<Connection> cxn;
+    bool inboxSelected = false;
+
     while (m_running) {
         QVariantList accounts;
         emit requestAccounts(&accounts);
 
         const auto [accountOk, accountErr, target] = SyncUtils::selectOAuthAccount(accounts);
         if (!accountOk) {
+            cxn.reset();
+            inboxSelected = false;
             SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                      m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
                                      consecutiveFailures, accountErr, 10);
             continue;
         }
 
-        QString accessToken;
-        emit requestRefreshAccessToken(target.account, target.email, &accessToken);
-        if (accessToken.isEmpty()) {
-            if (lastEmail.compare(target.email, Qt::CaseInsensitive) == 0 && !lastAccessToken.isEmpty()) {
-                accessToken = lastAccessToken;
-            } else {
+        const bool accountChanged = lastEmail.compare(target.email, Qt::CaseInsensitive) != 0;
+
+        // Reconnect only when there is no live connection or the account switched.
+        if (!cxn || !cxn->isConnected() || accountChanged) {
+            cxn.reset();
+            inboxSelected = false;
+
+            QString accessToken;
+            emit requestRefreshAccessToken(target.account, target.email, &accessToken);
+            if (accessToken.isEmpty()) {
+                if (!accountChanged && !lastAccessToken.isEmpty()) {
+                    accessToken = lastAccessToken;
+                } else {
+                    SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
+                                             m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
+                                             consecutiveFailures, "Realtime sync: auth refresh failed; retrying."_L1, 15);
+                    continue;
+                }
+            }
+
+            auto newCxn = std::make_shared<Connection>();
+            const auto connectResult = newCxn->connectAndAuth(target.host, target.port, target.email, accessToken);
+            if (!connectResult.success) {
+                if (!accountChanged && accessToken == lastAccessToken)
+                    lastAccessToken.clear();
                 SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                          m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                         consecutiveFailures, "Realtime sync: auth refresh failed; retrying."_L1, 15);
+                                         consecutiveFailures, connectResult.message, 10);
                 continue;
             }
+
+            cxn = std::move(newCxn);
+            lastEmail = target.email;
+            lastAccessToken = accessToken;
         }
 
-        auto cxn = std::make_shared<Connection>();
-        const auto connectResult = cxn->connectAndAuth(target.host, target.port, target.email, accessToken);
-        if (!connectResult.success) {
-            if (lastEmail.compare(target.email, Qt::CaseInsensitive) == 0 && accessToken == lastAccessToken)
-                lastAccessToken.clear();
-            SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
-                                     m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                     consecutiveFailures, connectResult.message, 10);
-            continue;
-        }
-
-        lastEmail = target.email;
-        lastAccessToken = accessToken;
-
-        if (const auto [ok, resp] = cxn->select("INBOX"_L1); !ok) {
-            SyncUtils::handleFailure([this](bool ok2, const QString &msg) { emit realtimeStatus(ok2, msg); },
-                                     m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                     consecutiveFailures, resp, 10);
-            continue;
+        // SELECT is only needed after a (re)connect or if we lost the selected state.
+        if (!inboxSelected) {
+            if (const auto [ok, resp] = cxn->select("INBOX"_L1); !ok) {
+                cxn.reset();
+                SyncUtils::handleFailure([this](bool ok2, const QString &msg) { emit realtimeStatus(ok2, msg); },
+                                         m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
+                                         consecutiveFailures, resp, 10);
+                continue;
+            }
+            inboxSelected = true;
         }
 
         if (const auto [ok, resp] = cxn->enterIdle(); !ok) {
+            // Drop the connection — it may be half-open or stale.
+            cxn.reset();
+            inboxSelected = false;
             SyncUtils::handleFailure([this](bool ok2, const QString &msg) { emit realtimeStatus(ok2, msg); },
                                      m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
                                      consecutiveFailures, resp, 3);
@@ -187,11 +211,16 @@ IdleWatcher::start() {
         const auto [mailboxChanged, existsSignals, recentSignals, expungeSignals] = waitForIdleSignals(*cxn, m_running);
 
         if (const auto [doneOk, doneResp] = cxn->exitIdle(); !doneOk) {
+            cxn.reset();
+            inboxSelected = false;
             SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                      m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
                                      consecutiveFailures, doneResp, 3);
             continue;
         }
+
+        // After a clean IDLE exit the connection remains in the selected state —
+        // no re-SELECT needed on the next iteration.
 
         if (!mailboxChanged) {
             QThread::sleep(1);

@@ -9,6 +9,9 @@ constexpr int kTlsTimeoutMs = 6000;
 constexpr int kReadTimeoutMs = 3000;
 constexpr int kTaggedReadTimeoutMs = 7000;
 constexpr int kFetchReadTimeoutMs = 12000;
+// IDLE-specific: server may take a moment to acknowledge the IDLE command,
+// especially under load. Use a more generous timeout than kReadTimeoutMs.
+constexpr int kIdleContinuationTimeoutMs = 10000;
 
 /**
  * Read from socket until a tagged response (tag + OK/NO/BAD) is received.

@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtWebEngine
 import org.kde.kirigami as Kirigami
 import ".."
+import "../Attachments"
 
 Rectangle {
     id: root
@@ -69,7 +70,6 @@ Rectangle {
     property var attachmentItems: []
     property var attachmentLocalPaths: ({})
     property var attachmentProgress: ({})
-    property var cardDarkModes: ({})      // index → bool, overrides global dark mode per card
 
     readonly property string folderName: i18n("Inbox")
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
@@ -92,7 +92,6 @@ Rectangle {
         return /<html|<body|<div|<table|<p|<br|<span|<img|<a\b/i.test(html);
     }
     property bool imagesAllowed: false
-    readonly property bool immersiveBodyMode: !!(appRoot && appRoot.contentPaneHoverExpandActive)
     readonly property bool isThreadView: threadMessages.length > 1
     // Reads directly from messageData.sender so it updates atomically with the message,
     // avoiding the senderDomain → senderEmail → senderText binding chain lag.
@@ -178,43 +177,24 @@ Rectangle {
     readonly property string senderEmail: appRoot.senderEmail(senderText)
     readonly property string senderName: appRoot.displaySenderName(senderText, messageData && messageData.accountEmail ? messageData.accountEmail : "")
     readonly property string senderText: messageData && messageData.sender ? messageData.sender : i18n("Unknown sender")
-    property bool showHeaderMeta: true
     required property var systemPalette
     property var tagMap: ({})
     readonly property int threadCount: (messageData && messageData.threadCount) ? messageData.threadCount : 0
-    // null = default state (last card auto-expanded); otherwise an object used as a Set
-    property var threadExpandedSet: null
-    readonly property int threadHiddenCount: Math.max(0, threadMessages.length - visibleThreadMessages.length)
-
     // ── Thread / conversation view ───────────────────────────────────────────
     readonly property string threadId: (messageData && messageData.threadId) ? messageData.threadId.toString() : ""
-    property bool threadLoadingOlder: false
     readonly property var threadMessages: {
         if (!threadId.length || threadCount < 2 || !appRoot || !appRoot.dataStoreObj)
             return [];
         // Reading .inbox creates a dependency on inboxChanged, so the thread
         // re-queries whenever any body is hydrated or messages are updated.
         void appRoot.dataStoreObj.inbox;
+        // Also depend on _bodyUpdateVersion so thread members re-appear when their
+        // bodies are hydrated (bodyHtmlUpdated fires without an inbox reload).
+        void appRoot._bodyUpdateVersion;
         return appRoot.dataStoreObj.messagesForThread(messageData.accountEmail, threadId);
     }
-    readonly property int threadOffTopCount: threadHiddenCount + threadScrolledOffTopCount
-    property int threadScrollEpoch: 0
-    readonly property int threadScrolledOffTopCount: {
-        void threadScrollEpoch;
-        return _threadScrolledOffTopCount();
-    }
-    property bool threadShowAll: false
-    property int threadVisibleCount: 5
     readonly property string trackerVendor: root._trackerInfo.vendor
     property bool trackingAllowed: false
-    readonly property var visibleThreadMessages: {
-        const msgs = threadMessages;
-        if (threadShowAll || msgs.length <= threadVisibleCount)
-            return msgs;
-        return msgs.slice(msgs.length - threadVisibleCount);
-    }
-
-    // ── End thread helpers ───────────────────────────────────────────────────
 
     function _fileNameFromUrl(url) {
         const raw = (url || "").toString();
@@ -224,230 +204,6 @@ Rectangle {
         const parts = noQuery.split("/");
         const last = parts.length ? parts[parts.length - 1] : "";
         return last.length ? decodeURIComponent(last) : i18n("Attachment");
-    }
-    function _threadAvatarSources(msg) {
-        if (!msg || !msg.sender)
-            return [];
-        return appRoot.senderAvatarSources(msg.sender, msg.avatarDomain || "", msg.avatarUrl || "", msg.accountEmail || "");
-    }
-    function _threadBodyKey(msg) {
-        if (!msg)
-            return "";
-        return (msg.accountEmail || "") + "|" + (msg.folder || "") + "|" + (msg.uid || "") + "|thread";
-    }
-    function _threadBodyTextForCard(index) {
-        void cardDarkModes;  // reactive dependency: re-evaluate when dark mode changes
-        const msgs = visibleThreadMessages;
-        if (index < 0 || index >= msgs.length)
-            return "";
-        const msg = msgs[index];
-        if (!msg.bodyHtml)
-            return "";
-        return renderedHtmlForThread(msg.bodyHtml.toString(), _threadCardDarkMode(index));
-    }
-    function _threadCardDarkMode(index) {
-        return cardDarkModes[index] !== undefined ? cardDarkModes[index] : forceDarkHtml;
-    }
-    function _threadCardHeight(index) {
-        return _threadIsExpanded(index) ? threadExpandedBodyHeight(index) : 72;
-    }
-    function _threadClampScrollToLastCardTop() {
-        const count = visibleThreadMessages.length;
-        if (count <= 0)
-            return;
-        // When the last card is expanded the user needs to scroll into its body,
-        // so don't clamp the scroll position.
-        if (_threadIsExpanded(count - 1))
-            return;
-        const lastItem = threadCardsRepeater.itemAt(count - 1);
-        if (!lastItem)
-            // delegates not yet created = skip to avoid resetting scroll position
-            return;
-        const maxY = Math.max(0, lastItem.mapToItem(threadScrollContent, 0, 0).y);
-        if (threadFlickable.contentY > maxY)
-            threadFlickable.contentY = maxY;
-    }
-    function _threadDate(msg) {
-        if (!msg)
-            return "";
-        return appRoot.formatContentDate(msg.receivedAt || "");
-    }
-    function _threadHasBody(msg) {
-        if (!msg || !msg.bodyHtml)
-            return false;
-        const h = msg.bodyHtml.toString();
-        return h.length > 0 && /<html|<body|<div|<table|<p|<br|<span|<img|<a\b/i.test(h);
-    }
-    function _threadHydrateIfNeeded(msg) {
-        if (!msg || !appRoot || !appRoot.imapServiceObj)
-            return;
-        if (_threadHasBody(msg))
-            return;
-        appRoot.imapServiceObj.hydrateMessageBody(msg.accountEmail, msg.folder, msg.uid);
-    }
-    function _threadIsExpanded(index) {
-        if (threadExpandedSet === null)
-            return index === visibleThreadMessages.length - 1;
-        return !!threadExpandedSet[index];
-    }
-    function _threadLoadOlder(step) {
-        const inc = Math.max(1, step || 5);
-        if (threadLoadingOlder || threadHiddenCount <= 0)
-            return;
-        const oldHeight = threadScrollContent.implicitHeight;
-        const oldY = threadFlickable.contentY;
-
-        threadLoadingOlder = true;
-        threadVisibleCount = Math.min(threadMessages.length, threadVisibleCount + inc);
-
-        Qt.callLater(function () {
-            const delta = Math.max(0, threadScrollContent.implicitHeight - oldHeight);
-            threadFlickable.contentY = oldY + delta;
-            threadLoadingOlder = false;
-            _threadClampScrollToLastCardTop();
-        });
-    }
-    function _threadMarkAllRead() {
-        const msgs = threadMessages;
-        for (let i = 0; i < msgs.length; i++) {
-            const m = msgs[i];
-            if (m.unread && appRoot.imapServiceObj)
-                appRoot.imapServiceObj.markMessageRead(m.accountEmail, m.folder, m.uid);
-        }
-    }
-    function _threadMaxContentY() {
-        const count = visibleThreadMessages.length;
-        if (count <= 0)
-            return 0;
-        // When the last card is expanded allow scrolling to the natural content bottom.
-        if (_threadIsExpanded(count - 1))
-            return Math.max(0, threadScrollContent.implicitHeight - threadFlickable.height);
-        const lastItem = threadCardsRepeater.itemAt(count - 1);
-        if (!lastItem)
-            return Math.max(0, threadScrollContent.implicitHeight - threadFlickable.height);
-        const yPos = lastItem.mapToItem(threadScrollContent, 0, 0).y;
-        return Math.max(0, yPos);
-    }
-    function _threadMessageKey(msg) {
-        if (!msg)
-            return "";
-        return normalizedEdgeKey(msg.accountEmail, msg.folder, msg.uid);
-    }
-    function _threadOnCardExpanded(index) {
-        const msgs = visibleThreadMessages;
-        if (index < 0 || index >= msgs.length)
-            return;
-        _threadHydrateIfNeeded(msgs[index]);
-    }
-    function _threadOnSelectedChanged() {
-        threadShowAll = false;
-        threadVisibleCount = 5;
-        threadLoadingOlder = false;
-        threadScrollEpoch = 0;
-        threadExpandedSet = null;
-        cardDarkModes = ({});
-    }
-    function _threadOpenExternal(msg) {
-        if (!msg)
-            return;
-        Qt.openUrlExternally("mailto:" + (msg.sender || ""));
-    }
-    function _threadParticipantsSummary() {
-        const msgs = threadMessages;
-        const me = messageData ? (messageData.accountEmail || "").toLowerCase() : "";
-        const names = [];
-        const seen = new Set();
-        for (let i = 0; i < msgs.length; i++) {
-            const name = _threadSenderName(msgs[i]);
-            if (!name.length)
-                continue;
-            const key = name.toLowerCase();
-            if (seen.has(key))
-                continue;
-            seen.add(key);
-            const senderEmail = appRoot.senderEmail(msgs[i].sender || "");
-            names.push(senderEmail.toLowerCase() === me ? i18n("me") : name);
-        }
-        return names.join(", ");
-    }
-    function _threadRecipientName(msg) {
-        if (!msg || !msg.recipient)
-            return "";
-        return appRoot.displayRecipientNames(msg.recipient, msg.accountEmail || "");
-    }
-    function _threadRenderedHtml(msg, darkMode) {
-        if (!msg || !msg.bodyHtml)
-            return "";
-        return renderedHtmlForThread(msg.bodyHtml.toString(), darkMode);
-    }
-    function _threadReply(msg) {
-        if (!msg)
-            return;
-        appRoot.selectedMessageKey = "msg:" + _threadMessageKey(msg);
-        // small delay to let selectedMessageData settle
-        appRoot.openComposerTo(msg.replyTo || msg.sender, "reply");
-    }
-    function _threadScrollToCard(index) {
-        const item = threadCardsRepeater.itemAt(index);
-        if (!item)
-            return;
-        const yPos = item.mapToItem(threadScrollContent, 0, 0).y;
-        threadFlickable.contentY = Math.max(0, yPos - 8);
-    }
-    function _threadScrolledOffTopCount() {
-        const yTop = threadFlickable.contentY;
-        let count = 0;
-        const total = visibleThreadMessages.length;
-        for (let i = 0; i < total; i++) {
-            const item = threadCardsRepeater.itemAt(i);
-            if (!item)
-                continue;
-            const y = item.mapToItem(threadScrollContent, 0, 0).y;
-            // Count as off-top even if only partially clipped.
-            if (y < yTop)
-                count++;
-            else
-                break;
-        }
-        return count;
-    }
-    function _threadSenderName(msg) {
-        if (!msg || !msg.sender)
-            return "";
-        return appRoot.displaySenderName(msg.sender, msg.accountEmail || "");
-    }
-    function _threadSubject() {
-        return messageSubject;
-    }
-    function _threadToggleCardDark(index) {
-        const next = Object.assign({}, cardDarkModes);
-        next[index] = !_threadCardDarkMode(index);
-        cardDarkModes = next;
-    }
-    function _threadToggleExpand(index) {
-        // Materialize from default state on first user interaction
-        if (threadExpandedSet === null) {
-            const last = visibleThreadMessages.length - 1;
-            const initial = {};
-            initial[last] = true;
-            threadExpandedSet = initial;
-        }
-        const next = Object.assign({}, threadExpandedSet);
-        if (next[index])
-            delete next[index];
-        else
-            next[index] = true;
-        threadExpandedSet = next;
-        Qt.callLater(function () {
-            threadScrollEpoch++;
-        });
-    }
-    function _threadUnreadCount() {
-        let n = 0;
-        for (let i = 0; i < threadMessages.length; i++)
-            if (threadMessages[i].unread)
-                n++;
-        return n;
     }
     function addTag(tagObj) {
         const exists = activeTags.some(function (t) {
@@ -481,69 +237,6 @@ Rectangle {
         }
         return out;
     }
-    function decodeMailtoComponent(s) {
-        return decodeURIComponent((s || "").replace(/\+/g, "%20"));
-    }
-    function escapeHtml(text) {
-        return (text || "").toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function extractAttachmentItemsFromHtml(html) {
-        const out = [];
-        const src = (html || "").toString();
-        if (!src.length)
-            return out;
-
-        const seen = {};
-
-        function maybeAdd(url, labelHint) {
-            const href = (url || "").trim();
-            if (!/^https?:\/\//i.test(href))
-                return;
-            if (seen[href])
-                return;
-            const lower = href.toLowerCase();
-            const hasFileExt = /\.(pdf|png|jpe?g|gif|webp|heic|docx?|xlsx?|pptx?|zip|rar|7z|txt|csv)($|\?)/i.test(lower);
-            const dotloopDoc = /dotloop\.com\/.+\/document\?/i.test(lower) || /[?&]documentid=/i.test(lower);
-            const genericAttachment = /download|attachment|file=/i.test(lower);
-
-            if (!(hasFileExt || dotloopDoc || genericAttachment))
-                return;
-            seen[href] = true;
-
-            let label = (labelHint || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-            if (!label.length || /^https?:\/\//i.test(label)) {
-                if (dotloopDoc)
-                    label = i18n("Document");
-                else
-                    label = root._fileNameFromUrl(href);
-            }
-
-            out.push({
-                name: label,
-                url: href,
-                canPreview: /\.(png|jpe?g|gif|webp)($|\?)/i.test(lower)
-            });
-        }
-
-        // 1) Structured anchor links
-        const anchorRe = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-        let m;
-        while ((m = anchorRe.exec(src)) !== null)
-            maybeAdd(m[1], m[2]);
-
-        // 2) Generic href-bearing attributes
-        const hrefRe = /\bhref\s*=\s*["']([^"']+)["']/gi;
-        while ((m = hrefRe.exec(src)) !== null)
-            maybeAdd(m[1], "");
-
-        // 3) URL token scan for templates where links are flattened/mangled inlined HTML
-        const urlRe = /https?:\/\/[^\s"'<>]+/gi;
-        while ((m = urlRe.exec(src)) !== null)
-            maybeAdd(m[0], "");
-
-        return out;
-    }
-
     function fileUrlFromLocalPath(localPath) {
         let p = (localPath || "").toString();
         if (!p.length)
@@ -561,52 +254,6 @@ Rectangle {
         if (n < 1024 * 1024)
             return (n / 1024).toFixed(1).replace(/\.0$/, "") + " kB";
         return (n / (1024 * 1024)).toFixed(1).replace(/\.0$/, "") + " MB";
-    }
-    function handleMailtoUrl(urlString) {
-        const raw = (urlString || "").toString();
-        if (!raw.toLowerCase().startsWith("mailto:"))
-            return false;
-
-        const noScheme = raw.slice(7);
-        const q = noScheme.indexOf("?");
-        const address = decodeMailtoComponent(q >= 0 ? noScheme.slice(0, q) : noScheme).trim();
-        const query = q >= 0 ? noScheme.slice(q + 1) : "";
-
-        let subject = "";
-        let body = "";
-        let cc = "";
-        let bcc = "";
-
-        if (query.length) {
-            const pairs = query.split("&");
-            for (let i = 0; i < pairs.length; ++i) {
-                const p = pairs[i];
-                const eq = p.indexOf("=");
-                const k = (eq >= 0 ? p.slice(0, eq) : p).toLowerCase();
-                const v = decodeMailtoComponent(eq >= 0 ? p.slice(eq + 1) : "");
-                if (k === "subject")
-                    subject = v;
-                else if (k === "body")
-                    body = v;
-                else if (k === "cc")
-                    cc = v;
-                else if (k === "bcc")
-                    bcc = v;
-            }
-        }
-
-        if (address.length)
-            appRoot.composeDraftTo = address;
-        if (subject.length)
-            appRoot.composeDraftSubject = subject;
-        if (body.length)
-            appRoot.composeDraftBody = body;
-
-        if (address.length)
-            appRoot.openComposerTo(address, i18n("mailto"));
-        else
-            appRoot.openComposeDialog(i18n("mailto"));
-        return true;
     }
     function htmlForMessage() {
         const base = (messageBodyHtml && messageBodyHtml.trim().length > 0) ? messageBodyHtml : "";
@@ -785,16 +432,6 @@ Rectangle {
         });
         setCurrentTags(tags);
     }
-    function renderedHtmlForThread(bodyHtml, darkMode) {
-        if (!bodyHtml || !bodyHtml.length)
-            return "";
-        htmlProcessor.darkBg      = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
-        htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
-        htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
-        htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
-        const collapsed = htmlProcessor.collapseBlockquotes(bodyHtml);
-        return htmlProcessor.prepareThread(collapsed, darkMode);
-    }
     function setCurrentTags(tags) {
         const key = appRoot.selectedMessageKey || "";
         if (!key.length)
@@ -847,11 +484,6 @@ Rectangle {
             }
         }
     }
-    function threadExpandedBodyHeight(index) {
-        // Placeholder — overridden dynamically per card by onContentHeightChanged
-        return 400;
-    }
-
     // Parse the DKIM signing domain from an Authentication-Results header and return its SLD.
     // Handles both "header.d=example.com" and "header.i=@example.com" forms.
     function vendorFromAuthResults(authResults) {
@@ -961,35 +593,20 @@ Rectangle {
         // Only start a new transition when the message key changes.
         // Background updates (mark-read, header refreshes) must not restart the animation.
         const key = root.renderMessageKey;
-        if (key.length && key !== htmlContainer.pendingKey)
-            htmlContainer.startTransition(key);
+        if (key.length && key !== htmlViewComponent.pendingKey)
+            htmlViewComponent.startTransition(key);
         // Queue HTML if available (handles case where data arrives before edgeKey).
-        htmlContainer.onHtmlUpdate();
+        htmlViewComponent.onHtmlUpdate();
     }
     onSelectedMessageEdgeKeyChanged: {
         const key = root.selectedMessageEdgeKey;
         // Always reset thread view paging/expanded state on header selection,
         // even when staying within the same thread id.
-        _threadOnSelectedChanged();
-        if (key.length && key !== htmlContainer.pendingKey)
-            htmlContainer.startTransition(key);
+        threadViewComponent.resetForNewMessage();
+        if (key.length && key !== htmlViewComponent.pendingKey)
+            htmlViewComponent.startTransition(key);
         // Also try to queue HTML now in case messageData is already consistent.
-        htmlContainer.onHtmlUpdate();
-    }
-    onThreadIdChanged: {
-        threadShowAll = false;
-        threadVisibleCount = 5;
-        threadLoadingOlder = false;
-        threadScrollEpoch = 0;
-        threadExpandedSet = null;
-        cardDarkModes = ({});
-    }
-    onVisibleThreadMessagesChanged: {
-        Qt.callLater(function () {
-            if (!root.threadLoadingOlder)
-                _threadClampScrollToLastCardTop();
-            threadScrollEpoch++;
-        });
+        htmlViewComponent.onHtmlUpdate();
     }
 
     TapHandler {
@@ -1376,157 +993,28 @@ Rectangle {
             }
         }
 
-        // Info bars — outer layout is visible when any bar has something to show.
-        ColumnLayout {
+        MessageInfoBars {
             id: infoBars
 
-            Layout.bottomMargin: Kirigami.Units.largeSpacing * 2
             Layout.fillWidth: true
-            spacing: Kirigami.Units.largeSpacing
+            appRoot: root.appRoot
+            hasExternalImages: root.hasExternalImages
+            hasTrackingPixel: root.hasTrackingPixel
+            imagesAllowed: root.imagesAllowed
+            isTrustedSender: root.isTrustedSender
+            listUnsubscribeUrl: root.listUnsubscribeUrl
+            senderDomain: root.senderDomain
+            trackingAllowed: root.trackingAllowed
+            trackerVendor: root.trackerVendor
             visible: !root.isThreadView && !!root.messageData && ((root.hasExternalImages && !root.imagesAllowed && !root.isTrustedSender) || (root.hasTrackingPixel && !root.trackingAllowed && root.imagesAllowed) || root.listUnsubscribeUrl.length > 0)
 
-            // Unsubscribe Info Bar
-            RowLayout {
-                id: unsubInfo
-
-                Layout.alignment: Qt.AlignLeft
-                spacing: Kirigami.Units.smallSpacing
-                visible: !!root.messageData && root.listUnsubscribeUrl.length > 0
-
-                Kirigami.Icon {
-                    Layout.alignment: Qt.AlignLeft
-                    Layout.preferredHeight: 16
-                    Layout.preferredWidth: 16
-                    source: "help-contextual"
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: "#4ea3ff"
-                    font.bold: true
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: i18n("Unsubscribe")
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        hoverEnabled: true
-
-                        onClicked: {
-                            Qt.openUrlExternally(root.listUnsubscribeUrl);
-                        }
-                    }
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: Kirigami.Theme.textColor
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: i18n("from receiving these messages")
-                }
+            onAllowTracking: root.trackingAllowed = true
+            onLoadImagesAlways: {
+                if (root.senderDomain && appRoot && appRoot.dataStoreObj)
+                    appRoot.dataStoreObj.setTrustedSenderDomain(root.senderDomain);
+                root.imagesAllowed = true;
             }
-
-            // Tracker Info Bar
-            RowLayout {
-                id: trackerInfo
-
-                Layout.alignment: Qt.AlignLeft
-                spacing: Kirigami.Units.smallSpacing
-                visible: !!root.messageData && root.hasTrackingPixel && !root.trackingAllowed && root.imagesAllowed
-
-                Kirigami.Icon {
-                    Layout.alignment: Qt.AlignLeft
-                    Layout.preferredHeight: 16
-                    Layout.preferredWidth: 16
-                    source: "crosshairs"
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: "#4ea3ff"
-                    font.bold: true
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: i18n("Allow email tracking.")
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        hoverEnabled: true
-
-                        onClicked: {
-                            root.trackingAllowed = true;
-                        }
-                    }
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: Kirigami.Theme.textColor
-                    // text: i18n("email tracking was blocked to preserve privacy.")
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: (root.trackerVendor || "Email") + i18n(" tracking was blocked to preserve privacy.")
-                }
-            }
-
-            // Images Info Bar — hidden when a tracking pixel is present (tracker bar takes priority)
-            RowLayout {
-                id: downloadInfo
-
-                Layout.alignment: Qt.AlignLeft
-                spacing: Kirigami.Units.smallSpacing
-                visible: !!root.messageData && root.hasExternalImages && !root.imagesAllowed && !root.isTrustedSender
-
-                Kirigami.Icon {
-                    Layout.alignment: Qt.AlignLeft
-                    Layout.preferredHeight: 16
-                    Layout.preferredWidth: 16
-                    source: "messagebox_warning"
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: "#4ea3ff"
-                    font.bold: true
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: i18n("Download Pictures")
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        hoverEnabled: true
-
-                        onClicked: {
-                            root.imagesAllowed = true;
-                        }
-                    }
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: Kirigami.Theme.textColor
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: i18n("or")
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: "#4ea3ff"
-                    font.bold: true
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: i18n("always download pictures from this sender.")
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        hoverEnabled: true
-
-                        onClicked: {
-                            if (root.senderDomain && appRoot && appRoot.dataStoreObj)
-                                appRoot.dataStoreObj.setTrustedSenderDomain(root.senderDomain);
-                            root.imagesAllowed = true;
-                        }
-                    }
-                }
-                QQC2.Label {
-                    Layout.fillWidth: false
-                    color: Kirigami.Theme.textColor
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
-                    text: i18n("To preserve privacy, external content was not downloaded.")
-                }
-            }
+            onLoadImagesOnce: root.imagesAllowed = true
         }
         Flow {
             id: attachmentFlow
@@ -1665,601 +1153,36 @@ Rectangle {
             }
         }
         // ── Thread view ──────────────────────────────────────────────────────
-        QQC2.Button {
-            id: showOlderFloatingBtn
-
-            Layout.alignment: Qt.AlignHCenter
-            bottomPadding: 6
-            flat: true
-            leftPadding: 16
-            rightPadding: 16
-            text: i18n("Show %1 older message(s)", root.threadOffTopCount)
-            topPadding: 6
-            visible: root.isThreadView && root.threadOffTopCount > 0
-
-            background: Rectangle {
-                border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.55)
-                border.width: 1
-                color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
-                radius: height / 2
-            }
-            contentItem: QQC2.Label {
-                font.pixelSize: 12
-                horizontalAlignment: Text.AlignHCenter
-                text: parent.text
-                verticalAlignment: Text.AlignVCenter
-            }
-
-            onClicked: {
-                if (root.threadHiddenCount > 0)
-                    root._threadLoadOlder(Math.min(12, root.threadHiddenCount));
-                else
-                    threadFlickable.contentY = Math.max(0, threadFlickable.contentY - Math.max(120, threadFlickable.height * 0.75));
-            }
-        }
-        Item {
-            id: threadFlickableWa
+        MessageThreadView {
+            id: threadViewComponent
 
             Layout.fillHeight: true
             Layout.fillWidth: true
             Layout.rightMargin: -20
+            appRoot: root.appRoot
+            forceDarkHtml: root.forceDarkHtml
+            messageSubject: root.messageSubject
+            systemPalette: root.systemPalette
+            threadId: root.threadId
+            threadMessages: root.threadMessages
             visible: root.isThreadView
-
-            Flickable {
-                id: threadFlickable
-
-                QQC2.ScrollBar.vertical: threadVScroll
-                anchors.fill: parent
-                anchors.rightMargin: threadVScroll.width + Kirigami.Units.largeSpacing * 2
-                boundsBehavior: Flickable.StopAtBounds
-                clip: true
-                contentHeight: Math.max(height + 1, threadScrollContent.implicitHeight)
-                contentWidth: width
-
-                onContentYChanged: {
-                    if (contentY <= 24 && root.threadHiddenCount > 0 && !root.threadLoadingOlder)
-                        root._threadLoadOlder(6);
-                    if (!root.threadLoadingOlder)
-                        root._threadClampScrollToLastCardTop();
-                    root.threadScrollEpoch++;
-                }
-                onHeightChanged: root._threadClampScrollToLastCardTop()
-                onMovementEnded: root._threadClampScrollToLastCardTop()
-
-                WheelHandler {
-                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                    grabPermissions: PointerHandler.CanTakeOverFromAnything
-
-                    onWheel: function (ev) {
-                        const delta = ev.angleDelta ? ev.angleDelta.y : 0;
-                        if (!delta)
-                            return;
-                        const next = threadFlickable.contentY - (delta / 2);
-                        // Scrolling up past contentY=0 with hidden older messages: load them
-                        if (next < 0 && root.threadHiddenCount > 0 && !root.threadLoadingOlder)
-                            root._threadLoadOlder(6);
-                        threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()));
-                        ev.accepted = true;
-                    }
-                }
-                Column {
-                    id: threadScrollContent
-
-                    bottomPadding: 12
-                    spacing: 8
-                    topPadding: 0
-                    width: threadFlickable.width
-
-                    // Message cards
-                    Repeater {
-                        id: threadCardsRepeater
-
-                        model: root.visibleThreadMessages
-
-                        delegate: Rectangle {
-                            id: threadCard
-
-                            property real bodyHeight: 24
-                            readonly property string cardBodyHtml: root._threadBodyTextForCard(index)
-                            required property int index
-                            readonly property bool isExpanded: root._threadIsExpanded(index)
-                            required property var modelData
-
-                            border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
-                            border.width: 1
-                            color: isExpanded ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35) : Kirigami.Theme.backgroundColor
-                            height: implicitHeight
-                            implicitHeight: cardHeaderRow.implicitHeight + 32 + (isExpanded ? bodyHeight + 12 : 0)
-                            radius: 8
-                            width: threadScrollContent.width
-
-                            onIsExpandedChanged: {
-                                if (isExpanded)
-                                    root._threadOnCardExpanded(index);
-                            }
-
-                            // ── Card header ───────────────────────────────────────────
-                            MouseArea {
-                                cursorShape: Qt.PointingHandCursor
-                                enabled: true
-                                height: threadCard.isExpanded ? (cardHeaderRow.y + cardHeaderRow.implicitHeight + 8) : parent.height
-                                propagateComposedEvents: true
-                                width: parent.width
-                                x: 0
-                                y: 0
-
-                                onClicked: root._threadToggleExpand(threadCard.index)
-                            }
-                            RowLayout {
-                                id: cardHeaderRow
-
-                                spacing: 10
-                                width: parent.width - 20
-                                x: 10
-                                y: threadCard.isExpanded ? 8 : Math.max(8, Math.round((threadCard.height - implicitHeight) / 2))
-
-                                // Avatar
-                                Item {
-                                    Layout.alignment: Qt.AlignVCenter
-                                    Layout.preferredHeight: 40
-                                    Layout.preferredWidth: 40
-
-                                    AvatarBadge {
-                                        anchors.fill: parent
-                                        avatarSources: root._threadAvatarSources(threadCard.modelData)
-                                        displayName: root._threadSenderName(threadCard.modelData)
-                                        fallbackText: threadCard.modelData.sender || ""
-                                        size: 40
-                                    }
-                                }
-
-                                // Sender / snippet / recipient
-                                ColumnLayout {
-                                    Layout.alignment: Qt.AlignVCenter
-                                    Layout.fillWidth: true
-                                    spacing: 2
-
-                                    QQC2.Label {
-                                        Layout.fillWidth: true
-                                        color: "#4ea3ff"
-                                        elide: Text.ElideRight
-                                        font.bold: true
-                                        font.pixelSize: 13
-                                        text: root._threadSenderName(threadCard.modelData)
-                                    }
-
-                                    // Collapsed: snippet
-                                    QQC2.Label {
-                                        Layout.fillWidth: true
-                                        elide: Text.ElideRight
-                                        font.pixelSize: 12
-                                        opacity: 0.72
-                                        text: threadCard.modelData.snippet || ""
-                                        visible: !threadCard.isExpanded
-                                    }
-
-                                    // Expanded: recipient line
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 4
-                                        visible: threadCard.isExpanded
-
-                                        QQC2.Label {
-                                            font.pixelSize: 12
-                                            opacity: 0.8
-                                            text: i18n("to")
-                                        }
-                                        QQC2.Label {
-                                            Layout.fillWidth: true
-                                            color: "#4ea3ff"
-                                            elide: Text.ElideRight
-                                            font.bold: true
-                                            font.pixelSize: 12
-                                            text: root._threadRecipientName(threadCard.modelData)
-                                        }
-                                    }
-                                }
-
-                                // Date + action buttons
-                                ColumnLayout {
-                                    Layout.alignment: Qt.AlignTop
-                                    spacing: 4
-
-                                    QQC2.Label {
-                                        Layout.alignment: Qt.AlignRight
-                                        font.pixelSize: 11
-                                        horizontalAlignment: Text.AlignRight
-                                        opacity: 0.75
-                                        text: root._threadDate(threadCard.modelData)
-                                    }
-                                    RowLayout {
-                                        spacing: 4
-                                        visible: true
-
-                                        MailActionButton {
-                                            iconName: "mail-reply-sender"
-                                            menuItems: [
-                                                {
-                                                    text: i18n("Reply"),
-                                                    icon: "mail-reply-sender"
-                                                },
-                                                {
-                                                    text: i18n("Reply all"),
-                                                    icon: "mail-reply-all"
-                                                },
-                                                {
-                                                    text: i18n("Forward"),
-                                                    icon: "mail-forward"
-                                                }
-                                            ]
-                                            text: i18n("Reply")
-
-                                            onTriggered: function (actionText) {
-                                                const msg = threadCard.modelData;
-                                                if (!msg)
-                                                    return;
-                                                if (actionText === i18n("Reply all")) {
-                                                    appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject);
-                                                    appRoot.openComposerTo(msg.recipient || "", i18n("reply all"));
-                                                } else if (actionText === i18n("Forward")) {
-                                                    appRoot.composeDraftTo = "";
-                                                    appRoot.composeDraftSubject = i18n("Fwd: %1").arg(root.messageSubject);
-                                                    appRoot.composeDraftBody = i18n("\n\n--- Forwarded message ---\nFrom: %1\nDate: %2\n\n%3").arg(msg.sender || "").arg(root._threadDate(msg)).arg(msg.snippet || "");
-                                                    appRoot.openComposeDialog(i18n("forward"));
-                                                } else {
-                                                    appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject);
-                                                    appRoot.openComposerTo(msg.replyTo || msg.sender || "", i18n("reply"));
-                                                }
-                                            }
-                                        }
-                                        QQC2.Button {
-                                            icon.name: root._threadCardDarkMode(threadCard.index) ? "weather-clear-night" : "weather-clear"
-                                            text: root._threadCardDarkMode(threadCard.index) ? i18n("Dark") : i18n("Light")
-
-                                            onClicked: root._threadToggleCardDark(threadCard.index)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // ── Expanded body ─────────────────────────────────────────
-                            Loader {
-                                id: bodyLoader
-
-                                active: threadCard.isExpanded
-                                height: threadCard.bodyHeight
-                                width: threadCard.width - 20
-                                x: 10
-                                y: cardHeaderRow.implicitHeight + 16
-
-                                sourceComponent: Component {
-                                    Item {
-                                        function loadHtmlDoc(html) {
-                                            threadBodyView.loadHtml(html, "file:///");
-                                        }
-
-                                        height: bodyLoader.height
-                                        width: bodyLoader.width
-
-                                        WebEngineView {
-                                            id: threadBodyView
-
-                                            anchors.fill: parent
-                                            backgroundColor: Kirigami.Theme.backgroundColor
-                                            settings.autoLoadImages: true
-                                            settings.javascriptEnabled: false
-                                            settings.localContentCanAccessRemoteUrls: true
-
-                                            Component.onCompleted: {
-                                                const html = threadCard.cardBodyHtml;
-                                                if (html.length)
-                                                    loadHtml(html, "file:///");
-                                            }
-                                            onContentsSizeChanged: {
-                                                const h = Number(contentsSize.height);
-                                                const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24);
-                                                if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
-                                                    threadCard.bodyHeight = target;
-                                                    root.threadScrollEpoch++;
-                                                }
-                                            }
-                                            onLoadingChanged: function (req) {
-                                                if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
-                                                    runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';");
-                                                    const h = Number(contentsSize.height);
-                                                    const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24);
-                                                    if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
-                                                        threadCard.bodyHeight = target;
-                                                        root.threadScrollEpoch++;
-                                                    }
-                                                }
-                                            }
-                                            onNavigationRequested: function (request) {
-                                                const url = request.url ? request.url.toString() : "";
-                                                if (request.navigationType === WebEngineNavigationRequest.LinkClickedNavigation && (url.startsWith("http://") || url.startsWith("https://"))) {
-                                                    request.action = WebEngineNavigationRequest.IgnoreRequest;
-                                                    Qt.openUrlExternally(url);
-                                                }
-                                            }
-                                            onNewWindowRequested: function (request) {
-                                                const url = request.requestedUrl ? request.requestedUrl.toString() : "";
-                                                if (url.startsWith("http://") || url.startsWith("https://"))
-                                                    Qt.openUrlExternally(url);
-                                            }
-                                        }
-
-                                        // Hard wheel-capture layer so thread pane scroll works even when cursor
-                                        // is over WebEngine content (which otherwise consumes wheel input).
-                                        Item {
-                                            anchors.fill: parent
-                                            z: 999
-
-                                            WheelHandler {
-                                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                                grabPermissions: PointerHandler.CanTakeOverFromAnything
-
-                                                onWheel: function (ev) {
-                                                    const delta = ev.angleDelta ? ev.angleDelta.y : 0;
-                                                    if (!delta)
-                                                        return;
-                                                    const next = threadFlickable.contentY - (delta / 2);
-                                                    threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()));
-                                                    ev.accepted = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                onLoaded: {
-                                    // reload when HTML changes (e.g., after hydration arrives)
-                                }
-
-                                WheelHandler {
-                                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                    grabPermissions: PointerHandler.CanTakeOverFromAnything
-
-                                    onWheel: function (ev) {
-                                        const delta = ev.angleDelta ? ev.angleDelta.y : 0;
-                                        if (!delta)
-                                            return;
-                                        const next = threadFlickable.contentY - (delta / 2);
-                                        threadFlickable.contentY = Math.max(0, Math.min(next, root._threadMaxContentY()));
-                                        ev.accepted = true;
-                                    }
-                                }
-                            }
-
-                            // Watch for body HTML becoming available after hydration
-                            Connections {
-                                function onCardBodyHtmlChanged() {
-                                    if (!threadCard.isExpanded)
-                                        return;
-                                    const html = threadCard.cardBodyHtml;
-                                    if (!html.length)
-                                        return;
-                                    if (bodyLoader.item && bodyLoader.item.loadHtmlDoc)
-                                        bodyLoader.item.loadHtmlDoc(html);
-                                }
-
-                                target: threadCard
-                            }
-                        }
-                    }
-                }
-            }
-            QQC2.ScrollBar {
-                id: threadVScroll
-
-                anchors.bottom: parent.bottom
-                anchors.right: parent.right
-                anchors.rightMargin: 5
-                anchors.top: parent.top
-                policy: QQC2.ScrollBar.AsNeeded
-                visible: false
-                width: 5
-            }
         }
 
-        // ── Single message view ──────────────────────────────────────────────
-        Rectangle {
-            id: htmlContainer
-
-            // ── Fade & load state ─────────────────────────────────────────────
-            property real bodyOpacity: 1.0
-            // True once the 250 ms fade-out animation has completed.
-            property bool fadedOut: false
-            property real flickVelocityY: 0
-            // Dedup key: prevents re-loading the same content twice.
-            property string lastHtmlKey: ""
-            // Key of the message currently being loaded by the WebEngineView.
-            property string loadingKey: ""
-            // HTML queued for pendingKey (empty until renderedHtml is available).
-            property string pendingHtml: ""
-
-            // Key of the message we are transitioning to show.
-            property string pendingKey: ""
-
-            // ── Hand the queued HTML to the WebEngineView ─────────────────────
-            function doLoad() {
-                if (!pendingHtml.length || pendingKey !== root.selectedMessageEdgeKey)
-                    return;
-                loadingKey = pendingKey;
-                htmlView.loadHtml(pendingHtml, "file:///");
-            }
-
-            // ── Called whenever renderedHtml or imagesAllowed changes ─────────
-            function onHtmlUpdate() {
-                const key = root.renderMessageKey;
-                const html = root.renderedHtml;
-                if (!html.length || !key.length)
-                    return;
-                // Wait until messageData is consistent with the selection.
-                if (root.selectedMessageEdgeKey.length > 0 && key !== root.selectedMessageEdgeKey)
-                    return;
-
-                const dedup = key + "|" + (root.imagesAllowed ? "1" : "0") + "|" + html;
-                if (dedup === lastHtmlKey)
-                    return; // already loaded or queued this exact content
-
-                if (key !== pendingKey) {
-                    // HTML arrived for a message that has no transition in progress yet
-                    // (late data or refresh of currently-shown message).
-                    startTransition(key);
-                }
-
-                lastHtmlKey = dedup;
-                pendingHtml = html;
-                if (fadedOut || !fadeTimer.running)
-                    doLoad();
-            // If fading out: fadeTimer.onTriggered will call doLoad() once the
-            // fade-out animation completes.
-            }
-
-            // ── Scroll the web view programmatically ──────────────────────────
-            function scrollHtmlBy(deltaY) {
-                if (!root.hasUsableBodyHtml)
-                    return;
-                const amount = Number(deltaY);
-                if (!isFinite(amount) || Math.abs(amount) < 0.01)
-                    return;
-                htmlView.runJavaScript("window.scrollBy(0," + Math.round(amount) + ");");
-            }
-
-            // ── Begin an animated transition to a new message ────────────────
-            // Only call this when the message KEY changes. Background updates
-            // (mark-read, hydration result, etc.) go through onHtmlUpdate().
-            function startTransition(key) {
-                pendingKey = key;
-                pendingHtml = "";
-                lastHtmlKey = "";
-                fadedOut = false;
-                loadingKey = "";
-                bodyOpacity = 0.0;     // triggers 250 ms NumberAnimation
-                fadeTimer.restart();
-            }
+        // ── Single message view + empty placeholder ──────────────────────────
+        MessageHtmlView {
+            id: htmlViewComponent
 
             Layout.fillHeight: true
             Layout.fillWidth: true
-            color: "transparent"
-            visible: !root.isThreadView && !!root.messageData
-
-            Behavior on bodyOpacity {
-                NumberAnimation {
-                    duration: 250
-                    easing.type: Easing.InOutQuad
-                }
-            }
-
-            // Fires when the 250 ms fade-out animation has completed.
-            Timer {
-                id: fadeTimer
-
-                interval: 250
-                repeat: false
-
-                onTriggered: {
-                    if (htmlContainer.pendingKey !== root.selectedMessageEdgeKey)
-                        return;
-                    htmlContainer.fadedOut = true;
-                    if (htmlContainer.pendingHtml.length)
-                        htmlContainer.doLoad();
-                    // If HTML not yet available, doLoad() will be called from onHtmlUpdate()
-                    // once renderedHtml becomes non-empty.
-                }
-            }
-            WebEngineView {
-                id: htmlView
-
-                anchors.fill: parent
-                backgroundColor: root.forceDarkHtml ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35) : "white"
-                opacity: htmlContainer.bodyOpacity
-                settings.autoLoadImages: true
-                settings.errorPageEnabled: true
-                settings.localContentCanAccessFileUrls: true
-                settings.localContentCanAccessRemoteUrls: true
-                visible: root.hasUsableBodyHtml
-
-                Component.onCompleted: htmlContainer.onHtmlUpdate()
-                onLoadingChanged: function (req) {
-                    const st = req.status;
-                    if (st !== WebEngineLoadingInfo.LoadSucceededStatus && st !== WebEngineLoadingInfo.LoadFailedStatus)
-                        return;
-                    if (htmlContainer.loadingKey !== root.selectedMessageEdgeKey) {
-                        htmlContainer.loadingKey = "";
-                        return;
-                    }
-                    htmlContainer.loadingKey = "";
-                    htmlContainer.pendingHtml = "";
-                    htmlContainer.fadedOut = false;
-                    htmlContainer.bodyOpacity = 1.0;
-                }
-                onNavigationRequested: function (request) {
-                    const url = request.url ? request.url.toString() : "";
-                    if (!url.length)
-                        return;
-                    if (url.toLowerCase().startsWith("mailto:")) {
-                        request.action = WebEngineNavigationRequest.IgnoreRequest;
-                        if (!root.handleMailtoUrl(url)) {
-                            Qt.openUrlExternally(url);
-                        }
-                        return;
-                    }
-
-                    if (request.navigationType === WebEngineNavigationRequest.LinkClickedNavigation && (url.startsWith("http://") || url.startsWith("https://"))) {
-                        request.action = WebEngineNavigationRequest.IgnoreRequest;
-                        Qt.openUrlExternally(url);
-                    }
-                }
-
-                // Links with target="_blank" fire onNewWindowRequested instead of
-                // onNavigationRequested — handle them the same way.
-                onNewWindowRequested: function (request) {
-                    const url = request.requestedUrl ? request.requestedUrl.toString() : "";
-                    if (url.startsWith("http://") || url.startsWith("https://"))
-                        Qt.openUrlExternally(url);
-                    else if (url.toLowerCase().startsWith("mailto:"))
-                        Qt.openUrlExternally(url);
-                }
-
-                Connections {
-                    function onImagesAllowedChanged() {
-                        htmlContainer.onHtmlUpdate();
-                    }
-                    function onRenderedHtmlChanged() {
-                        htmlContainer.onHtmlUpdate();
-                    }
-
-                    target: root
-                }
-            }
-        }
-        Item {
-            Layout.fillHeight: true
-            Layout.fillWidth: true
-            visible: !root.messageData
-
-            ColumnLayout {
-                anchors.centerIn: parent
-                spacing: Kirigami.Units.smallSpacing
-
-                Kirigami.Icon {
-                    Layout.alignment: Qt.AlignHCenter
-                    height: 42
-                    source: "mail-message"
-                    width: 42
-                }
-                QQC2.Label {
-                    Layout.alignment: Qt.AlignHCenter
-                    font.bold: true
-                    text: i18n("Select a message")
-                }
-                QQC2.Label {
-                    Layout.alignment: Qt.AlignHCenter
-                    opacity: 0.75
-                    text: i18n("Choose an email from the list to view its content.")
-                }
-            }
+            appRoot: root.appRoot
+            forceDarkHtml: root.forceDarkHtml
+            hasUsableBodyHtml: root.hasUsableBodyHtml
+            imagesAllowed: root.imagesAllowed
+            messageData: root.messageData
+            renderMessageKey: root.renderMessageKey
+            renderedHtml: root.renderedHtml
+            selectedMessageEdgeKey: root.selectedMessageEdgeKey
+            visible: !root.isThreadView
         }
     }
     Column {

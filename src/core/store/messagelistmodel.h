@@ -77,7 +77,7 @@ public:
     Q_INVOKABLE QVariantMap rowAt(int index) const;
 
     int windowSize() const { return m_windowSize; }
-    void setWindowSize(int size);
+    Q_INVOKABLE void setWindowSize(int size);
     int totalRowCount() const { return m_allRows.size(); }
     int visibleRowCount() const { return m_rows.size(); }
     int visibleMessageCount() const;

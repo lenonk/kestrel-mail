@@ -103,6 +103,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     m_capabilities.clear();
     m_tag = 1;
     m_host        = host;
+    m_port        = port;
     m_email       = email;
     m_accessToken = accessToken;
     m_idleTag.clear();
@@ -348,7 +349,7 @@ Connection::enterIdle() {
     m_socket->write(buildSimpleCommand(tag, "IDLE"_L1));
     m_socket->flush();
 
-    if (!m_socket->waitForReadyRead(IO::kReadTimeoutMs))
+    if (!m_socket->waitForReadyRead(IO::kIdleContinuationTimeoutMs))
         return {false, "IDLE failed: timeout waiting for continuation"_L1};
 
     const QString resp = QString::fromUtf8(m_socket->readAll());
@@ -409,7 +410,16 @@ Connection::disconnect() {
 
 bool
 Connection::isConnected() const {
-    return m_socket && m_socket->isOpen() && m_authenticated;
+    return m_socket
+        && m_socket->state() == QAbstractSocket::ConnectedState
+        && m_authenticated;
+}
+
+bool
+Connection::tryReconnect() {
+    if (m_host.isEmpty() || m_email.isEmpty() || m_accessToken.isEmpty())
+        return false;
+    return connectAndAuth(m_host, m_port, m_email, m_accessToken).success;
 }
 
 QString

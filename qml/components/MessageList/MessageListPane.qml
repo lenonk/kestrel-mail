@@ -50,9 +50,17 @@ Rectangle {
             property var folderScrollByKey: ({})
             property var folderTopIndexByKey: ({})
             property int pendingRestoreIndex: -1
+            property string pendingRestoreStableKey: ""
             property string lastFolderKey: (root.appRoot && root.appRoot.selectedFolderKey)
                                            ? root.appRoot.selectedFolderKey.toString()
                                            : ""
+            property bool loadMoreQueued: false
+            property bool windowShiftQueued: false
+
+            Component.onCompleted: {
+                if (root.appRoot && root.appRoot.messageListModelObj)
+                    root.appRoot.messageListModelObj.setWindowSize(150)
+            }
 
             function queueRestoreScroll() {
                 if (!restorePending)
@@ -65,16 +73,74 @@ Rectangle {
                 interval: 50
                 repeat: false
                 onTriggered: {
-                    if (groupedMessageList.pendingRestoreIndex >= 0
-                            && groupedMessageList.pendingRestoreIndex < groupedMessageList.count) {
-                        groupedMessageList.positionViewAtIndex(groupedMessageList.pendingRestoreIndex, ListView.Beginning)
+                    // Don't interrupt an active flick. For intentional navigation (folder
+                    // switch, restoreTargetLocked) retry until the flick settles. For
+                    // background model changes, just let the flick finish naturally.
+                    if (groupedMessageList.flicking) {
+                        if (groupedMessageList.restoreTargetLocked) {
+                            scrollRestoreTimer.restart()
+                        } else {
+                            groupedMessageList.pendingRestoreIndex = -1
+                            groupedMessageList.pendingRestoreStableKey = ""
+                            groupedMessageList.restorePending = false
+                        }
+                        return
+                    }
+
+                    const stableKey = groupedMessageList.pendingRestoreStableKey
+                    let resolved = -1
+
+                    // Try stableKey lookup first — survives model resets where index shifts.
+                    if (stableKey.length && root.appRoot.messageListModelObj) {
+                        const n = groupedMessageList.count
+                        for (let i = 0; i < n; ++i) {
+                            const row = root.appRoot.messageListModelObj.rowAt(i)
+                            if (row && row.messageKey && row.messageKey.toString() === stableKey) {
+                                resolved = i
+                                break
+                            }
+                        }
+                    }
+
+                    // Fall back to captured numeric index when stableKey is absent or not found.
+                    if (resolved < 0)
+                        resolved = groupedMessageList.pendingRestoreIndex
+
+                    if (resolved >= 0 && resolved < groupedMessageList.count) {
+                        groupedMessageList.positionViewAtIndex(resolved, ListView.Beginning)
                     } else {
                         const maxY = Math.max(0, groupedMessageList.contentHeight - groupedMessageList.height)
                         groupedMessageList.contentY = Math.max(0, Math.min(maxY, groupedMessageList.preservedContentY))
                     }
                     groupedMessageList.pendingRestoreIndex = -1
+                    groupedMessageList.pendingRestoreStableKey = ""
                     groupedMessageList.restorePending = false
                     groupedMessageList.restoreTargetLocked = false
+                }
+            }
+
+            // Waits for the flick to settle before shifting the visible window,
+            // so the model reset from shiftWindowDown/Up never interrupts a flick.
+            Timer {
+                id: windowShiftTimer
+                interval: 150
+                repeat: false
+                onTriggered: {
+                    if (!root.appRoot.messageListModelObj) {
+                        groupedMessageList.windowShiftQueued = false
+                        return
+                    }
+                    if (groupedMessageList.flicking) {
+                        windowShiftTimer.restart()
+                        return
+                    }
+                    groupedMessageList.windowShiftQueued = false
+                    const bottomGap = groupedMessageList.contentHeight
+                                    - (groupedMessageList.contentY + groupedMessageList.height)
+                    if (bottomGap < 600)
+                        root.appRoot.messageListModelObj.shiftWindowDown()
+                    else if (groupedMessageList.contentY < 600)
+                        root.appRoot.messageListModelObj.shiftWindowUp()
                 }
             }
 
@@ -110,8 +176,22 @@ Rectangle {
                 ignoreUnknownSignals: true
 
                 function onModelAboutToBeReset() {
-                    if (!groupedMessageList.restoreTargetLocked)
+                    if (!groupedMessageList.restoreTargetLocked) {
                         groupedMessageList.preservedContentY = groupedMessageList.contentY
+                        // Capture a stable anchor so positionViewAtIndex can restore the
+                        // correct visual position even when rows shift during a model reset.
+                        const topIdx = groupedMessageList.indexAt(1, groupedMessageList.contentY + 1)
+                        groupedMessageList.pendingRestoreIndex = topIdx
+                        // Also capture the stableKey (messageKey) of the top-visible row so
+                        // we can locate it by identity after a reset where indices shift.
+                        if (topIdx >= 0 && root.appRoot.messageListModelObj) {
+                            const row = root.appRoot.messageListModelObj.rowAt(topIdx)
+                            groupedMessageList.pendingRestoreStableKey = (row && row.messageKey)
+                                ? row.messageKey.toString() : ""
+                        } else {
+                            groupedMessageList.pendingRestoreStableKey = ""
+                        }
+                    }
                     groupedMessageList.restorePending = true
                 }
 
@@ -119,15 +199,42 @@ Rectangle {
                     groupedMessageList.queueRestoreScroll()
                 }
 
-                function onRowsAboutToBeInserted() {
-                    if (!groupedMessageList.restoreTargetLocked)
+                function onRowsAboutToBeInserted(parent, first, last) {
+                    // Pure bottom append (loadMore): rows are added after the current last
+                    // item, so the viewport is completely unaffected — no restore needed.
+                    if (first >= groupedMessageList.count)
+                        return
+                    if (!groupedMessageList.restoreTargetLocked) {
                         groupedMessageList.preservedContentY = groupedMessageList.contentY
+                        // If rows are inserted before the current top-visible item, the item
+                        // shifts down by the inserted count — compensate so the view stays put.
+                        const topIdx = groupedMessageList.indexAt(1, groupedMessageList.contentY + 1)
+                        if (topIdx >= 0 && first <= topIdx)
+                            groupedMessageList.pendingRestoreIndex = topIdx + (last - first + 1)
+                        else
+                            groupedMessageList.pendingRestoreIndex = topIdx
+                    }
                     groupedMessageList.restorePending = true
                 }
 
-                function onRowsAboutToBeRemoved() {
-                    if (!groupedMessageList.restoreTargetLocked)
+                function onRowsAboutToBeRemoved(parent, first, last) {
+                    if (!groupedMessageList.restoreTargetLocked) {
                         groupedMessageList.preservedContentY = groupedMessageList.contentY
+                        const topIdx = groupedMessageList.indexAt(1, groupedMessageList.contentY + 1)
+                        if (topIdx >= 0) {
+                            if (topIdx >= first && topIdx <= last) {
+                                // The top item itself is being removed — land at first survivor.
+                                groupedMessageList.pendingRestoreIndex = first
+                            } else if (first < topIdx) {
+                                // Rows removed before the viewport — shift index back.
+                                groupedMessageList.pendingRestoreIndex = topIdx - (last - first + 1)
+                            } else {
+                                groupedMessageList.pendingRestoreIndex = topIdx
+                            }
+                        } else {
+                            groupedMessageList.pendingRestoreIndex = -1
+                        }
+                    }
                     groupedMessageList.restorePending = true
                 }
 
@@ -172,8 +279,21 @@ Rectangle {
             onContentYChanged: {
                 if (!root.appRoot.messageListModelObj) return
                 const bottomGap = contentHeight - (contentY + height)
-                if (bottomGap < 1800) {
-                    root.appRoot.messageListModelObj.loadMore()
+                // Fetch more rows from DB when approaching the end of all loaded data.
+                if (bottomGap < 1800 && !groupedMessageList.loadMoreQueued) {
+                    groupedMessageList.loadMoreQueued = true
+                    Qt.callLater(function() {
+                        groupedMessageList.loadMoreQueued = false
+                        if (root.appRoot.messageListModelObj)
+                            root.appRoot.messageListModelObj.loadMore()
+                    })
+                }
+                // Queue a window shift when near either edge of the visible window.
+                // The timer defers the actual shift until the flick has settled.
+                if (!groupedMessageList.windowShiftQueued
+                        && (bottomGap < 600 || contentY < 600)) {
+                    groupedMessageList.windowShiftQueued = true
+                    windowShiftTimer.start()
                 }
             }
 
@@ -182,7 +302,10 @@ Rectangle {
                 width: groupedMessageList.width
                 readonly property bool isHeaderRow: !!isHeader
                 readonly property int topGap: 0
-                implicitHeight: topGap + (headerButton.visible ? (headerButton.implicitHeight + 10) : messageCard.height)
+                readonly property string delegateKey: (typeof model !== "undefined" && typeof model.messageKey !== "undefined") ? model.messageKey.toString() : ""
+                readonly property bool isPendingDelete: delegateKey.length > 0 && root.appRoot && root.appRoot.pendingDeleteKeys && !!root.appRoot.pendingDeleteKeys[delegateKey]
+                visible: !isPendingDelete
+                implicitHeight: isPendingDelete ? 0 : (topGap + (headerButton.visible ? (headerButton.implicitHeight + 10) : messageCard.height))
 
                 Item {
                     x: 0

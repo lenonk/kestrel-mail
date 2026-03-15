@@ -722,57 +722,54 @@ executeIncremental(SyncContext &ctx) {
                       "inbox-inc"_L1, state, throttleBackoffMs);
     }
 
-    // For non-INBOX folders: backfill messages within budget that aren't cached locally.
-    if (!ctx.isInbox()) {
-        if (ctx.fetchBudget != 0 && ctx.getFolderUids) {
-            const auto localUids = ctx.getFolderUids(ctx.cxn->email(), ctx.folderName);
-            const QSet localSet(localUids.begin(), localUids.end());
-            const QSet newSet(newUids.begin(), newUids.end());
+    // Backfill messages within budget that aren't cached locally.
+    if (ctx.fetchBudget != 0 && ctx.getFolderUids) {
+        const auto localUids = ctx.getFolderUids(ctx.cxn->email(), ctx.folderName);
+        const QSet localSet(localUids.begin(), localUids.end());
+        const QSet newSet(newUids.begin(), newUids.end());
 
-            const auto allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
-            QStringList allUids = parseUidSearchAll(allResp);
+        const auto allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
+        QStringList allUids = parseUidSearchAll(allResp);
 
-            std::ranges::sort(allUids, [](const QString &a, const QString &b) {
-                return a.toLongLong() < b.toLongLong();
-            });
+        std::ranges::sort(allUids, [](const QString &a, const QString &b) {
+            return a.toLongLong() < b.toLongLong();
+        });
 
-            int fetchedBackfill = 0;
-            std::array<qint32, kSyncBatchSize> backfillBatch{};
-            int backfillN = 0;
+        int fetchedBackfill = 0;
+        std::array<qint32, kSyncBatchSize> backfillBatch{};
+        int backfillN = 0;
 
-            auto flushBackfill = [&]() {
-                if (backfillN <= 0) return;
+        auto flushBackfill = [&]() {
+            if (backfillN <= 0) return;
 
-                if (throttleBackoffMs > 0)
-                    QThread::msleep(static_cast<unsigned long>(throttleBackoffMs));
+            if (throttleBackoffMs > 0)
+                QThread::msleep(static_cast<unsigned long>(throttleBackoffMs));
 
-                fetchUidBatch(ctx,
-                              std::vector<qint32>(backfillBatch.begin(), backfillBatch.begin() + backfillN),
-                              "folder-backfill"_L1, state, throttleBackoffMs);
+            fetchUidBatch(ctx,
+                          std::vector<qint32>(backfillBatch.begin(), backfillBatch.begin() + backfillN),
+                          "folder-backfill"_L1, state, throttleBackoffMs);
 
-                backfillN = 0;
-            };
+            backfillN = 0;
+        };
 
-            for (auto i = allUids.size() - 1; i >= 0 && (ctx.fetchBudget < 0 || fetchedBackfill < ctx.fetchBudget); --i) {
-                const auto uid = allUids.at(i);
-                if (newSet.contains(uid) || localSet.contains(uid))
-                    continue;
+        for (auto i = allUids.size() - 1; i >= 0 && (ctx.fetchBudget < 0 || fetchedBackfill < ctx.fetchBudget); --i) {
+            const auto uid = allUids.at(i);
+            if (newSet.contains(uid) || localSet.contains(uid))
+                continue;
 
-                bool ok = false;
-                const qint32 uidV = uid.toInt(&ok);
+            bool ok = false;
+            const qint32 uidV = uid.toInt(&ok);
 
-                if (!ok) continue;
+            if (!ok) continue;
 
-                backfillBatch[backfillN++] = uidV;
-                ++fetchedBackfill;
+            backfillBatch[backfillN++] = uidV;
+            ++fetchedBackfill;
 
-                if (backfillN == kSyncBatchSize)
-                    flushBackfill();
-            }
-
-            flushBackfill();
-
+            if (backfillN == kSyncBatchSize)
+                flushBackfill();
         }
+
+        flushBackfill();
     }
 
     enrichSnippets(ctx, state);

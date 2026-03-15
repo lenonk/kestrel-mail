@@ -46,9 +46,6 @@ QString MessageHydrator::execute(const Request &req) {
         QElapsedTimer step;
         step.start();
         bool selectOk = true;
-        qInfo().noquote() << "[perf-hydrate-exec] folder compare:" << req.cxn->selectedFolder() << "<>" << folder;
-        std::flush(std::cerr);
-        std::flush(std::cout);
         QString msg;
         if (req.cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
             const auto sel = req.cxn->select(folder);
@@ -58,15 +55,22 @@ QString MessageHydrator::execute(const Request &req) {
         const qint64 selectMs = step.elapsed();
 
         if (!selectOk) {
-            qWarning().noquote() << "[perf-hydrate-exec]"
-                                 << "uid=" << uid
-                                 << "folder=" << folder
-                                 << "selectMs=" << selectMs
-                                 << "result=" << msg;
-            std::flush(std::cerr);
-            std::flush(std::cout);
-            assert(0);
-            continue;
+            // Empty response means the socket died (server idle-timeout, etc.).
+            // Try reconnecting in-place with stored credentials and retry SELECT.
+            if (msg.isEmpty() && req.cxn->tryReconnect()) {
+                const auto sel2 = req.cxn->select(folder);
+                selectOk = std::get<0>(sel2);
+                msg      = std::get<1>(sel2);
+            }
+
+            if (!selectOk) {
+                qWarning().noquote() << "[perf-hydrate-exec]"
+                                     << "uid=" << uid
+                                     << "folder=" << folder
+                                     << "selectMs=" << selectMs
+                                     << "selectErr=" << msg.simplified().left(120);
+                continue;
+            }
         }
 
         step.restart();

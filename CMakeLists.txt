@@ -99,6 +99,7 @@ qt_add_executable(kestrel-mail
     src/core/transport/imap/message/avatarresolver.cpp
     src/core/transport/imap/message/bodyprocessor.cpp
     src/core/mime/mailioparser.cpp
+    src/core/transport/smtp/smtpservice.cpp
 )
 
 qt_add_resources(kestrel-mail kestrel_mail_qml
@@ -119,7 +120,6 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/PopupMenu.qml
         qml/components/AvatarBadge.qml
         qml/components/ContactHoverPopup.qml
-        qml/components/AttachmentHoverPopup.qml
         qml/components/InviteCard.qml
         qml/components/PaneIconStrip.qml
         qml/components/CollapsedPaneRail.qml
@@ -131,6 +131,12 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/MessageList/MessageCategoryButton.qml
         qml/components/MessageList/MessageListHeader.qml
         qml/components/MessageContent/MessageContentPane.qml
+        qml/components/MessageContent/MessageInfoBars.qml
+        qml/components/MessageContent/MessageHtmlView.qml
+        qml/components/MessageContent/MessageThreadView.qml
+        qml/components/Compose/Compose.qml
+        qml/components/Attachments/AttachmentCard.qml
+        qml/components/Attachments/AttachmentHoverPopup.qml
         qml/important.svg
         qml/flag.svg
         qml/trash.svg

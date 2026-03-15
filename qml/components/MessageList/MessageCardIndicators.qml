@@ -25,7 +25,7 @@ RowLayout {
         QQC2.Label {
             id: threadCountLabel
             anchors.centerIn: parent
-            text: threadCount.toString()
+            text: threadCount.toString() + " >"
             font.pixelSize: 11
             font.bold: true
             color: Kirigami.Theme.textColor

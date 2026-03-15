@@ -9,6 +9,7 @@ import org.kde.kirigami as Kirigami
 import "components" as Components
 import "components/MessageList" as MessageList
 import "components/MessageContent" as MessageContent
+import "components/Compose" as Compose
 
 Kirigami.ApplicationWindow {
     id: root
@@ -89,6 +90,8 @@ Kirigami.ApplicationWindow {
     property var selectedMessageAnchor: ({})
     // Set of message keys currently checked in the message list (JS object used as Set).
     property var selectedMessageKeys: ({})
+    // Keys of messages currently being moved to trash (for instant visual removal).
+    property var pendingDeleteKeys: ({})
     property int lastClickedMessageIndex: -1
     property bool bootstrapFolderSyncRequested: false
 
@@ -433,7 +436,14 @@ Kirigami.ApplicationWindow {
     readonly property var selectedFolderCategories: (root.selectedFolderEntry && root.selectedFolderEntry.categories)
                                                 ? root.selectedFolderEntry.categories
                                                 : []
-    readonly property var selectedMessageData: root.messageByKey(root.selectedMessageKey)
+    // Incremented when body HTML is stored for the currently-selected message.
+    // selectedMessageData reads this to create a reactive dependency so the
+    // content pane updates after async hydration without needing a full inbox reload.
+    property int _bodyUpdateVersion: 0
+    readonly property var selectedMessageData: {
+        void root._bodyUpdateVersion
+        return root.messageByKey(root.selectedMessageKey)
+    }
 
 
     readonly property var mockInboxMessages: [
@@ -468,10 +478,6 @@ Kirigami.ApplicationWindow {
                                                ? root.accountRepositoryObj.accounts[0].accountName
                                                : i18n("Account")
 
-    property string composeDraftTo: ""
-    property string composeDraftSubject: ""
-    property string composeDraftBody: ""
-
     Components.AccountWizardDialog {
         id: accountWizard
         accountSetupObj: root.accountSetupObj
@@ -479,54 +485,12 @@ Kirigami.ApplicationWindow {
         onToastRequested: (message, isError) => root.showInlineStatus(message, isError)
     }
 
-    QQC2.Dialog {
+    Compose.Compose {
         id: composeDialog
-        title: i18n("Compose")
-        modal: true
-        width: Math.min(root.width * 0.72, 900)
-        height: Math.min(root.height * 0.72, 640)
-        standardButtons: QQC2.Dialog.Close
-
-        contentItem: ColumnLayout {
-            anchors.fill: parent
-            spacing: Kirigami.Units.smallSpacing
-
-            QQC2.TextField {
-                Layout.fillWidth: true
-                placeholderText: i18n("To")
-                text: root.composeDraftTo
-                onTextChanged: root.composeDraftTo = text
-            }
-
-            QQC2.TextField {
-                Layout.fillWidth: true
-                placeholderText: i18n("Subject")
-                text: root.composeDraftSubject
-                onTextChanged: root.composeDraftSubject = text
-            }
-
-            QQC2.TextArea {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                placeholderText: i18n("Message")
-                text: root.composeDraftBody
-                wrapMode: TextEdit.Wrap
-                onTextChanged: root.composeDraftBody = text
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                QQC2.Button {
-                    text: i18n("Send")
-                    enabled: root.composeDraftTo.trim().length > 0
-                    onClicked: {
-                        root.showInlineStatus(i18n("Send requested to %1").arg(root.composeDraftTo), false)
-                        composeDialog.close()
-                    }
-                }
-            }
-        }
+        accountRepositoryObj: root.accountRepositoryObj
+        dataStoreObj: root.dataStoreObj
+        smtpServiceObj: (typeof smtpService !== "undefined") ? smtpService : null
+        onSendRequested: root.showInlineStatus(i18n("Message sent"), false)
     }
 
     Component.onCompleted: {
@@ -606,6 +570,26 @@ Kirigami.ApplicationWindow {
         function onInboxChanged() {
             // Keep current selection stable; messageByKey() now resolves against DB
             // when the row is outside the in-memory inbox cache window.
+        }
+        function onBodyHtmlUpdated(accountEmail, folder, uid) {
+            // Bump _bodyUpdateVersion so selectedMessageData re-evaluates and picks up
+            // the fresh body from the DB — without a full inbox reload.
+            const key = root.selectedMessageKey
+            if (!key.length) return
+            const p = root.parseMessageKey(key)
+            if (!p) return
+            const accMatch = p.accountEmail.toLowerCase() === accountEmail.toLowerCase()
+            const folderMatch = p.folder.toLowerCase() === folder.toLowerCase()
+            const uidMatch = p.uid === uid
+            if (accMatch && folderMatch && uidMatch) {
+                root._bodyUpdateVersion++
+            } else if (accMatch) {
+                // Different UID/folder — this may be a thread member being hydrated.
+                // If the user is currently viewing a thread, bump so threadMessages re-queries.
+                const d = root.selectedMessageData
+                if (d && (d.threadCount || 0) >= 2)
+                    root._bodyUpdateVersion++
+            }
         }
     }
 
@@ -983,17 +967,16 @@ Kirigami.ApplicationWindow {
 
         let dbRow = null
         if (root.dataStoreObj && root.dataStoreObj.messageByKey) {
-            dbRow = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
-            if (dbRow) {
-                base = dbRow
-            } else if (!base) {
+            const raw = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
+            // C++ returns an empty {} QVariantMap when no row is found.
+            // In JS `if ({})` is truthy, so check for a real field instead.
+            if (raw && (raw.accountEmail || "") !== "") {
+                dbRow = raw
                 base = dbRow
             }
         }
 
-        if (!base) {
-            return null
-        }
+        if (!base) return null
 
         // If DB has fresher hydrated body for this exact key, prefer it over stale inbox cache row.
         if (dbRow && root.isBodyHtmlUsable(dbRow.bodyHtml) && !root.isBodyHtmlUsable(base.bodyHtml)) {
@@ -1096,22 +1079,38 @@ Kirigami.ApplicationWindow {
     }
 
     function openComposeDialog(contextLabel) {
-        root.showInlineStatus(i18n("Compose opened (%1)").arg(contextLabel || i18n("message view")), false)
-        composeDialog.open()
+        composeDialog.openCompose("", "", "")
     }
 
     function openComposerTo(address, contextLabel) {
         const email = (address || "").toString().trim()
-        if (!email.length) {
-            openComposeDialog(contextLabel)
-            return
-        }
-        root.composeDraftTo = email
-        if (!root.composeDraftSubject.length && root.selectedMessageData && root.selectedMessageData.subject) {
-            root.composeDraftSubject = i18n("Re: %1").arg(root.selectedMessageData.subject)
-        }
-        root.showInlineStatus(i18n("Compose opened for %1 (%2)").arg(email).arg(contextLabel || i18n("from message view")), false)
-        composeDialog.open()
+        const subject = (!email.length && root.selectedMessageData && root.selectedMessageData.subject)
+                        ? i18n("Re: %1").arg(root.selectedMessageData.subject) : ""
+        composeDialog.openCompose(email, subject, "")
+    }
+
+    function _replySubject(subj) {
+        const s = (subj || "").toString().trim()
+        return s.toLowerCase().startsWith("re:") ? s : "Re: " + s
+    }
+
+    function _fwdSubject(subj) {
+        const s = (subj || "").toString().trim()
+        const l = s.toLowerCase()
+        return (l.startsWith("fwd:") || l.startsWith("fw:")) ? s : "Fwd: " + s
+    }
+
+    function _quotedBody(d) {
+        const sender = (d.sender || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+        const subj   = (d.subject || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+        const date   = d.receivedAt ? new Date(d.receivedAt).toLocaleString(Qt.locale(), "ddd M/d/yyyy h:mm AP") : ""
+        const body   = (d.bodyHtml && d.bodyHtml.toString().length > 0) ? d.bodyHtml : (d.snippet || "")
+        return '<br><br><blockquote style="margin:0 0 0 6px;padding-left:8px;border-left:2px solid #999;color:inherit;">'
+             + '<b>From:</b> ' + sender + '<br>'
+             + (date ? '<b>Date:</b> ' + date + '<br>' : '')
+             + '<b>Subject:</b> ' + subj + '<br><br>'
+             + body
+             + '</blockquote>'
     }
 
     // Returns the raw IMAP folder name for Trash on the given account (host).
@@ -1142,6 +1141,39 @@ Kirigami.ApplicationWindow {
         if (!imapServiceObj) return
         const keys = Object.keys(root.selectedMessageKeys)
         if (keys.length > 0) {
+            // Mark rows for instant visual collapse.
+            const pendingNow = Object.assign({}, root.pendingDeleteKeys)
+            for (const k of keys) pendingNow[k] = true
+            root.pendingDeleteKeys = pendingNow
+
+            // If the currently viewed message is being deleted, auto-select the next one.
+            // (The hover-trash icon uses selectedMessageKeys even for a single message.)
+            const currentKey = root.selectedMessageKey
+            if (currentKey.length > 0 && keys.indexOf(currentKey) >= 0) {
+                const mdl = root.messageListModelObj
+                let nextKey = ""
+                if (mdl) {
+                    const n = mdl.visibleRowCount
+                    let currentIdx = -1
+                    for (let i = 0; i < n; ++i) {
+                        const r = mdl.rowAt(i)
+                        if (r && r.messageKey === currentKey) { currentIdx = i; break }
+                    }
+                    for (let i = currentIdx + 1; i < n && !nextKey; ++i) {
+                        const r = mdl.rowAt(i)
+                        if (r && !r.isHeader && r.messageKey && keys.indexOf(r.messageKey.toString()) < 0)
+                            nextKey = r.messageKey.toString()
+                    }
+                    if (!nextKey) {
+                        for (let i = currentIdx - 1; i >= 0 && !nextKey; --i) {
+                            const r = mdl.rowAt(i)
+                            if (r && !r.isHeader && r.messageKey && keys.indexOf(r.messageKey.toString()) < 0)
+                                nextKey = r.messageKey.toString()
+                        }
+                    }
+                }
+                root.selectedMessageKey = nextKey
+            }
             // Batch delete all checked messages
             const accs = root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
             for (const key of keys) {
@@ -1158,9 +1190,8 @@ Kirigami.ApplicationWindow {
                 moveMessageToFolder(p.accountEmail, p.folder, p.uid, trashFolderForHost(host))
             }
             root.selectedMessageKeys = ({})
-            root.selectedMessageKey = ""
         } else if (root.selectedMessageData) {
-            // Single message — current viewed message
+            // Single message — current viewed message (e.g. toolbar Delete button)
             const d = root.selectedMessageData
             const accs = root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
             let host = ""
@@ -1170,6 +1201,33 @@ Kirigami.ApplicationWindow {
                     host = acc.imapHost || acc["imapHost"] || ""
                     break
                 }
+            }
+            // Mark row for instant visual collapse.
+            const deletedKey = root.selectedMessageKey
+            const pendingNow2 = Object.assign({}, root.pendingDeleteKeys)
+            pendingNow2[deletedKey] = true
+            root.pendingDeleteKeys = pendingNow2
+            // Auto-select the next message before removing the current one.
+            const mdl = root.messageListModelObj
+            if (mdl) {
+                const n = mdl.visibleRowCount
+                let currentIdx = -1
+                for (let i = 0; i < n; ++i) {
+                    const r = mdl.rowAt(i)
+                    if (r && r.messageKey === deletedKey) { currentIdx = i; break }
+                }
+                let nextKey = ""
+                for (let i = currentIdx + 1; i < n && !nextKey; ++i) {
+                    const r = mdl.rowAt(i)
+                    if (r && !r.isHeader && r.messageKey) nextKey = r.messageKey.toString()
+                }
+                if (!nextKey) {
+                    for (let i = currentIdx - 1; i >= 0 && !nextKey; --i) {
+                        const r = mdl.rowAt(i)
+                        if (r && !r.isHeader && r.messageKey) nextKey = r.messageKey.toString()
+                    }
+                }
+                root.selectedMessageKey = nextKey
             }
             moveMessageToFolder(d.accountEmail, d.folder, d.uid, trashFolderForHost(host))
         }
@@ -1446,6 +1504,10 @@ Kirigami.ApplicationWindow {
                             { text: i18n("Chat..."), icon: "im-user-online" },
                             { text: i18n("Channel..."), icon: "network-workgroup" }
                         ]
+                        onTriggered: (actionText) => {
+                            if (actionText === "" || actionText === i18n("Mail..."))
+                                root.openComposeDialog()
+                        }
                     }
                     Components.MailActionButton {
                         iconName: "view-refresh"
@@ -1465,9 +1527,66 @@ Kirigami.ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Kirigami.Units.largeSpacing
 
-                    Components.MailActionButton { iconName: "mail-reply-sender"; text: i18n("Reply"); menuItems: [{ text: i18n("Reply"), icon: "mail-reply-sender" }, { text: i18n("Reply to all"), icon: "mail-reply-all" }] }
-                    Components.MailActionButton { iconName: "mail-reply-all"; text: i18n("Reply All") }
-                    Components.MailActionButton { iconName: "mail-forward"; text: i18n("Forward") }
+                    Components.MailActionButton {
+                        iconName: "mail-reply-sender"
+                        text: i18n("Reply")
+                        menuItems: [
+                            { text: i18n("Reply"),        icon: "mail-reply-sender" },
+                            { text: i18n("Reply to all"), icon: "mail-reply-all"    }
+                        ]
+                        onTriggered: (actionText) => {
+                            const d = root.selectedMessageData; if (!d) return
+                            const replyTo = (d.replyTo && d.replyTo.length > 0) ? d.replyTo : d.sender
+                            if (actionText === i18n("Reply to all")) {
+                                const myEmails = (root.accountRepositoryObj ? root.accountRepositoryObj.accounts : [])
+                                                 .map(a => (a.email || "").toLowerCase())
+                                const ccRaw = (d.recipient || "").split(",").map(s => s.trim()).filter(s => {
+                                    if (!s.length) return false
+                                    const l = s.toLowerCase()
+                                    return !myEmails.some(me => l.includes(me))
+                                })
+                                composeDialog.openComposeReply({
+                                    toList: [replyTo], ccList: ccRaw,
+                                    subject: root._replySubject(d.subject), body: root._quotedBody(d)
+                                })
+                            } else {
+                                composeDialog.openComposeReply({
+                                    toList: [replyTo],
+                                    subject: root._replySubject(d.subject), body: root._quotedBody(d)
+                                })
+                            }
+                        }
+                    }
+                    Components.MailActionButton {
+                        iconName: "mail-reply-all"
+                        text: i18n("Reply All")
+                        onTriggered: {
+                            const d = root.selectedMessageData; if (!d) return
+                            const replyTo = (d.replyTo && d.replyTo.length > 0) ? d.replyTo : d.sender
+                            const myEmails = (root.accountRepositoryObj ? root.accountRepositoryObj.accounts : [])
+                                             .map(a => (a.email || "").toLowerCase())
+                            const ccRaw = (d.recipient || "").split(",").map(s => s.trim()).filter(s => {
+                                if (!s.length) return false
+                                const l = s.toLowerCase()
+                                return !myEmails.some(me => l.includes(me))
+                            })
+                            composeDialog.openComposeReply({
+                                toList: [replyTo], ccList: ccRaw,
+                                subject: root._replySubject(d.subject), body: root._quotedBody(d)
+                            })
+                        }
+                    }
+                    Components.MailActionButton {
+                        iconName: "mail-forward"
+                        text: i18n("Forward")
+                        onTriggered: {
+                            const d = root.selectedMessageData; if (!d) return
+                            composeDialog.openComposeReply({
+                                toList: [],
+                                subject: root._fwdSubject(d.subject), body: root._quotedBody(d)
+                            })
+                        }
+                    }
                     Components.MailActionButton { iconName: "mail-mark-important"; text: i18n("Mark"); menuItems: [{ text: i18n("Read"), icon: "mail-mark-read" }, { text: i18n("Unread"), icon: "mail-mark-unread" }] }
                     Components.MailActionButton { iconName: "archive-insert"; text: i18n("Archive") }
                     Components.MailActionButton { iconName: "edit-delete"; text: i18n("Delete"); onTriggered: root.deleteSelectedMessages() }

@@ -183,7 +183,7 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
         QStringLiteral("gmail.com"), QStringLiteral("googlemail.com"),
         QStringLiteral("outlook.com"), QStringLiteral("hotmail.com"), QStringLiteral("live.com"),
         QStringLiteral("icloud.com"), QStringLiteral("me.com"),
-        QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk")
+        QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk"), QStringLiteral("mail.com"),
     };
 
     if (!likelyPersonalDomains.contains(domain)) {
@@ -393,7 +393,8 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
 
     static const QSet bimiSkip = {
         QStringLiteral("gmail.com"), QStringLiteral("google.com"), QStringLiteral("googlemail.com"),
-        QStringLiteral("twitter.com"), QStringLiteral("youtube.com"), QStringLiteral("icloud.com"), QStringLiteral("outlook.com")
+        QStringLiteral("twitter.com"), QStringLiteral("youtube.com"), QStringLiteral("icloud.com"), QStringLiteral("outlook.com"),
+        QStringLiteral("mail.com"),
     };
 
     if (bimiSkip.contains(d)) {
@@ -601,7 +602,8 @@ resolveFaviconLogoUrl(const QString &domain) {
         QStringLiteral("outlook.com"), QStringLiteral("hotmail.com"), QStringLiteral("live.com"),
         QStringLiteral("icloud.com"), QStringLiteral("me.com"),
         QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk"),
-        QStringLiteral("google.com"), QStringLiteral("twitter.com"), QStringLiteral("youtube.com")
+        QStringLiteral("google.com"), QStringLiteral("twitter.com"), QStringLiteral("youtube.com"),
+        QStringLiteral("mail.com")
     };
 
     if (skip.contains(d)) {

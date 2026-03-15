@@ -2288,6 +2288,13 @@ qint64 DataStore::folderMaxUid(const QString &accountEmail, const QString &folde
     return maxUid;
 }
 
+qint64 DataStore::folderMessageCount(const QString &accountEmail, const QString &folder) const
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return 0;
+    return folderEdgeCount(database, accountEmail, folder);
+}
+
 QVariantMap DataStore::folderSyncStatus(const QString &accountEmail, const QString &folder) const
 {
     QVariantMap out;
@@ -2840,10 +2847,15 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
                              << "hasMimeHeaders=" << hasMimeHeaders;
     }
 
-    // Only reload the list if the tracking pixel flag actually changed — body_html
-    // is loaded on demand and is not part of the list model.
+    // Only reload the list when the tracking-pixel flag changed — that flag IS
+    // part of the list model (MessageCard shows an indicator). body_html is NOT
+    // a list model role; QML bindings that need the fresh body listen to
+    // bodyHtmlUpdated instead of waiting for an inbox reload.
     if (changed && hasTP != prevTP)
         scheduleReloadInbox();
+
+    if (changed)
+        emit bodyHtmlUpdated(accountEmail.trimmed(), folder.trimmed(), uid.trimmed());
 
     return changed;
 }
@@ -3646,6 +3658,43 @@ QString DataStore::displayNameForEmail(const QString &email) const
     q.bindValue(QStringLiteral(":email"), e);
     if (!q.exec() || !q.next()) return {};
     return q.value(0).toString().trimmed();
+}
+
+QVariantList DataStore::searchContacts(const QString &prefix, int limit) const
+{
+    QVariantList out;
+    if (QThread::currentThread() != thread())
+        return out;
+
+    const QString p = prefix.trimmed();
+    if (p.isEmpty())
+        return out;
+
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return out;
+
+    const QString pattern = p + QLatin1Char('%');
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(
+        "SELECT email, display_name FROM contact_display_names "
+        "WHERE email LIKE :pat OR display_name LIKE :pat2 "
+        "ORDER BY display_score DESC, last_seen_at DESC "
+        "LIMIT :lim"
+    ));
+    q.bindValue(QStringLiteral(":pat"),  pattern);
+    q.bindValue(QStringLiteral(":pat2"), pattern);
+    q.bindValue(QStringLiteral(":lim"),  limit);
+    if (!q.exec())
+        return out;
+
+    while (q.next()) {
+        QVariantMap row;
+        row.insert(QStringLiteral("email"),       q.value(0).toString());
+        row.insert(QStringLiteral("displayName"), q.value(1).toString().trimmed());
+        out.append(row);
+    }
+    return out;
 }
 
 QVariantMap DataStore::migrationStats() const

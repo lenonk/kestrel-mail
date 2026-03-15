@@ -32,6 +32,7 @@
 #include <QStandardPaths>
 #include <QFutureWatcher>
 #include <QProcess>
+#include <QSemaphore>
 #include <QtConcurrentRun>
 
 #include "sync/idlewatcher.h"
@@ -58,7 +59,15 @@ QWaitCondition g_poolWait;
 std::vector<PooledConnSlot> g_poolSlots;
 std::atomic_bool g_poolInitialized{false};
 std::function<QString(const QString &email)> g_poolTokenRefresher;
-constexpr int kOperationalPoolMax = 5;
+// 3 pool + 1 dedicated hydrate + 1 IDLE = 5 total, within Gmail's per-account limit.
+constexpr int kOperationalPoolMax = 3;
+
+// Only 1 background body-hydration at a time; user-initiated hydrations bypass this.
+QSemaphore g_bgHydrateSem{1};
+
+// Limit concurrent background folder syncs so they can't exhaust the connection pool.
+// User-initiated syncs (syncAll / syncFolder with announce=true) bypass this.
+QSemaphore g_bgFolderSyncSem{1};
 constexpr int kPoolAcquireTimeoutMs = 3500;
 
 // Dedicated hydration slot — one per account, established before the pool.
@@ -69,9 +78,7 @@ std::vector<PooledConnSlot> g_hydrateSlots;
 
 static bool isBackgroundOwner(const QString &owner) {
     return owner.startsWith("bg-", Qt::CaseInsensitive)
-        || owner.startsWith("background", Qt::CaseInsensitive)
-        || owner == "prefetch-attachments"_L1
-        || owner == "prefetch-images"_L1;
+        || owner.startsWith("background", Qt::CaseInsensitive);
 }
 }
 
@@ -592,7 +599,33 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
     if (toFetch.isEmpty())
         return;
 
-    runBackgroundTask([this, accountEmail, folderName, uid, toFetch]() {
+    // Dedup by (account, sorted-partIds): all folder representations of the same
+    // message have identical attachment parts. Only one background task needs to
+    // run per message — prevents N concurrent pool acquisitions when QML fires
+    // one prefetchAttachments call per candidate folder.
+    QStringList partIds;
+    for (const auto &a : toFetch)
+        partIds.push_back(a.toMap().value("partId"_L1).toString());
+    std::sort(partIds.begin(), partIds.end());
+    const QString taskKey = "task:"_L1 + accountEmail + "|"_L1 + partIds.join(","_L1);
+
+    {
+        QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
+        if (m_inFlightAttachmentDownloads.contains(taskKey))
+            return;
+        m_inFlightAttachmentDownloads.insert(taskKey);
+    }
+
+    runBackgroundTask([this, accountEmail, folderName, uid, toFetch, taskKey]() {
+        struct TaskGuard {
+            ImapService *svc;
+            QString key;
+            ~TaskGuard() {
+                QMutexLocker lock(&svc->m_inFlightAttachmentDownloadsMutex);
+                svc->m_inFlightAttachmentDownloads.remove(key);
+            }
+        } taskGuard{this, taskKey};
+
         auto cxn = getPooledConnection(accountEmail, "prefetch-attachments");
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
@@ -1454,7 +1487,37 @@ ImapService::syncFolderInternal(const AccountInfo &account,
     }
 
     const bool reconcileDeletes = !announce && !hadIdleHint && minUid > 0;
-    const int budget = (minUid == 0) ? Imap::SyncUtils::recentFetchCount() : 0;
+    const int fetchTarget = Imap::SyncUtils::recentFetchCount();
+    int budget;
+    if (minUid == 0) {
+        // First sync: fetch up to fetchTarget newest messages (-1 = unlimited).
+        budget = fetchTarget;
+    } else {
+        // Incremental sync: backfill older messages, but only once per session per folder.
+        const QString folderKey = target.trimmed().toLower();
+        bool shouldBackfill = false;
+        {
+            QMutexLocker lock(&m_backfilledFoldersMutex);
+            if (!m_backfilledFolders.contains(folderKey)) {
+                m_backfilledFolders.insert(folderKey);
+                shouldBackfill = true;
+            }
+        }
+
+        if (!shouldBackfill) {
+            budget = 0;
+        } else if (fetchTarget < 0) {
+            // No target set — backfill everything missing.
+            budget = -1;
+        } else {
+            qint64 localCount = 0;
+            QMetaObject::invokeMethod(this, [this, &localCount, email = email, &target]() {
+                if (m_store) localCount = m_store->folderMessageCount(email, target);
+            }, Qt::BlockingQueuedConnection);
+            budget = (localCount < static_cast<qint64>(fetchTarget))
+                         ? static_cast<int>(fetchTarget - localCount) : 0;
+        }
+    }
 
     const auto onHeader = [&, email = email](const QVariantMap &h) mutable {
         auto row = h;
@@ -1697,6 +1760,17 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             return {};
         }
 
+        // Serialize all background hydrations to a single connection slot so
+        // the pool stays available for user actions, syncs, and IDLE.
+        // User-initiated hydrations skip this entirely.
+        const bool isBg = !userInitiated;
+        if (isBg && !g_bgHydrateSem.tryAcquire(1, 60'000))
+            return {};
+        struct SemGuard {
+            bool active;
+            ~SemGuard() { if (active) g_bgHydrateSem.release(); }
+        } semGuard{isBg};
+
         Imap::MessageHydrator::Request r;
         r.folderName = folderNorm; r.uid = uidNorm;
 
@@ -1728,10 +1802,8 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
                     pooled = getPooledConnection(emailCopy, "hydrate-user-fallback"_L1);
             }
         } else {
-            qint8 attempts = 0;
+            // Semaphore ensures only 1 bg hydrate runs; one attempt is enough.
             pooled = getPooledConnection(emailCopy, "bg-hydrate"_L1);
-            while (!pooled && attempts++ < 10)
-                pooled = getPooledConnection(emailCopy, "bg-hydrate-retry"_L1);
         }
 
         const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
@@ -1893,6 +1965,15 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
     runAsync(
         [this, accounts, target, announce]() -> SyncResult {
+            // Cap concurrent background syncs to keep pool connections available.
+            const bool isBgSync = !announce;
+            if (isBgSync && !g_bgFolderSyncSem.tryAcquire(1, 30'000))
+                return SyncResult{};
+            struct FolderSyncGuard {
+                bool active;
+                ~FolderSyncGuard() { if (active) g_bgFolderSyncSem.release(); }
+            } fsgGuard{isBgSync};
+
             SyncResult result;
             int inboxInserted = 0;
             int seqNum = 0;

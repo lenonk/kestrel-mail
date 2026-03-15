@@ -54,9 +54,14 @@ public:
 
     // Connection parameters saved during connectAndAuth.
     [[nodiscard]] QString host()             const { return m_host; }
+    [[nodiscard]] int     port()             const { return m_port; }
     [[nodiscard]] QString email()            const { return m_email; }
     [[nodiscard]] QString accessToken()      const { return m_accessToken; }
     [[nodiscard]] QString selectedFolder()   const { return m_selectedFolder; }
+
+    // Re-authenticate using credentials saved from the last connectAndAuth() call.
+    // Returns true on success. Does nothing and returns false if no credentials are stored.
+    bool tryReconnect();
 
     // Execute a generic IMAP command (tag managed internally). Returns response as QString.
     [[nodiscard]] QString execute(const QString &command);
@@ -104,6 +109,7 @@ private:
     bool    m_authenticated = false;
 
     QString m_host;
+    int     m_port         = 993;
     QString m_email;
     QString m_accessToken;
     QString m_selectedFolder;

@@ -42,6 +42,7 @@ public:
     Q_INVOKABLE QStringList folderUids(const QString &accountEmail, const QString &folder) const;
     QStringList folderUidsWithNullSnippet(const QString &accountEmail, const QString &folder) const;
     Q_INVOKABLE qint64 folderMaxUid(const QString &accountEmail, const QString &folder) const;
+    Q_INVOKABLE qint64 folderMessageCount(const QString &accountEmail, const QString &folder) const;
     Q_INVOKABLE QVariantMap folderSyncStatus(const QString &accountEmail, const QString &folder) const;
     Q_INVOKABLE void upsertFolderSyncStatus(const QString &accountEmail, const QString &folder,
                                             qint64 uidNext, qint64 highestModSeq, qint64 messages);
@@ -89,6 +90,7 @@ public:
     Q_INVOKABLE bool isSenderTrusted(const QString &domain) const;
     Q_INVOKABLE void setTrustedSenderDomain(const QString &domain);
     Q_INVOKABLE QVariantList attachmentsForMessage(const QString &accountEmail, const QString &folder, const QString &uid) const;
+    Q_INVOKABLE QVariantList searchContacts(const QString &prefix, int limit = 10) const;
     void upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments);
 
 signals:
@@ -97,6 +99,9 @@ signals:
     // Emitted immediately after the DB is updated, before the full inbox reload.
     // Allows the message list to update just the unread dot for a single row instantly.
     void messageMarkedRead(const QString &accountEmail, const QString &uid);
+    // Emitted after body_html is stored for a message. Does NOT trigger an inbox
+    // reload — QML bindings that need the fresh body should depend on this signal.
+    void bodyHtmlUpdated(const QString &accountEmail, const QString &folder, const QString &uid);
 
 private:
     QString m_connectionName;

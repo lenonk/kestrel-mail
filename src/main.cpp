@@ -24,6 +24,7 @@
 #include "core/store/datastore.h"
 #include "core/store/messagelistmodel.h"
 #include "core/transport/imap/imapservice.h"
+#include "core/transport/smtp/smtpservice.h"
 
 class CachingNetworkAccessManagerFactory : public QQmlNetworkAccessManagerFactory
 {
@@ -71,6 +72,7 @@ int main(int argc, char *argv[])
     HtmlProcessor htmlProcessor(&engine);
     ImapService imapService(&accountRepository, &dataStore, &tokenVault, &engine);
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &imapService, &ImapService::shutdown);
+    SmtpService smtpService(&accountRepository, &tokenVault, &engine);
 
     engine.rootContext()->setContextProperty("providerProfiles", &providerProfiles);
     engine.rootContext()->setContextProperty("accountSetup", &accountSetup);
@@ -79,6 +81,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("messageListModel", &messageListModel);
     engine.rootContext()->setContextProperty("htmlProcessor", &htmlProcessor);
     engine.rootContext()->setContextProperty("imapService", &imapService);
+    engine.rootContext()->setContextProperty("smtpService", &smtpService);
 #if defined(NDEBUG)
     engine.rootContext()->setContextProperty("kestrelDebugBuild", false);
 #else
