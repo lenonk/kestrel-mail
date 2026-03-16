@@ -324,6 +324,7 @@ Item {
         if (!account.length || !folder.length || !uid.length)
             return;
         let items = appRoot.imapServiceObj.attachmentsForMessage(account, folder, uid);
+        let activeUid = uid;
         if ((!items || items.length === 0) && appRoot.dataStoreObj && appRoot.dataStoreObj.fetchCandidatesForMessageKey) {
             const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
             for (let i = 0; i < candidates.length; ++i) {
@@ -335,17 +336,21 @@ Item {
                 const trial = appRoot.imapServiceObj.attachmentsForMessage(account, cf, cu);
                 if (trial && trial.length > 0) {
                     items = trial;
+                    activeUid = cu;
                     break;
                 }
             }
         }
         items = items || [];
         const paths = {};
+        const progress = {};
         for (let i = 0; i < items.length; i++) {
             const a = items[i];
-            const lp = appRoot.imapServiceObj.cachedAttachmentPath(account, uid, a.partId);
-            if (lp.length > 0)
+            const lp = appRoot.imapServiceObj.cachedAttachmentPath(account, activeUid, a.partId);
+            if (lp.length > 0) {
                 paths[a.partId] = lp;
+                progress[a.partId] = 100;
+            }
         }
         const nextItems = Object.assign({}, cardAttachmentItems);
         nextItems[key] = items;
@@ -354,6 +359,10 @@ Item {
             const nextPaths = Object.assign({}, cardAttachmentLocalPaths);
             nextPaths[key] = paths;
             cardAttachmentLocalPaths = nextPaths;
+
+            const nextProgress = Object.assign({}, cardAttachmentProgress);
+            nextProgress[key] = Object.assign({}, nextProgress[key] || {}, progress);
+            cardAttachmentProgress = nextProgress;
         }
     }
 

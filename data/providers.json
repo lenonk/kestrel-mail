@@ -10,7 +10,7 @@
     "supportsOAuth2": true,
     "oauthAuthUrl": "https://accounts.google.com/o/oauth2/v2/auth",
     "oauthTokenUrl": "https://oauth2.googleapis.com/token",
-    "oauthScopes": "https://mail.google.com/",
+    "oauthScopes": "openid profile email https://mail.google.com/",
     "oauthClientId": "838689413408-g7bpqtpc4hb3bihelaa41a7lbdo2e40r.apps.googleusercontent.com",
     "oauthClientSecret": "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"
   },

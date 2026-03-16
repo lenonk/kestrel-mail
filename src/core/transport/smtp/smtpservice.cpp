@@ -7,10 +7,16 @@
 #include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
+#include <QMimeDatabase>
 #include <QNetworkAccessManager>
+#include <QRegularExpression>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSslSocket>
+#include <QUuid>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QtConcurrent>
@@ -88,6 +94,127 @@ bool smtpSend(QSslSocket &sock, const QByteArray &cmd) {
     return sock.write(cmd) >= 0 && sock.flush();
 }
 
+QByteArray foldBase64(const QByteArray &raw)
+{
+    const QByteArray b64 = raw.toBase64();
+    QByteArray out;
+    out.reserve(b64.size() + b64.size() / 76 + 8);
+    for (int i = 0; i < b64.size(); i += 76) {
+        out += b64.mid(i, 76);
+        out += "\r\n";
+    }
+    return out;
+}
+
+QString stripHtmlTags(const QString &html)
+{
+    QString out = html;
+    out.replace(QRegularExpression(QStringLiteral("<style\\b[^>]*>[\\s\\S]*?</style>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral(" "));
+    out.replace(QRegularExpression(QStringLiteral("<script\\b[^>]*>[\\s\\S]*?</script>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral(" "));
+    out.replace(QRegularExpression(QStringLiteral("<br\\s*/?>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral("\n"));
+    out.replace(QRegularExpression(QStringLiteral("</p\\s*>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral("\n"));
+    out.replace(QRegularExpression(QStringLiteral("<[^>]+>")), QStringLiteral(""));
+    out.replace(QStringLiteral("&nbsp;"), QStringLiteral(" "));
+    out.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+    out.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
+    out.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+    return out.trimmed();
+}
+
+bool bodyLooksHtml(const QString &body)
+{
+    const QString s = body.trimmed();
+    if (s.startsWith(QStringLiteral("<!DOCTYPE"), Qt::CaseInsensitive)) return true;
+    if (s.startsWith(QStringLiteral("<html"), Qt::CaseInsensitive)) return true;
+    if (s.contains(QRegularExpression(QStringLiteral("<\\s*(p|div|br|span|table|body|head|meta)\\b"), QRegularExpression::CaseInsensitiveOption))) return true;
+    return false;
+}
+
+QString extractAddrSpec(const QString &recipient)
+{
+    QString addr = recipient.trimmed();
+    const int lt = addr.lastIndexOf('<');
+    const int gt = addr.lastIndexOf('>');
+    if (lt >= 0 && gt > lt)
+        addr = addr.mid(lt + 1, gt - lt - 1).trimmed();
+    return addr;
+}
+
+QString subjectHeader(const QString &subject)
+{
+    const QString subjectLine = subject.isEmpty() ? QStringLiteral("(no subject)") : subject;
+    for (const QChar c : subjectLine) {
+        if (c.unicode() > 127) {
+            return QStringLiteral("Subject: =?UTF-8?B?") + QString::fromLatin1(subjectLine.toUtf8().toBase64()) + QStringLiteral("?=\r\n");
+        }
+    }
+    return QStringLiteral("Subject: ") + subjectLine + QStringLiteral("\r\n");
+}
+
+QByteArray buildInlineBodyPart(const QString &body)
+{
+    const bool isHtml = bodyLooksHtml(body);
+    const QString plain = isHtml ? stripHtmlTags(body) : body;
+
+    if (!isHtml) {
+        QByteArray part;
+        part += "Content-Type: text/plain; charset=UTF-8\r\n";
+        part += "Content-Transfer-Encoding: base64\r\n\r\n";
+        part += foldBase64(plain.toUtf8());
+        return part;
+    }
+
+    const QByteArray altBoundary = "alt-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8();
+    QByteArray part;
+    part += "Content-Type: multipart/alternative; boundary=\"" + altBoundary + "\"\r\n\r\n";
+
+    part += "--" + altBoundary + "\r\n";
+    part += "Content-Type: text/plain; charset=UTF-8\r\n";
+    part += "Content-Transfer-Encoding: base64\r\n\r\n";
+    part += foldBase64(plain.toUtf8());
+
+    part += "--" + altBoundary + "\r\n";
+    part += "Content-Type: text/html; charset=UTF-8\r\n";
+    part += "Content-Transfer-Encoding: base64\r\n\r\n";
+    part += foldBase64(body.toUtf8());
+
+    part += "--" + altBoundary + "--\r\n";
+    return part;
+}
+
+bool appendAttachmentPart(QByteArray &msg, const QString &path, QString *errorOut)
+{
+    QFileInfo fi(path);
+    QFile file(path);
+    if (!fi.exists() || !fi.isFile() || !file.open(QIODevice::ReadOnly)) {
+        if (errorOut) *errorOut = QStringLiteral("Attachment read failed: ") + path;
+        return false;
+    }
+
+    const QByteArray bytes = file.readAll();
+    const QString filename = fi.fileName();
+    const QString mime = QMimeDatabase().mimeTypeForFile(fi).name();
+
+    msg += "Content-Type: " + mime.toUtf8() + "; name=\"" + filename.toUtf8() + "\"\r\n";
+    msg += "Content-Disposition: attachment; filename=\"" + filename.toUtf8() + "\"\r\n";
+    msg += "Content-Transfer-Encoding: base64\r\n\r\n";
+    msg += foldBase64(bytes);
+    return true;
+}
+
+QByteArray dotStuff(const QByteArray &wire)
+{
+    QByteArray out;
+    out.reserve(wire.size() + 64);
+    const QList<QByteArray> lines = wire.split('\n');
+    for (QByteArray line : lines) {
+        if (line.endsWith('\r')) line.chop(1);
+        if (line.startsWith('.')) out += '.';
+        out += line + "\r\n";
+    }
+    return out;
+}
+
 } // namespace
 
 SmtpService::SmtpService(AccountRepository *accounts, TokenVault *vault, QObject *parent)
@@ -110,6 +237,7 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
     const QStringList bccList = params.value("bccList"_L1).toStringList();
     const QString subject     = params.value("subject"_L1).toString();
     const QString body        = params.value("body"_L1).toString();
+    const QStringList attachmentPaths = params.value("attachments"_L1).toStringList();
 
     if (fromEmail.isEmpty() || toList.isEmpty())
         return {false, "From and To addresses are required"_L1};
@@ -207,13 +335,7 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
     // RCPT TO for all recipients
     const QStringList allRecipients = toList + ccList + bccList;
     for (const QString &recipient : allRecipients) {
-        // Strip display name — extract just the addr-spec
-        QString addr = recipient.trimmed();
-        const int lt = addr.lastIndexOf('<');
-        const int gt = addr.lastIndexOf('>');
-        if (lt >= 0 && gt > lt)
-            addr = addr.mid(lt + 1, gt - lt - 1).trimmed();
-
+        const QString addr = extractAddrSpec(recipient);
         smtpSend(sock, "RCPT TO:<" + addr.toUtf8() + ">\r\n");
         resp = smtpReadLine(sock);
         if (smtpCode(resp) != 250 && smtpCode(resp) != 251) {
@@ -230,17 +352,18 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
         return {false, "DATA command rejected: "_L1 + QString::fromLatin1(resp.trimmed())};
     }
 
-    // Build RFC 2822 message
+    // Build RFC 2822 + MIME message
     QByteArray msg;
 
-    const QString fromDisplay = account.value("accountName"_L1).toString().trimmed();
+    const QString fromDisplay = account.value("displayName"_L1).toString().trimmed().isEmpty()
+            ? account.value("accountName"_L1).toString().trimmed()
+            : account.value("displayName"_L1).toString().trimmed();
     const QString fromFormatted = fromDisplay.isEmpty()
         ? "<"_L1 + fromEmail + ">"_L1
         : "\""_L1 + encodeDisplayName(fromDisplay) + "\" <"_L1 + fromEmail + ">"_L1;
 
     msg += "From: " + fromFormatted.toUtf8() + "\r\n";
 
-    // To
     QStringList toFormatted;
     for (const auto &a : toList) toFormatted.append(formatAddress(a));
     msg += "To: " + toFormatted.join(", "_L1).toUtf8() + "\r\n";
@@ -251,36 +374,34 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
         msg += "Cc: " + ccFormatted.join(", "_L1).toUtf8() + "\r\n";
     }
 
-    // Subject — encode if non-ASCII
-    const QString subjectLine = subject.isEmpty() ? "(no subject)"_L1 : subject;
-    bool subjectNeedsEncoding = false;
-    for (const QChar c : subjectLine)
-        if (c.unicode() > 127) { subjectNeedsEncoding = true; break; }
-    if (subjectNeedsEncoding)
-        msg += "Subject: =?UTF-8?B?" + subjectLine.toUtf8().toBase64() + "?=\r\n";
-    else
-        msg += "Subject: " + subjectLine.toUtf8() + "\r\n";
-
+    msg += subjectHeader(subject).toUtf8();
+    msg += "Date: " + QDateTime::currentDateTimeUtc().toString(QStringLiteral("ddd, dd MMM yyyy HH:mm:ss +0000")).toUtf8() + "\r\n";
+    msg += "Message-ID: <" + QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8() + "@kestrel.mail>\r\n";
     msg += "MIME-Version: 1.0\r\n";
-    msg += "Content-Type: text/plain; charset=UTF-8\r\n";
-    msg += "Content-Transfer-Encoding: quoted-printable\r\n";
-    msg += "\r\n";
 
-    // Encode body as quoted-printable (simplified: just escape lines starting with '.')
-    const QByteArray bodyUtf8 = body.toUtf8();
-    for (const QByteArray &line : bodyUtf8.split('\n')) {
-        QByteArray l = line;
-        if (l.endsWith('\r'))
-            l.chop(1);
-        // Dot-stuffing
-        if (l.startsWith('.'))
-            msg += '.';
-        msg += l + "\r\n";
+    if (attachmentPaths.isEmpty()) {
+        msg += buildInlineBodyPart(body);
+    } else {
+        const QByteArray mixedBoundary = "mix-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8();
+        msg += "Content-Type: multipart/mixed; boundary=\"" + mixedBoundary + "\"\r\n\r\n";
+
+        msg += "--" + mixedBoundary + "\r\n";
+        msg += buildInlineBodyPart(body);
+
+        for (const QString &path : attachmentPaths) {
+            msg += "--" + mixedBoundary + "\r\n";
+            QString attachErr;
+            if (!appendAttachmentPart(msg, path, &attachErr)) {
+                sock.disconnectFromHost();
+                return {false, attachErr};
+            }
+        }
+
+        msg += "--" + mixedBoundary + "--\r\n";
     }
 
-    msg += ".\r\n";
-
-    sock.write(msg);
+    const QByteArray wireMsg = dotStuff(msg) + ".\r\n";
+    sock.write(wireMsg);
     sock.flush();
 
     resp = smtpReadLine(sock, kSmtpDataTimeoutMs);

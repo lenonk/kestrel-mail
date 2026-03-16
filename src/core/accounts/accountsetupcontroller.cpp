@@ -108,6 +108,13 @@ bool AccountSetupController::saveCurrentAccount(const QString &accountName, cons
     account.insert("smtpHost", m_selectedProvider.value("smtpHost"));
     account.insert("smtpPort", m_selectedProvider.value("smtpPort"));
     account.insert("accountName", accountName.trimmed().isEmpty() ? m_email.trimmed() : accountName.trimmed());
+    if (m_oauth) {
+        const QVariantMap profile = m_oauth->profileForEmail(m_email);
+        const QString ownerName = profile.value("displayName").toString().trimmed();
+        if (!ownerName.isEmpty()) {
+            account.insert("displayName", ownerName);
+        }
+    }
     account.insert("encryption", encryption);
     account.insert("authType", m_selectedProvider.value("supportsOAuth2").toBool() ? "oauth2" : "password");
     account.insert("oauthTokenUrl", m_selectedProvider.value("oauthTokenUrl"));

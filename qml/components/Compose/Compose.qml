@@ -85,6 +85,15 @@ Window {
             arr.push('"' + model.get(i).display + '" <' + model.get(i).email + '>');
         return arr;
     }
+    function _accountDisplayText(account) {
+        if (!account)
+            return i18n("Select account");
+        const name = (account.displayName || account.fullName || account.senderName || "").toString().trim();
+        const email = (account.email || "").toString().trim();
+        if (name.length && email.length)
+            return '"' + name + '" <' + email + '>';
+        return email.length ? email : (name.length ? name : i18n("Select account"));
+    }
     function _doSend() {
         if (!smtpServiceObj) {
             sendError = i18n("SMTP service not available");
@@ -354,8 +363,9 @@ Window {
                         id: sendBtn
 
                         alwaysHighlighted: true
-                        enabled: !root.sending
-                        iconName: "mail-send"
+                        enabled: true
+                        iconName: root.sending ? "view-refresh" : "mail-send"
+                        spinning: root.sending
                         menuItems: [
                             {
                                 text: i18n("Send as mass mail"),
@@ -369,6 +379,8 @@ Window {
                         text: root.sending ? i18n("Sending…") : i18n("Send")
 
                         onTriggered: actionText => {
+                            if (root.sending)
+                                return;
                             if (actionText === "")
                                 root._doSend();
                         // TODO: mass mail / send later
@@ -387,23 +399,36 @@ Window {
                     QQC2.ComboBox {
                         id: accountCombo
 
+                        readonly property int edgeInset: 6
+                        readonly property int menuGap: 2
+                        readonly property int arrowSize: 12
+
                         Layout.alignment: Qt.AlignVCenter
                         Layout.preferredHeight: root._rowH - 8
                         Layout.preferredWidth: 300
-                        displayText: currentIndex >= 0 && model && model.length > currentIndex ? '"' + model[currentIndex].accountName + '" <' + model[currentIndex].email + '>' : i18n("Select account")
+                        displayText: currentIndex >= 0 && model && model.length > currentIndex ? root._accountDisplayText(model[currentIndex]) : i18n("Select account")
                         font.pixelSize: 12
                         model: root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
 
                         background: Rectangle {
                             color: accountCombo.hovered ? Qt.rgba(sysPalette.highlight.r, sysPalette.highlight.g, sysPalette.highlight.b, 0.22) : Qt.rgba(sysPalette.highlight.r, sysPalette.highlight.g, sysPalette.highlight.b, 0.09)
                             radius: 4
+
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                anchors.top: parent.top
+                                color: sysPalette.window
+                                opacity: 0.95
+                                width: 1
+                                x: parent.width - accountCombo.arrowSize - accountCombo.menuGap * 2 - 1
+                            }
                         }
                         contentItem: Text {
                             color: Kirigami.Theme.textColor
                             elide: Text.ElideRight
                             font: accountCombo.font
                             leftPadding: 8
-                            rightPadding: 24
+                            rightPadding: accountCombo.arrowSize + accountCombo.menuGap * 2 + accountCombo.edgeInset
                             text: accountCombo.displayText
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -413,18 +438,18 @@ Window {
 
                             font.pixelSize: 12
                             highlighted: accountCombo.highlightedIndex === index
-                            text: '"' + modelData.accountName + '" <' + modelData.email + '>'
+                            text: root._accountDisplayText(modelData)
                             width: accountCombo.width
                         }
                         indicator: Kirigami.Icon {
                             anchors.right: parent.right
-                            anchors.rightMargin: 8
+                            anchors.rightMargin: accountCombo.menuGap
                             anchors.verticalCenter: parent.verticalCenter
                             color: Kirigami.Theme.textColor
-                            height: 12
+                            height: accountCombo.arrowSize
                             isMask: true
                             source: "arrow-down"
-                            width: 12
+                            width: accountCombo.arrowSize
                         }
                         popup: QQC2.Popup {
                             padding: 4
@@ -464,7 +489,7 @@ Window {
                     accessoryText: i18n("Add Cc & Bcc")
                     chipModel: toChipModel
                     dataStoreObj: root.dataStoreObj
-                    label: i18n("To")
+                    label: i18n("To:")
                     labelWidth: root._lblW
                     rowHeight: root._rowH
                     showAccessory: !root.showCcBcc
@@ -481,7 +506,7 @@ Window {
                     Layout.fillWidth: true
                     chipModel: ccChipModel
                     dataStoreObj: root.dataStoreObj
-                    label: i18n("Cc")
+                    label: i18n("Cc:")
                     labelWidth: root._lblW
                     rowHeight: root._rowH
                     visible: root.showCcBcc
@@ -494,7 +519,7 @@ Window {
                     Layout.fillWidth: true
                     chipModel: bccChipModel
                     dataStoreObj: root.dataStoreObj
-                    label: i18n("Bcc")
+                    label: i18n("Bcc:")
                     labelWidth: root._lblW
                     rowHeight: root._rowH
                     visible: root.showCcBcc
@@ -515,7 +540,7 @@ Window {
                         Text {
                             color: Kirigami.Theme.disabledTextColor
                             font.pixelSize: 12
-                            text: i18n("Subject")
+                            text: i18n("Subject:")
 
                             anchors {
                                 left: parent.left

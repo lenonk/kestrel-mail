@@ -16,6 +16,7 @@
 #include <QTcpSocket>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QStringList>
 
 OAuthService::OAuthService(TokenVault *vault, QObject *parent)
     : QObject(parent)
@@ -199,6 +200,23 @@ bool OAuthService::completeAuthorization(const QString &callbackOrCode)
         return false;
     }
 
+    QVariantMap profile;
+    const QVariantMap claims = parseJwtPayloadClaims(obj.value(QStringLiteral("id_token")).toString());
+    const QString claimName = claims.value(QStringLiteral("name")).toString().trimmed();
+    const QString claimEmail = claims.value(QStringLiteral("email")).toString().trimmed().toLower();
+    if (!claimName.isEmpty()) {
+        profile.insert(QStringLiteral("displayName"), claimName);
+    }
+    if (!claimEmail.isEmpty()) {
+        profile.insert(QStringLiteral("email"), claimEmail);
+    }
+    if (!profile.isEmpty()) {
+        const QString key = m_pendingEmail.trimmed().toLower();
+        if (!key.isEmpty()) {
+            m_profileByEmail.insert(key, profile);
+        }
+    }
+
     const bool stored = m_vault ? m_vault->storeRefreshToken(m_pendingEmail, refreshToken) : false;
     if (!stored) {
         m_lastStatus = QStringLiteral("Token exchange succeeded but token vault write failed.");
@@ -239,4 +257,38 @@ bool OAuthService::removeStoredRefreshToken(const QString &email)
 {
     if (!m_vault) return false;
     return m_vault->removeRefreshToken(email.trimmed().toLower());
+}
+
+QVariantMap OAuthService::profileForEmail(const QString &email) const
+{
+    const QString key = email.trimmed().toLower();
+    if (key.isEmpty()) {
+        return {};
+    }
+    return m_profileByEmail.value(key);
+}
+
+QVariantMap OAuthService::parseJwtPayloadClaims(const QString &jwt)
+{
+    const QString token = jwt.trimmed();
+    if (token.isEmpty()) {
+        return {};
+    }
+
+    const QStringList parts = token.split('.');
+    if (parts.size() < 2) {
+        return {};
+    }
+
+    QByteArray payload = parts.at(1).toUtf8();
+    payload.replace('-', '+');
+    payload.replace('_', '/');
+    const int remainder = payload.size() % 4;
+    if (remainder == 2) payload.append("==");
+    else if (remainder == 3) payload.append("=");
+    else if (remainder == 1) return {};
+
+    const QByteArray decoded = QByteArray::fromBase64(payload);
+    const QJsonObject obj = QJsonDocument::fromJson(decoded).object();
+    return obj.toVariantMap();
 }

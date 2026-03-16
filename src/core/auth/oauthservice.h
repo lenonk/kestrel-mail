@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QHash>
 #include <QVariantMap>
 
 class QTcpServer;
@@ -22,6 +23,7 @@ public:
     Q_INVOKABLE bool completeAuthorization(const QString &callbackOrCode);
     Q_INVOKABLE bool hasStoredRefreshToken(const QString &email) const;
     Q_INVOKABLE bool removeStoredRefreshToken(const QString &email);
+    Q_INVOKABLE QVariantMap profileForEmail(const QString &email) const;
 
 signals:
     void pendingAuthUrlChanged();
@@ -40,7 +42,9 @@ private:
     QString m_pendingClientId;
     QString m_pendingClientSecret;
     QTcpServer *m_callbackServer = nullptr;
+    QHash<QString, QVariantMap> m_profileByEmail;
 
     static QString randomBase64Url(int bytes);
     static QString sha256Base64Url(const QString &value);
+    static QVariantMap parseJwtPayloadClaims(const QString &jwt);
 };
