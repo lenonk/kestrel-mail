@@ -138,6 +138,35 @@ Kirigami.ApplicationWindow {
         root.calendarSources = next
     }
 
+    function rebuildCalendarSourcesFromGoogle() {
+        if (!root.imapServiceObj || !root.imapServiceObj.googleCalendarList)
+            return
+
+        const incoming = root.imapServiceObj.googleCalendarList
+        if (!incoming || incoming.length === 0)
+            return
+
+        const checkedMap = ({})
+        for (let i = 0; i < root.calendarSources.length; ++i) {
+            const c = root.calendarSources[i]
+            checkedMap[String(c.id || "")] = !!c.checked
+        }
+
+        const next = []
+        for (let i = 0; i < incoming.length; ++i) {
+            const g = incoming[i]
+            const id = String(g.id || "")
+            next.push({
+                account: "gmail",
+                id: id,
+                name: String(g.name || g.summary || id),
+                checked: checkedMap.hasOwnProperty(id) ? checkedMap[id] : true,
+                color: String(g.color || g.backgroundColor || "")
+            })
+        }
+        root.calendarSources = next
+    }
+
     Settings {
         id: uiSettings
         category: "ui"
@@ -561,6 +590,9 @@ Kirigami.ApplicationWindow {
             if (root.imapServiceObj && root.imapServiceObj.initialize) {
                 root.imapServiceObj.initialize()
             }
+            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleCalendars) {
+                root.imapServiceObj.refreshGoogleCalendars()
+            }
         })
     }
 
@@ -592,6 +624,10 @@ Kirigami.ApplicationWindow {
         function onSyncActivityChanged(active) {
             root.accountRefreshing = !!active
             root.refreshInProgress = !!active
+        }
+
+        function onGoogleCalendarListChanged() {
+            root.rebuildCalendarSourcesFromGoogle()
         }
     }
 
@@ -654,6 +690,9 @@ Kirigami.ApplicationWindow {
             // handles first-run; when folders already exist, do one direct selected-folder sync.
             if (hadFolders) {
                 root.syncSelectedFolder(true, true)
+            }
+            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleCalendars) {
+                root.imapServiceObj.refreshGoogleCalendars()
             }
         }
     }

@@ -24,6 +24,7 @@ class QElapsedTimer;
 class ImapService : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(QVariantList googleCalendarList READ googleCalendarList NOTIFY googleCalendarListChanged)
 public:
     explicit ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent = nullptr);
     ~ImapService() override;
@@ -55,6 +56,9 @@ public:
     Q_INVOKABLE QString cachedAttachmentPath(const QString &accountEmail, const QString &uid, const QString &partId) const;
     Q_INVOKABLE QString attachmentPreviewPath(const QString &accountEmail, const QString &uid, const QString &partId,
                                               const QString &fileName, const QString &mimeType);
+    Q_INVOKABLE void refreshGoogleCalendars();
+
+    [[nodiscard]] QVariantList googleCalendarList() const { return m_googleCalendarList; }
 
 signals:
     void syncFinished(bool ok, const QString &message);
@@ -63,6 +67,7 @@ signals:
     void realtimeStatus(bool ok, const QString &message);
     void attachmentReady(const QString &accountEmail, const QString &uid, const QString &partId, const QString &localPath);
     void attachmentDownloadProgress(const QString &accountEmail, const QString &uid, const QString &partId, int progressPercent);
+    void googleCalendarListChanged();
 
 private:
     // Internal result type for async sync work lambdas.
@@ -108,6 +113,8 @@ private:
     struct AttachmentCacheEntry { QString localPath; qint64 expiresAt = 0; };
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;
     mutable QMutex                               m_attachmentFileCacheMutex;
+
+    QVariantList                                 m_googleCalendarList;
 
     QSet<QString>                                m_inFlightAttachmentDownloads;
     mutable QMutex                               m_inFlightAttachmentDownloadsMutex;

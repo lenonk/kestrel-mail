@@ -18,7 +18,9 @@
 #include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSet>
@@ -1623,6 +1625,72 @@ ImapService::refreshFolderList(bool announce) {
                 emit syncFinished(r.ok, r.message);
         }
     );
+}
+
+void
+ImapService::refreshGoogleCalendars() {
+    if (m_destroying || !m_accounts)
+        return;
+
+    const auto accounts = m_accounts->accounts();
+    if (accounts.isEmpty()) {
+        if (!m_googleCalendarList.isEmpty()) {
+            m_googleCalendarList.clear();
+            emit googleCalendarListChanged();
+        }
+        return;
+    }
+
+    runBackgroundTask([this, accounts]() {
+        QString accessToken;
+        for (const auto &info : resolveAccounts(accounts)) {
+            if (info.host.contains("gmail", Qt::CaseInsensitive)) {
+                accessToken = info.accessToken;
+                break;
+            }
+        }
+        if (accessToken.isEmpty())
+            return;
+
+        QNetworkAccessManager nam;
+        QNetworkRequest req{QUrl(QStringLiteral("https://www.googleapis.com/calendar/v3/users/me/calendarList"))};
+        req.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+        QEventLoop loop;
+        QNetworkReply *reply = nam.get(req);
+        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        loop.exec();
+
+        const QByteArray payload = reply->readAll();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        if (!ok)
+            return;
+
+        const auto doc = QJsonDocument::fromJson(payload);
+        if (!doc.isObject())
+            return;
+
+        QVariantList list;
+        const auto items = doc.object().value("items").toArray();
+        list.reserve(items.size());
+        for (const auto &v : items) {
+            const auto o = v.toObject();
+            QVariantMap row;
+            row.insert("id", o.value("id").toString());
+            row.insert("name", o.value("summary").toString());
+            row.insert("color", o.value("backgroundColor").toString());
+            row.insert("checked", true);
+            row.insert("account", "gmail");
+            list.push_back(row);
+        }
+
+        QMetaObject::invokeMethod(this, [this, list]() {
+            m_googleCalendarList = list;
+            emit googleCalendarListChanged();
+        }, Qt::QueuedConnection);
+    });
 }
 
 
