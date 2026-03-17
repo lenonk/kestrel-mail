@@ -161,7 +161,7 @@ QString sanitizeExtractedHtml(QString html)
     if (htmlStart > 0) html = html.mid(htmlStart);
 
     const QString lower2 = html.toLower();
-    const int htmlEnd = lower2.indexOf(QStringLiteral("</html>"));
+    const int htmlEnd = lower2.lastIndexOf(QStringLiteral("</html>"));
     if (htmlEnd >= 0) {
         html = html.left(htmlEnd + 7);
     }

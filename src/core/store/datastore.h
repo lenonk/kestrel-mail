@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QObject>
 #include <QVariantList>
 #include <QStringList>
@@ -109,6 +110,16 @@ private:
     QVariantList m_folders;
     bool m_reloadInboxScheduled = false;
 
+    // In-memory cache for contact_avatars lookups — keyed by normalised email.
+    // Populated on first DB hit; invalidated/updated on upsert. Eliminates
+    // repeated SQL queries during list-scroll delegate creation.
+    mutable QHash<QString, QString> m_avatarCache;
+    static constexpr int kAvatarCacheNotQueried = -1;  // sentinel: email not yet looked up
+
     QSqlDatabase db() const;
     void scheduleReloadInbox();
+    QString avatarDirPath() const;
+    // Parses a data URI, writes bytes to avatarDirPath(), stores file:// URL in DB.
+    // Returns the file:// URL on success, empty string on failure.
+    QString writeAvatarDataUri(const QString &email, const QString &dataUri);
 };

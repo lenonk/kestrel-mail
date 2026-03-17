@@ -28,7 +28,9 @@ struct SyncContext {
     // Optional: returns UIDs of locally-known messages that need snippet regeneration.
     // executeFull will include these in its fetch pass even if they are already in getFolderUids.
     std::function<QStringList(const QString &email, const QString &folder)> getUidsNeedingSnippetRefresh;
-    std::function<void(const QString &email, const QStringList &uids)> removeUids;
+    // Folder-scoped prune: removes folder edges not in remoteUids, then orphan-cleans.
+    // Preferred over removeUids (all-folder) to avoid removing valid edges in other folders.
+    std::function<void(const QString &email, const QString &folder, const QStringList &remoteUids)> pruneFolder;
     std::function<void(const QString &email, const QString &folder, const QStringList &readUids)> onFlagsReconciled;
 
     [[nodiscard]] bool isGmail() const {

@@ -10,6 +10,7 @@
 #include <QHash>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFile>
 #include <QUuid>
 #include <QCryptographicHash>
 #include <QRegularExpression>
@@ -726,15 +727,39 @@ bool DataStore::init()
         }
     }
 
-    // Clear raw HTTPS Google profile photo URLs from contact_avatars — they require auth
-    // and are blocked by the UI's isGoogleProfileish guardrail. Clearing them forces
-    // a re-fetch on the next sync (now with proper Bearer token support).
-    // Use an ancient timestamp so avatarShouldRefresh immediately allows a retry.
+    // Clear raw HTTPS Google profile photo URLs from contact_avatars — they require auth.
     q.exec(QStringLiteral(
         "UPDATE contact_avatars SET avatar_url='', failure_count=0, last_checked_at='2000-01-01T00:00:00' "
         "WHERE source='google-people' "
         "AND (avatar_url LIKE 'https://%' OR avatar_url LIKE 'http://%')"
     ));
+
+    // Clear any raw s2/favicons URLs that slipped through (redirect to faviconV2 which 404s).
+    q.exec(QStringLiteral(
+        "UPDATE contact_avatars SET avatar_url='', failure_count=0, last_checked_at='2000-01-01T00:00:00' "
+        "WHERE avatar_url LIKE 'https://www.google.com/s2/favicons%'"
+    ));
+
+    // Migrate existing data URI avatar entries to files on disk.
+    // After this migration all avatar_url values are either file:// URLs or empty.
+    {
+        QSqlQuery qSel(database);
+        if (qSel.exec(QStringLiteral("SELECT email, avatar_url FROM contact_avatars WHERE avatar_url LIKE 'data:%'"))) {
+            struct MigrateRow { QString email; QString url; };
+            QVector<MigrateRow> rows;
+            while (qSel.next())
+                rows.push_back({qSel.value(0).toString(), qSel.value(1).toString()});
+            for (const auto &row : rows) {
+                const QString fileUrl = writeAvatarDataUri(row.email, row.url);
+                QSqlQuery qUp(database);
+                qUp.prepare(QStringLiteral(
+                    "UPDATE contact_avatars SET avatar_url=:url WHERE email=:email"));
+                qUp.bindValue(QStringLiteral(":url"), fileUrl);  // empty on failure → clears blob
+                qUp.bindValue(QStringLiteral(":email"), row.email);
+                qUp.exec();
+            }
+        }
+    }
 
     // Clear stale esp_vendor values produced by the old Received-chain heuristic.
     // Only values from definitive X-* header markers are kept; everything else is
@@ -948,6 +973,9 @@ bool DataStore::init()
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_folder_message ON message_folder_map(folder, message_id)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_account_message ON message_folder_map(account_email, message_id)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_account_folder_uid ON message_folder_map(account_email, folder, uid)"));
+    // Expression index so lower(folder) comparisons in fetchCandidatesForMessageKey use the index
+    // instead of a full table scan (lower() on a plain-column index is not usable by SQLite).
+    q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_account_lf_uid ON message_folder_map(account_email, lower(folder), uid)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_ml_account_message_label ON message_labels(account_email, message_id, label)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_ml_label_lower ON message_labels(lower(label))"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mtm_account_message_tag ON message_tag_map(account_email, message_id, tag_id)"));
@@ -1048,8 +1076,8 @@ void DataStore::upsertHeaders(const QVariantList &headers)
 
     database.transaction();
     for (const QVariant &v : headers) {
-        const QVariantMap h = v.toMap();
-        if (!h.isEmpty()) upsertHeader(h);
+        if (const QVariantMap h = v.toMap(); !h.isEmpty())
+            upsertHeader(h);
     }
     database.commit();
 
@@ -1502,37 +1530,46 @@ void DataStore::upsertHeader(const QVariantMap &header)
         insertParticipant(QStringLiteral("recipient"), 0, recipientDisplayNameValue, recipientEmailValue, QStringLiteral("header"));
     }
 
-    // Identity-level avatar cache store (phase 1): one avatar per normalized email.
+    // Identity-level avatar cache store: one avatar file URL per normalized email.
+    // Data URIs are written to disk; file:// URLs are stored in the DB.
     if (!senderEmailValue.isEmpty() && !avatarUrlValue.isEmpty()) {
-        QSqlQuery qAvatar(database);
-        qAvatar.prepare(QStringLiteral(R"(
-            INSERT INTO contact_avatars (email, avatar_url, source, last_checked_at, failure_count)
-            VALUES (:email, :avatar_url, :source, datetime('now'), 0)
-            ON CONFLICT(email) DO UPDATE SET
-              avatar_url=excluded.avatar_url,
-              source=CASE WHEN excluded.source IS NOT NULL AND length(trim(excluded.source))>0 THEN excluded.source ELSE contact_avatars.source END,
-              last_checked_at=datetime('now'),
-              failure_count=0
-        )"));
-        qAvatar.bindValue(QStringLiteral(":email"), senderEmailValue);
-        qAvatar.bindValue(QStringLiteral(":avatar_url"), avatarUrlValue);
-        qAvatar.bindValue(QStringLiteral(":source"), avatarSourceValue);
-        qAvatar.exec();
+        const QString storedSenderUrl = avatarUrlValue;
+        if (!storedSenderUrl.isEmpty()) {
+            QSqlQuery qAvatar(database);
+            qAvatar.prepare(QStringLiteral(R"(
+                INSERT INTO contact_avatars (email, avatar_url, source, last_checked_at, failure_count)
+                VALUES (:email, :avatar_url, :source, datetime('now'), 0)
+                ON CONFLICT(email) DO UPDATE SET
+                  avatar_url=excluded.avatar_url,
+                  source=CASE WHEN excluded.source IS NOT NULL AND length(trim(excluded.source))>0 THEN excluded.source ELSE contact_avatars.source END,
+                  last_checked_at=datetime('now'),
+                  failure_count=0
+            )"));
+            qAvatar.bindValue(QStringLiteral(":email"), senderEmailValue);
+            qAvatar.bindValue(QStringLiteral(":avatar_url"), storedSenderUrl);
+            qAvatar.bindValue(QStringLiteral(":source"), avatarSourceValue);
+            qAvatar.exec();
+            m_avatarCache.insert(senderEmailValue, storedSenderUrl);
+        }
     }
     if (!recipientEmailValue.isEmpty() && !recipientAvatarUrlValue.isEmpty()) {
-        QSqlQuery qAvatar(database);
-        qAvatar.prepare(QStringLiteral(R"(
-            INSERT INTO contact_avatars (email, avatar_url, source, last_checked_at, failure_count)
-            VALUES (:email, :avatar_url, 'google-people', datetime('now'), 0)
-            ON CONFLICT(email) DO UPDATE SET
-              avatar_url=excluded.avatar_url,
-              source='google-people',
-              last_checked_at=datetime('now'),
-              failure_count=0
-        )"));
-        qAvatar.bindValue(QStringLiteral(":email"), recipientEmailValue);
-        qAvatar.bindValue(QStringLiteral(":avatar_url"), recipientAvatarUrlValue);
-        qAvatar.exec();
+        const QString storedRecipientUrl = recipientAvatarUrlValue;
+        if (!storedRecipientUrl.isEmpty()) {
+            QSqlQuery qAvatar(database);
+            qAvatar.prepare(QStringLiteral(R"(
+                INSERT INTO contact_avatars (email, avatar_url, source, last_checked_at, failure_count)
+                VALUES (:email, :avatar_url, 'google-people', datetime('now'), 0)
+                ON CONFLICT(email) DO UPDATE SET
+                  avatar_url=excluded.avatar_url,
+                  source='google-people',
+                  last_checked_at=datetime('now'),
+                  failure_count=0
+            )"));
+            qAvatar.bindValue(QStringLiteral(":email"), recipientEmailValue);
+            qAvatar.bindValue(QStringLiteral(":avatar_url"), storedRecipientUrl);
+            qAvatar.exec();
+            m_avatarCache.insert(recipientEmailValue, storedRecipientUrl);
+        }
     } else if (!recipientEmailValue.isEmpty() && recipientAvatarLookupMiss) {
         QSqlQuery qAvatarMiss(database);
         qAvatarMiss.prepare(QStringLiteral(R"(
@@ -1561,39 +1598,34 @@ void DataStore::upsertHeader(const QVariantMap &header)
         )"));
         qAvatarMiss.bindValue(QStringLiteral(":email"), recipientEmailValue);
         qAvatarMiss.exec();
+        m_avatarCache.remove(recipientEmailValue);  // CASE expression; evict to re-query
     }
 
     if (!senderEmailValue.isEmpty() && avatarUrlValue.isEmpty()) {
-        const QString fallbackAvatar = faviconUrlForEmail(senderEmailValue);
+        // No avatar resolved for this sender — record a miss so we don't retry too soon.
+        // Never store raw favicon URLs as fallback (they 404 without session cookies).
         QSqlQuery qAvatarMiss(database);
         qAvatarMiss.prepare(QStringLiteral(R"(
             INSERT INTO contact_avatars (email, avatar_url, source, last_checked_at, failure_count)
-            VALUES (:email, :avatar_url, :source, datetime('now'), 1)
+            VALUES (:email, '', 'lookup-miss', datetime('now'), 1)
             ON CONFLICT(email) DO UPDATE SET
               avatar_url=CASE
-                           -- Keep data URIs — they are fully resolved and good.
-                           WHEN contact_avatars.avatar_url LIKE 'data:%'
+                           -- Preserve existing file:// URLs — they are fully resolved and good.
+                           WHEN contact_avatars.avatar_url LIKE 'file://%'
                            THEN contact_avatars.avatar_url
-                           -- Replace raw HTTPS URLs (fetch failed / auth needed) with favicon fallback.
-                           WHEN excluded.avatar_url IS NOT NULL
-                                AND length(trim(excluded.avatar_url)) > 0
-                           THEN excluded.avatar_url
-                           ELSE contact_avatars.avatar_url
+                           ELSE ''
                          END,
               source=CASE
-                       WHEN contact_avatars.avatar_url LIKE 'data:%'
+                       WHEN contact_avatars.avatar_url LIKE 'file://%'
                        THEN contact_avatars.source
-                       WHEN excluded.source IS NOT NULL AND length(trim(excluded.source)) > 0
-                       THEN excluded.source
-                       ELSE contact_avatars.source
+                       ELSE 'lookup-miss'
                      END,
               last_checked_at=datetime('now'),
               failure_count=contact_avatars.failure_count + 1
         )"));
         qAvatarMiss.bindValue(QStringLiteral(":email"), senderEmailValue);
-        qAvatarMiss.bindValue(QStringLiteral(":avatar_url"), fallbackAvatar);
-        qAvatarMiss.bindValue(QStringLiteral(":source"), fallbackAvatar.isEmpty() ? QStringLiteral("lookup-miss") : QStringLiteral("favicon"));
         qAvatarMiss.exec();
+        m_avatarCache.remove(senderEmailValue);  // CASE expression; evict to re-query
     }
 
     auto upsertDisplayName = [&](const QString &email, const QString &displayName, const QString &source) {
@@ -2586,6 +2618,13 @@ bool DataStore::hasUsableBodyForEdge(const QString &accountEmail, const QString 
     if (lower.contains("cid:"_L1))
         return false;
 
+    // Detect structurally truncated HTML: more </table> than <table> means the body
+    // was cut mid-content (e.g. by the 128 KB partial IMAP fetch window).
+    const int tableOpen  = lower.count("<table"_L1);
+    const int tableClose = lower.count("</table>"_L1);
+    if (tableClose > tableOpen)
+        return false;
+
     return true;
 }
 
@@ -2866,7 +2905,7 @@ void DataStore::scheduleReloadInbox()
         return;
 
     m_reloadInboxScheduled = true;
-    QTimer::singleShot(40, this, [this]() {
+    QTimer::singleShot(300, this, [this]() {
         m_reloadInboxScheduled = false;
         reloadInbox();
     });
@@ -3572,72 +3611,76 @@ QVariantList DataStore::groupedMessagesForSelection(const QString &folderKey,
     return out;
 }
 
+QString DataStore::avatarDirPath() const
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+           + "/kestrel-mail/avatars"_L1;
+}
+
+QString DataStore::writeAvatarDataUri(const QString &email, const QString &dataUri)
+{
+    // Parse "data:image/TYPE;base64,BASE64DATA"
+    static const QRegularExpression re(QStringLiteral(R"(^data:(image/[^;,]+);base64,(.+)$)"),
+                                       QRegularExpression::DotMatchesEverythingOption);
+    const auto m = re.match(dataUri.trimmed());
+    if (!m.hasMatch())
+        return {};
+
+    const QString mime = m.captured(1).trimmed().toLower();
+    const QByteArray bytes = QByteArray::fromBase64(m.captured(2).trimmed().toLatin1());
+    if (bytes.isEmpty())
+        return {};
+
+    QString ext = "bin"_L1;
+    if (mime.startsWith("image/png"_L1))        ext = "png"_L1;
+    else if (mime.contains("jpeg"_L1) || mime.contains("jpg"_L1)) ext = "jpg"_L1;
+    else if (mime.startsWith("image/webp"_L1))  ext = "webp"_L1;
+    else if (mime.startsWith("image/gif"_L1))   ext = "gif"_L1;
+    else if (mime.startsWith("image/svg"_L1))   ext = "svg"_L1;
+
+    const QString dir = avatarDirPath();
+    QDir().mkpath(dir);
+
+    const QString hash = QString::fromLatin1(
+        QCryptographicHash::hash(email.trimmed().toLower().toUtf8(), QCryptographicHash::Sha1).toHex());
+    const QString absPath = dir + "/"_L1 + hash + "."_L1 + ext;
+
+    QFile f(absPath);
+    if (!f.open(QIODevice::WriteOnly))
+        return {};
+    f.write(bytes);
+    f.close();
+
+    return "file://"_L1 + absPath;
+}
+
 QString DataStore::avatarForEmail(const QString &email) const
 {
-    if (QThread::currentThread() != thread()) {
-        const QString e2 = email.trimmed().toLower();
-        const QString fb = faviconUrlForEmail(e2);
-        // qInfo().noquote() << "[avatarForEmail] off-thread-fallback" << "email=" << e2
-        //                   << "thread=" << QThread::currentThread() << "owner=" << thread();
-        return fb;
-    }
+    // Off-thread callers get no result — avatars are only needed on the main thread.
+    if (QThread::currentThread() != thread())
+        return {};
 
     const QString e = email.trimmed().toLower();
-    if (e.isEmpty()) {
-        // qInfo().noquote() << "[avatarForEmail] empty-email";
+    if (e.isEmpty())
         return {};
-    }
 
-    bool suppressGenericFavicon = false;
+    // Fast path: in-memory cache populated on first DB hit.
+    if (m_avatarCache.contains(e))
+        return m_avatarCache.value(e);
+
     auto database = db();
     if (database.isValid() && database.isOpen()) {
         QSqlQuery q(database);
-        q.prepare(QStringLiteral("SELECT avatar_url, source, last_checked_at, failure_count FROM contact_avatars WHERE email=:email LIMIT 1"));
+        q.prepare(QStringLiteral("SELECT avatar_url FROM contact_avatars WHERE email=:email LIMIT 1"));
         q.bindValue(QStringLiteral(":email"), e);
-        if (q.exec()) {
-            if (q.next()) {
-                const QString cached = q.value(0).toString().trimmed();
-                const QString source = q.value(1).toString().trimmed();
-                const QString checked = q.value(2).toString().trimmed();
-                const int failures = q.value(3).toInt();
-                Q_UNUSED(failures);
-                if (!cached.isEmpty()) {
-                    // qInfo().noquote() << "[avatarForEmail] cache-hit" << "email=" << e
-                    //                   << "source=" << source << "len=" << cached.size()
-                    //                   << "checked=" << checked << "failures=" << failures;
-                    return cached;
-                }
-                if (source == QStringLiteral("google-people-miss")) {
-                    suppressGenericFavicon = true;
-                }
-                // qInfo().noquote() << "[avatarForEmail] cache-empty" << "email=" << e
-                //                   << "source=" << source << "checked=" << checked
-                //                   << "failures=" << failures;
-            } else {
-                // qInfo().noquote() << "[avatarForEmail] cache-miss" << "email=" << e;
-            }
-        } else {
-            // qInfo().noquote() << "[avatarForEmail] cache-query-failed" << "email=" << e << q.lastError().text();
+        if (q.exec() && q.next()) {
+            const QString cached = q.value(0).toString().trimmed();
+            m_avatarCache.insert(e, cached);
+            return cached;
         }
-    } else {
-        // qInfo().noquote() << "[avatarForEmail] db-unavailable" << "email=" << e;
     }
 
-    // Identity-source fallback: deterministic domain favicon when no cached avatar exists.
-    const int at = e.indexOf('@');
-    if (at > 0 && at + 1 < e.size()) {
-        const QString domain = e.mid(at + 1).trimmed();
-        if (!domain.isEmpty()) {
-            if (suppressGenericFavicon && domain == QStringLiteral("gmail.com")) {
-                // qInfo().noquote() << "[avatarForEmail] suppress-gmail-favicon" << "email=" << e;
-                return {};
-            }
-            const QString fallback = QStringLiteral("https://www.google.com/s2/favicons?domain=%1&sz=128").arg(domain);
-            // qInfo().noquote() << "[avatarForEmail] favicon-fallback" << "email=" << e << "domain=" << domain;
-            return fallback;
-        }
-    }
-    // qInfo().noquote() << "[avatarForEmail] no-avatar" << "email=" << e;
+    m_avatarCache.insert(e, {});
     return {};
 }
 
@@ -3819,12 +3862,11 @@ bool DataStore::avatarShouldRefresh(const QString &email, int ttlSeconds, int ma
     const QString checked = q.value(1).toString().trimmed();
     const int failures = q.value(2).toInt();
 
-    // Data URIs are fully resolved — no need to refresh.
-    if (!avatarUrl.isEmpty() && !avatarUrl.startsWith(QStringLiteral("https://"))
-            && !avatarUrl.startsWith(QStringLiteral("http://")))
+    // File URLs are fully resolved — no need to refresh unless the file was deleted.
+    if (avatarUrl.startsWith("file://"_L1))
         return false;
-    // Raw HTTPS URLs were likely stored when the fetch failed (e.g. auth required).
-    // Allow retry so we can eventually store a proper data URI.
+    // Raw HTTPS URLs were likely stored before this refactor (they are now cleared on startup)
+    // or when a fetch failed. Allow retry so we can eventually store a proper file URL.
 
     const QDateTime checkedAt = QDateTime::fromString(checked, Qt::ISODate);
     const QDateTime now = QDateTime::currentDateTimeUtc();
@@ -3871,6 +3913,8 @@ void DataStore::updateContactAvatar(const QString &email, const QString &avatarU
     const QString e = email.trimmed().toLower();
     if (e.isEmpty()) return;
 
+    const QString storedUrl = avatarUrl.trimmed();
+
     QSqlQuery q(database);
     q.prepare(QStringLiteral(R"(
         INSERT INTO contact_avatars (email, avatar_url, source, last_checked_at, failure_count)
@@ -3882,10 +3926,11 @@ void DataStore::updateContactAvatar(const QString &email, const QString &avatarU
           failure_count=0
     )"));
     q.bindValue(QStringLiteral(":email"), e);
-    q.bindValue(QStringLiteral(":avatar_url"), avatarUrl.trimmed());
+    q.bindValue(QStringLiteral(":avatar_url"), storedUrl);
     q.bindValue(QStringLiteral(":source"), source.trimmed().isEmpty()
                 ? QStringLiteral("google-people") : source.trimmed().toLower());
     q.exec();
+    m_avatarCache.insert(e, storedUrl);
 }
 
 bool DataStore::hasCachedHeadersForFolder(const QString &rawFolderName, int minCount) const

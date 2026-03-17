@@ -11,30 +11,9 @@ Item {
     property string fallbackText: ""
     property int size: Kirigami.Units.iconSizes.large
 
-    property int avatarSourceIndex: 0
-    property int avatarRetryNonce: 0
-    readonly property string currentAvatarSource: {
-        let base = ""
-        if (avatarSources && avatarSources.length > 0) {
-            for (let i = Math.max(0, avatarSourceIndex); i < avatarSources.length; ++i) {
-                const candidate = (avatarSources[i] || "")
-                if (!candidate.length)
-                    continue
-                // Skip noisy Google favicon proxy URLs that frequently 404.
-                if (candidate.indexOf("t0.gstatic.com/faviconV2") >= 0
-                        || candidate.indexOf("t1.gstatic.com/faviconV2") >= 0
-                        || candidate.indexOf("t2.gstatic.com/faviconV2") >= 0
-                        || candidate.indexOf("t3.gstatic.com/faviconV2") >= 0)
-                    continue
-                base = candidate
-                break
-            }
-        }
-        if (!base.length || avatarRetryNonce <= 0) return base
-        if (!(base.startsWith("https://") || base.startsWith("http://"))) return base
-        const joiner = base.indexOf("?") >= 0 ? "&" : "?"
-        return base + joiner + "kavatar_retry=" + avatarRetryNonce
-    }
+    readonly property string currentAvatarSource: (avatarSources && avatarSources.length > 0)
+                                                   ? (avatarSources[0] || "")
+                                                   : ""
 
     implicitWidth: size
     implicitHeight: size
@@ -70,11 +49,6 @@ Item {
         return Qt.hsla(hue, 0.50, 0.45, 1.0)
     }
 
-    onAvatarSourcesChanged: {
-        avatarSourceIndex = 0
-        avatarRetryNonce = 0
-    }
-
     Rectangle {
         id: avatarRect
         anchors.fill: parent
@@ -89,20 +63,7 @@ Item {
         fillMode: Image.PreserveAspectCrop
         smooth: true
         visible: false
-
-        onStatusChanged: {
-            if (status === Image.Error) {
-                // console.log("[avatar-image] error", source)
-                if (root.avatarRetryNonce === 0) {
-                    root.avatarRetryNonce = Date.now()
-                    return
-                }
-                if (root.avatarSources && root.avatarSourceIndex < root.avatarSources.length - 1) {
-                    root.avatarSourceIndex += 1
-                    root.avatarRetryNonce = 0
-                }
-            }
-        }
+        asynchronous: true
     }
 
     OpacityMask {

@@ -55,12 +55,8 @@ Rectangle {
                                            ? root.appRoot.selectedFolderKey.toString()
                                            : ""
             property bool loadMoreQueued: false
-            property bool windowShiftQueued: false
 
-            Component.onCompleted: {
-                if (root.appRoot && root.appRoot.messageListModelObj)
-                    root.appRoot.messageListModelObj.setWindowSize(150)
-            }
+            Component.onCompleted: {}
 
             function queueRestoreScroll() {
                 if (!restorePending)
@@ -119,30 +115,6 @@ Rectangle {
                 }
             }
 
-            // Waits for the flick to settle before shifting the visible window,
-            // so the model reset from shiftWindowDown/Up never interrupts a flick.
-            Timer {
-                id: windowShiftTimer
-                interval: 150
-                repeat: false
-                onTriggered: {
-                    if (!root.appRoot.messageListModelObj) {
-                        groupedMessageList.windowShiftQueued = false
-                        return
-                    }
-                    if (groupedMessageList.flicking) {
-                        windowShiftTimer.restart()
-                        return
-                    }
-                    groupedMessageList.windowShiftQueued = false
-                    const bottomGap = groupedMessageList.contentHeight
-                                    - (groupedMessageList.contentY + groupedMessageList.height)
-                    if (bottomGap < 600)
-                        root.appRoot.messageListModelObj.shiftWindowDown()
-                    else if (groupedMessageList.contentY < 600)
-                        root.appRoot.messageListModelObj.shiftWindowUp()
-                }
-            }
 
             Connections {
                 target: root.appRoot
@@ -287,13 +259,6 @@ Rectangle {
                         if (root.appRoot.messageListModelObj)
                             root.appRoot.messageListModelObj.loadMore()
                     })
-                }
-                // Queue a window shift when near either edge of the visible window.
-                // The timer defers the actual shift until the flick has settled.
-                if (!groupedMessageList.windowShiftQueued
-                        && (bottomGap < 600 || contentY < 600)) {
-                    groupedMessageList.windowShiftQueued = true
-                    windowShiftTimer.start()
                 }
             }
 

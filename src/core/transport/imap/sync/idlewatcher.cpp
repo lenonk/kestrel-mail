@@ -208,7 +208,8 @@ IdleWatcher::start() {
             }
         }
 
-        const auto [mailboxChanged, existsSignals, recentSignals, expungeSignals] = waitForIdleSignals(*cxn, m_running);
+        const auto [mailboxChanged, existsSignals, recentSignals, expungeSignals] =
+            waitForIdleSignals(*cxn, m_running);
 
         if (const auto [doneOk, doneResp] = cxn->exitIdle(); !doneOk) {
             cxn.reset();

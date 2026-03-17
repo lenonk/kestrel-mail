@@ -82,5 +82,16 @@ QString resolveGravatarUrl(const QString &email);
  */
 QString resolveFaviconLogoUrl(const QString &domain);
 
+/**
+ * Write a data URI to a per-email avatar file on disk.
+ * Called from the worker thread so the main thread never does avatar file I/O.
+ * Returns a file:// URL on success, empty string on failure.
+ *
+ * @param email Normalized email address (used to derive the file name)
+ * @param dataUri Data URI string (data:image/TYPE;base64,...)
+ * @return file:// URL or empty string
+ */
+QString writeAvatarFile(const QString &email, const QString &dataUri);
+
 } // namespace Imap::AvatarResolver
 

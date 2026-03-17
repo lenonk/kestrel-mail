@@ -328,7 +328,7 @@ Window {
                 PopupMenu {
                     id: composeMenu
 
-                    parent: root
+                    parent: root.contentItem
                     x: Kirigami.Units.smallSpacing
                     y: root._titleH
 
@@ -424,8 +424,8 @@ Window {
                             }
                         }
                         contentItem: Text {
+                            clip: true
                             color: Kirigami.Theme.textColor
-                            elide: Text.ElideRight
                             font: accountCombo.font
                             leftPadding: 8
                             rightPadding: accountCombo.arrowSize + accountCombo.menuGap * 2 + accountCombo.edgeInset

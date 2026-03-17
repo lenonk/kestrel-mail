@@ -115,7 +115,11 @@ QString MessageHydrator::execute(const Request &req) {
         const bool hasUnresolvedCidSrc = QRegularExpression(QStringLiteral("\\bsrc\\s*=\\s*[\"']\\s*cid:"),
                                                             QRegularExpression::CaseInsensitiveOption)
                                              .match(html).hasMatch();
-        if (!html.isEmpty() && (html.size() < 512 || isPlainTextFallback || hasUnresolvedCidSrc)) {
+        // Also retry if the bounded fetch was truncated: server returned exactly 131072 bytes,
+        // meaning the message is larger than the window and the HTML was cut mid-content.
+        const bool wasBoundedTruncated = raw.contains(QByteArrayLiteral("{131072}\r\n"));
+
+        if (!html.isEmpty() && (html.size() < 512 || isPlainTextFallback || hasUnresolvedCidSrc || wasBoundedTruncated)) {
             step.restart();
             const auto rawFull = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
             fetchMs += step.elapsed();

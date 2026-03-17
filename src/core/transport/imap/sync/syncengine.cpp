@@ -52,6 +52,7 @@ using Imap::AvatarResolver::resolveFaviconLogoUrl;
 using Imap::AvatarResolver::resolveGooglePeopleAvatarUrl;
 using Imap::AvatarResolver::resolveGravatarUrl;
 using Imap::AvatarResolver::fetchAvatarBlob;
+using Imap::AvatarResolver::writeAvatarFile;
 
 // Body processor
 using Imap::BodyProcessor::parseAttachmentParts;
@@ -316,7 +317,11 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
         if (!recipientEmail.isEmpty() && allowLookup) {
             const auto url = resolveGooglePeopleAvatarUrl(recipientEmail, ctx.cxn->accessToken());
             if (!url.isEmpty()) {
-                h.insert("recipientAvatarUrl"_L1,      fetchAvatarBlob(url));
+                const QString blob = fetchAvatarBlob(url);
+                const QString fileUrl = blob.startsWith("data:"_L1)
+                                        ? writeAvatarFile(recipientEmail, blob)
+                                        : blob;
+                h.insert("recipientAvatarUrl"_L1,        fileUrl);
                 h.insert("recipientAvatarLookupMiss"_L1, false);
             }
             else {
@@ -404,19 +409,19 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
         const bool tinyGoogleAvatar = avatarSource == "google-people"_L1
                                       && avatarBlob.startsWith("data:"_L1)
                                       && avatarBlob.size() < 3000;
-        // If fetchAvatarBlob couldn't convert to a data URI (returned raw URL), don't
-        // persist the raw URL — the UI's isGoogleProfileish guardrail would block it.
+        // Write data URI to disk on the worker thread so upsertHeader never does file I/O
+        // on the main thread. Pass the file:// URL to the store instead of the blob.
         const bool resolvedToDataUri = avatarBlob.startsWith("data:"_L1);
         if (tinyGoogleAvatar) {
             qInfo().noquote() << "[avatar] discarding tiny google-people avatar for" << senderEmail;
         } else if (resolvedToDataUri) {
-            h.insert("avatarUrl"_L1,    avatarBlob);
-            h.insert("avatarSource"_L1, avatarSource);
+            const QString fileUrl = writeAvatarFile(senderEmail, avatarBlob);
+            if (!fileUrl.isEmpty()) {
+                h.insert("avatarUrl"_L1,    fileUrl);
+                h.insert("avatarSource"_L1, avatarSource);
+            }
         } else if (avatarSource != "google-people"_L1) {
-            // For non-Google sources (BIMI header, favicon): the URL itself is the result
-            // (already a data URI from resolveFaviconLogoUrl / resolveBimiLogoUrlViaDoh).
-            // This branch normally won't be hit since those functions return data URIs,
-            // but handle it defensively.
+            // Defensive: non-Google sources always return data URIs; this branch shouldn't fire.
             h.insert("avatarUrl"_L1,    avatarBlob);
             h.insert("avatarSource"_L1, avatarSource);
         }
@@ -971,15 +976,13 @@ SyncEngine::execute(SyncContext &ctx) {
 
     // Delete reconciliation: compare remote UID set to local and purge deleted UIDs.
     // Runs only when explicitly requested (non-announce incremental folder syncs).
-    if (ctx.reconcileDeletes && ctx.getFolderUids && ctx.removeUids) {
+    if (ctx.reconcileDeletes && ctx.pruneFolder) {
         const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
         const QStringList remoteUids = parseUidSearchAll(allResp);
-
-        const QStringList localUids  = ctx.getFolderUids(ctx.cxn->email(), ctx.folderName);
-        const QSet<QString> remoteSet(remoteUids.begin(), remoteUids.end());
-        const QSet<QString> localSet(localUids.begin(), localUids.end());
-        const QStringList deleted    = (localSet - remoteSet).values();
-        if (!deleted.isEmpty()) ctx.removeUids(ctx.cxn->email(), deleted);
+        // Folder-scoped prune: only removes edges from THIS folder (not cross-folder),
+        // preventing e.g. a Trash prune from wiping All Mail edges for messages that
+        // are still present in All Mail on the server.
+        ctx.pruneFolder(ctx.cxn->email(), ctx.folderName, remoteUids);
     }
 
     // FLAGS reconciliation: for incremental syncs, search for SEEN UIDs in a recent window

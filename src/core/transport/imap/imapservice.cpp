@@ -42,6 +42,7 @@
 using namespace Qt::Literals::StringLiterals;
 using Imap::AvatarResolver::resolveGooglePeopleAvatarUrl;
 using Imap::AvatarResolver::fetchAvatarBlob;
+using Imap::AvatarResolver::writeAvatarFile;
 
 namespace {
 struct PooledConnSlot {
@@ -1433,9 +1434,9 @@ ImapService::fetchFolderHeaders(const QString &email,
         return result;
     };
 
-    ctx.removeUids = [this](const QString &acctEmail, const QStringList &uids) {
-        QMetaObject::invokeMethod(this, [this, acctEmail, uids]() {
-            if (m_store) m_store->removeAccountUidsEverywhere(acctEmail, uids);
+    ctx.pruneFolder = [this](const QString &acctEmail, const QString &folder, const QStringList &remoteUids) {
+        QMetaObject::invokeMethod(this, [this, acctEmail, folder, remoteUids]() {
+            if (m_store) m_store->pruneFolderToUids(acctEmail, folder, remoteUids);
         }, Qt::QueuedConnection);
     };
 
@@ -1986,28 +1987,33 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
                     return;
 
                 const QVariantList batch = pendingHeaders; pendingHeaders.clear();
+
+                // Post headers in small chunks so the main-thread event loop can breathe
+                // between them (paint frames and BlockingQueuedConnection calls slip through).
+                static constexpr int kDbChunk = 5;
+                for (int start = 0; start < batch.size(); start += kDbChunk) {
+                    const QVariantList chunk = batch.mid(start, kDbChunk);
+                    QMetaObject::invokeMethod(this, [this, chunk]() {
+                        if (m_store) m_store->upsertHeaders(chunk);
+                    }, Qt::QueuedConnection);
+                }
+
+                // Body-fetch dispatch posted after all header chunks are queued.
                 QMetaObject::invokeMethod(this, [this, batch]() {
-                    if (!m_store)
-                        return;
-
-                    m_store->upsertHeaders(batch);
-
+                    if (!m_store) return;
                     QSet<QString> dispatched;
                     for (const QVariant &hv : batch) {
                         const QVariantMap h = hv.toMap();
                         const QString email = h.value("accountEmail"_L1).toString().trimmed();
                         const QString folder = h.value("folder"_L1).toString().trimmed();
-                        if (email.isEmpty() || folder.isEmpty())
-                            continue;
-
+                        if (email.isEmpty() || folder.isEmpty()) continue;
                         const QString key = email.toLower() + "|"_L1 + folder.toLower();
-                        if (dispatched.contains(key))
-                            continue;
+                        if (dispatched.contains(key)) continue;
                         dispatched.insert(key);
-
                         backgroundFetchBodies({}, email, folder, {});
                     }
                 }, Qt::QueuedConnection);
+
                 flushTimer.restart();
             };
 
@@ -2104,28 +2110,30 @@ ImapService::syncAll(bool announce) {
                     return;
 
                 const QVariantList batch = pendingHeaders; pendingHeaders.clear();
+
+                static constexpr int kDbChunk = 5;
+                for (int start = 0; start < batch.size(); start += kDbChunk) {
+                    const QVariantList chunk = batch.mid(start, kDbChunk);
+                    QMetaObject::invokeMethod(this, [this, chunk]() {
+                        if (m_store) m_store->upsertHeaders(chunk);
+                    }, Qt::QueuedConnection);
+                }
+
                 QMetaObject::invokeMethod(this, [this, batch]() {
-                    if (!m_store)
-                        return;
-
-                    m_store->upsertHeaders(batch);
-
+                    if (!m_store) return;
                     QSet<QString> dispatched;
                     for (const QVariant &hv : batch) {
                         const QVariantMap h = hv.toMap();
                         const QString email = h.value("accountEmail"_L1).toString().trimmed();
                         const QString folder = h.value("folder"_L1).toString().trimmed();
-                        if (email.isEmpty() || folder.isEmpty())
-                            continue;
-
+                        if (email.isEmpty() || folder.isEmpty()) continue;
                         const QString key = email.toLower() + "|"_L1 + folder.toLower();
-                        if (dispatched.contains(key))
-                            continue;
+                        if (dispatched.contains(key)) continue;
                         dispatched.insert(key);
-
                         backgroundFetchBodies({}, email, folder, {});
                     }
                 }, Qt::QueuedConnection);
+
                 flushTimer.restart();
             };
 
@@ -2259,8 +2267,10 @@ ImapService::syncAll(bool announce) {
                     if (url.isEmpty()) continue;
                     const QString blob = fetchAvatarBlob(url, googleAccessToken);
                     if (!blob.startsWith("data:"_L1)) continue;
-                    QMetaObject::invokeMethod(this, [this, sEmail, blob]() {
-                        if (m_store) m_store->updateContactAvatar(sEmail, blob, "google-people"_L1);
+                    const QString fileUrl = writeAvatarFile(sEmail, blob);
+                    if (fileUrl.isEmpty()) continue;
+                    QMetaObject::invokeMethod(this, [this, sEmail, fileUrl]() {
+                        if (m_store) m_store->updateContactAvatar(sEmail, fileUrl, "google-people"_L1);
                     }, Qt::BlockingQueuedConnection);
                 }
             }

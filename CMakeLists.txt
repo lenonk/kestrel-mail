@@ -135,6 +135,12 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/MessageContent/MessageHtmlView.qml
         qml/components/MessageContent/MessageThreadView.qml
         qml/components/Compose/Compose.qml
+        qml/components/Calendar/CalendarPane.qml
+        qml/components/Calendar/CalendarTopBar.qml
+        qml/components/Calendar/CalendarWeekHeader.qml
+        qml/components/Calendar/CalendarTimeGutter.qml
+        qml/components/Calendar/CalendarWeekGrid.qml
+        qml/components/Calendar/CalendarEventCard.qml
         qml/components/Attachments/AttachmentCard.qml
         qml/components/Attachments/AttachmentHoverPopup.qml
         qml/important.svg

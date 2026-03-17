@@ -10,6 +10,7 @@ import "components" as Components
 import "components/MessageList" as MessageList
 import "components/MessageContent" as MessageContent
 import "components/Compose" as Compose
+import "components/Calendar" as Calendar
 
 Kirigami.ApplicationWindow {
     id: root
@@ -67,6 +68,7 @@ Kirigami.ApplicationWindow {
     property real folderPaneExpandedWidth: 235
     property bool folderPaneHiddenByButton: false
     property bool rightPaneVisible: true
+    property string activeWorkspace: "mail"
     property bool paneAutoToggleEnabled: false
     property real messageListPaneWidth: 470
     property real rightPaneExpandedWidth: 170
@@ -870,48 +872,12 @@ Kirigami.ApplicationWindow {
         const email = root.senderEmail(senderValue)
         const accountEmail = (accountEmailHint || (root.selectedMessageData && root.selectedMessageData.accountEmail)
                               || "").toString().trim().toLowerCase()
-        const selfIdentity = email.length && accountEmail.length && email === accountEmail
-        if (selfIdentity) return []
-
-        const identityCached = (root.dataStoreObj && root.dataStoreObj.avatarForEmail && email.length)
-                ? (root.dataStoreObj.avatarForEmail(email) || "")
-                : ""
-
-        const normalized = identityCached.toString().trim()
-        if (!normalized.length)
+        if (!email.length || (accountEmail.length && email === accountEmail))
             return []
-
-        const lower = normalized.toLowerCase()
-        const isHttpUrl = lower.startsWith("https://") || lower.startsWith("http://")
-        const isDataImage = lower.startsWith("data:image/")
-        const isSupportedDataImage = isDataImage && (
-            lower.startsWith("data:image/png")
-            || lower.startsWith("data:image/jpeg")
-            || lower.startsWith("data:image/jpg")
-            || lower.startsWith("data:image/gif")
-            || lower.startsWith("data:image/webp")
-            || lower.startsWith("data:image/svg+xml")
-        )
-
-        if (!(isHttpUrl || isSupportedDataImage))
+        if (!root.dataStoreObj || !root.dataStoreObj.avatarForEmail)
             return []
-
-        const senderDomainValue = email.indexOf("@") >= 0 ? email.split("@")[1].toLowerCase() : ""
-        const isGoogleProfileish = lower.indexOf("googleusercontent.com") >= 0
-                                 || lower.indexOf("people.googleapis.com") >= 0
-                                 || lower.indexOf("gstatic.com") >= 0
-                                 || lower.indexOf("ggpht.com") >= 0
-
-        const isGoogleS2Favicon = lower.indexOf("google.com/s2/favicons") >= 0
-                                   && (senderDomainValue === "gmail.com" || senderDomainValue === "googlemail.com")
-
-        // Guardrails:
-        // - suppress google profile/default avatar surfaces that may resolve to placeholders
-        // - suppress Google S2 favicon URLs (often tiny/placeholder or visually blank)
-        if (isGoogleProfileish || isGoogleS2Favicon)
-            return []
-
-        return [normalized]
+        const url = (root.dataStoreObj.avatarForEmail(email) || "").toString().trim()
+        return url.length ? [url] : []
     }
 
     function avatarSourceLabel(urlValue) {
@@ -1818,11 +1784,18 @@ Kirigami.ApplicationWindow {
                         vertical: false
                         showLabel: false
                         items: [
-                            { iconName: "mail-message", label: i18n("Mail"), toolTipText: i18n("Mail"), active: true },
-                            { iconName: "office-calendar", label: i18n("Calendar"), toolTipText: i18n("Calendar") },
+                            { iconName: "mail-message", label: i18n("Mail"), toolTipText: i18n("Mail"), active: root.activeWorkspace === "mail" },
+                            { iconName: "office-calendar", label: i18n("Calendar"), toolTipText: i18n("Calendar"), active: root.activeWorkspace === "calendar" },
                             { iconName: "user-identity", label: i18n("People"), toolTipText: i18n("People") },
                             { iconName: "overflow-menu-horizontal", label: i18n("More"), toolTipText: i18n("More"), useHorizontalDots: true }
                         ]
+                        onItemClicked: function(_index, item) {
+                            const icon = (item && item.iconName) ? item.iconName : "";
+                            if (icon === "mail-message")
+                                root.activeWorkspace = "mail";
+                            else if (icon === "office-calendar")
+                                root.activeWorkspace = "calendar";
+                        }
                     }
                 }
 
@@ -1880,8 +1853,8 @@ Kirigami.ApplicationWindow {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 0
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: true; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
+                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: root.activeWorkspace === "mail"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "mail" }
+                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: root.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "calendar" }
                         Components.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
                         Components.PaneIconButton { Layout.fillWidth: true; iconName: "view-task"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
                         Components.PaneIconButton { Layout.fillWidth: true; iconName: "overflow-menu-horizontal"; label: ""; showLabel: false; hoverFeedback: true; toolTipText: i18n("More"); useHorizontalDots: true; underlineOnLeft: true; sideIndicatorInset: 4 }
@@ -1890,23 +1863,25 @@ Kirigami.ApplicationWindow {
             }
             MessageList.MessageListPane {
                 id: messageListPane
-                opacity: root.contentPaneHoverExpandActive ? 0 : 1
+                visible: root.activeWorkspace === "mail"
+                opacity: (root.activeWorkspace === "mail" && root.contentPaneHoverExpandActive) ? 0 : 1
 
                 Behavior on opacity {
                     NumberAnimation { duration: 180; easing.type: Easing.InOutQuad }
                 }
 
-                QQC2.SplitView.minimumWidth: 0
-                QQC2.SplitView.preferredWidth: root.contentPaneHoverMessageListWidth
+                QQC2.SplitView.minimumWidth: visible ? 0 : 0
+                QQC2.SplitView.preferredWidth: visible ? root.contentPaneHoverMessageListWidth : 0
                 appRoot: root
                 systemPalette: systemPalette
             }
 
             MessageContent.MessageContentPane {
                 id: messageContentPane
-                QQC2.SplitView.minimumWidth: 420
-                QQC2.SplitView.preferredWidth: 520
-                QQC2.SplitView.fillWidth: true
+                visible: root.activeWorkspace === "mail"
+                QQC2.SplitView.minimumWidth: visible ? 420 : 0
+                QQC2.SplitView.preferredWidth: visible ? 520 : 0
+                QQC2.SplitView.fillWidth: root.activeWorkspace === "mail"
                 appRoot: root
                 systemPalette: systemPalette
 
@@ -1918,6 +1893,15 @@ Kirigami.ApplicationWindow {
                     }
                 }
             }
+
+            Calendar.CalendarPane {
+                id: calendarPane
+                visible: root.activeWorkspace === "calendar"
+                QQC2.SplitView.minimumWidth: visible ? 720 : 0
+                QQC2.SplitView.preferredWidth: visible ? 980 : 0
+                QQC2.SplitView.fillWidth: root.activeWorkspace === "calendar"
+            }
+
             Rectangle {
                 id: rightPaneContainer
                 QQC2.SplitView.minimumWidth: root.rightCollapsedRailWidth
@@ -2006,8 +1990,8 @@ Kirigami.ApplicationWindow {
                         spacing: 0
                         Components.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: i18n("People"); toolTipText: i18n("People"); showLabel: false; hoverFeedback: true }
                         Components.PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: i18n("Tasks"); toolTipText: i18n("Tasks"); showLabel: false; hoverFeedback: true }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: i18n("Mail"); toolTipText: i18n("Mail"); showLabel: false; active: true; hoverFeedback: true }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: i18n("Calendar"); toolTipText: i18n("Calendar"); showLabel: false; hoverFeedback: true }
+                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: i18n("Mail"); toolTipText: i18n("Mail"); showLabel: false; active: root.activeWorkspace === "mail"; hoverFeedback: true; onClicked: root.activeWorkspace = "mail" }
+                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: i18n("Calendar"); toolTipText: i18n("Calendar"); showLabel: false; active: root.activeWorkspace === "calendar"; hoverFeedback: true; onClicked: root.activeWorkspace = "calendar" }
                     }
                 }
 
@@ -2051,8 +2035,8 @@ Kirigami.ApplicationWindow {
                         spacing: 0
                         Components.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
                         Components.PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: true; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
+                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: root.activeWorkspace === "mail"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "mail" }
+                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: root.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "calendar" }
                     }
                 }
             }
@@ -2063,6 +2047,7 @@ Kirigami.ApplicationWindow {
 
                 // Visual splitter lines (non-interactive).
                 Rectangle {
+                    visible: messageListPane.visible
                     color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.6)
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
@@ -2070,11 +2055,12 @@ Kirigami.ApplicationWindow {
                     x: Math.round(messageListPane.x)
                 }
                 Rectangle {
+                    visible: root.activeWorkspace === "mail" ? messageContentPane.visible : calendarPane.visible
                     color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.6)
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: 1
-                    x: Math.round(messageContentPane.x)
+                    x: Math.round(root.activeWorkspace === "mail" ? messageContentPane.x : calendarPane.x)
                 }
                 Rectangle {
                     color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.6)

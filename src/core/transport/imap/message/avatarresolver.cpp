@@ -1,4 +1,7 @@
 #include "avatarresolver.h"
+
+#include <qcache.h>
+
 #include "../parser/responseparser.h"
 #include <QNetworkReply>
 #include <QTimer>
@@ -13,6 +16,12 @@
 #include <QCryptographicHash>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QImage>
+#include <QDir>
+#include <QFile>
+#include <QStandardPaths>
+
+using namespace Qt::Literals::StringLiterals;
 
 namespace Imap::AvatarResolver {
 
@@ -49,8 +58,11 @@ namespace {
             const auto payload = reply->readAll();
             const auto ct = reply->header(QNetworkRequest::ContentTypeHeader).toString().trimmed().toLower();
             if (!payload.isEmpty() && payload.size() <= 512 * 1024 && ct.startsWith(QStringLiteral("image/"))) {
-                result.bytes = payload;
-                result.mime  = ct;
+                QImage test;
+                if (test.loadFromData(payload)) {
+                    result.bytes = payload;
+                    result.mime  = ct;
+                }
             }
         }
 
@@ -581,60 +593,223 @@ resolveFaviconLogoUrl(const QString &domain) {
     return found;
 }*/
 
-QString
-resolveFaviconLogoUrl(const QString &domain) {
-    static QMutex mutex;
-    static QHash<QString, QString> cache;
+// QString
+// resolveFaviconLogoUrl(const QString &domain) {
+//     static QMutex mutex;
+//     static QHash<QString, QString> cache;
+//
+//     const QString d = domain.trimmed().toLower();
+//     if (d.isEmpty())
+//         return {};
+//
+//     {
+//         QMutexLocker lock(&mutex);
+//         if (cache.contains(d))
+//             return cache.value(d);
+//     }
+//
+//     // Personal/consumer domains: use initials, not a brand logo.
+//     static const QSet<QString> skip = {
+//         QStringLiteral("gmail.com"), QStringLiteral("googlemail.com"),
+//         QStringLiteral("outlook.com"), QStringLiteral("hotmail.com"), QStringLiteral("live.com"),
+//         QStringLiteral("icloud.com"), QStringLiteral("me.com"),
+//         QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk"),
+//         QStringLiteral("google.com"), QStringLiteral("twitter.com"), QStringLiteral("youtube.com"),
+//         QStringLiteral("mail.com")
+//     };
+//
+//     if (skip.contains(d)) {
+//         QMutexLocker lock(&mutex);
+//         cache.insert(d, {});
+//         return {};
+//     }
+//
+//     auto toDataUri = [](const ImageFetch &f) -> QString {
+//         return QStringLiteral("data:%1;base64,%2").arg(f.mime, QString::fromLatin1(f.bytes.toBase64()));
+//     };
+//
+//     QString found;
+//
+//     const auto googleResult = fetchImageBytes(QUrl(
+//         QStringLiteral("https://www.google.com/s2/favicons?domain=%1&sz=128").arg(d)));
+//     if (!googleResult.bytes.isEmpty() && googleResult.bytes != googleGlobePlaceholder())
+//         found = toDataUri(googleResult);
+//
+//     if (found.isEmpty()) {
+//         const auto ddgResult = fetchImageBytes(QUrl(QStringLiteral("https://icons.duckduckgo.com/ip3/%1.ico").arg(d)));
+//         if (!ddgResult.bytes.isEmpty())
+//             found = toDataUri(ddgResult);
+//     }
+//
+//     {
+//         QMutexLocker lock(&mutex);
+//         cache.insert(d, found);
+//     }
+//
+//     return found;
+// }
 
+QString resolveFaviconLogoUrl(const QString &domain) {
+    // LRU-ish cache: cap it.
+    static QCache<QString, QString> cache(/*maxCost*/ 2048);
     const QString d = domain.trimmed().toLower();
     if (d.isEmpty())
         return {};
 
-    {
-        QMutexLocker lock(&mutex);
-        if (cache.contains(d))
-            return cache.value(d);
-    }
+    if (auto *hit = cache.object(d))
+        return *hit;
 
-    // Personal/consumer domains: use initials, not a brand logo.
     static const QSet<QString> skip = {
-        QStringLiteral("gmail.com"), QStringLiteral("googlemail.com"),
-        QStringLiteral("outlook.com"), QStringLiteral("hotmail.com"), QStringLiteral("live.com"),
-        QStringLiteral("icloud.com"), QStringLiteral("me.com"),
-        QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk"),
-        QStringLiteral("google.com"), QStringLiteral("twitter.com"), QStringLiteral("youtube.com"),
-        QStringLiteral("mail.com")
+        u"gmail.com"_s, u"googlemail.com"_s,
+        u"outlook.com"_s, u"hotmail.com"_s, u"live.com"_s,
+        u"icloud.com"_s, u"me.com"_s,
+        u"yahoo.com"_s, u"yahoo.co.uk"_s,
+        u"google.com"_s, u"twitter.com"_s, u"youtube.com"_s,
+        u"mail.com"_s,
     };
 
     if (skip.contains(d)) {
-        QMutexLocker lock(&mutex);
-        cache.insert(d, {});
+        cache.insert(d, new QString(), 1);
         return {};
     }
 
     auto toDataUri = [](const ImageFetch &f) -> QString {
-        return QStringLiteral("data:%1;base64,%2").arg(f.mime, QString::fromLatin1(f.bytes.toBase64()));
+        return QStringLiteral("data:%1;base64,%2")
+            .arg(f.mime, QString::fromLatin1(f.bytes.toBase64()));
+    };
+
+    auto isUsableImage = [](const ImageFetch &f) -> bool {
+        if (f.bytes.isEmpty()) return false;
+        // If you can, decode it to confirm it's a real image.
+        QImage img;
+        img.loadFromData(f.bytes);
+        return !img.isNull() && img.width() > 0 && img.height() > 0;
+    };
+
+    auto fetchUrl = [&](const QUrl &u) -> ImageFetch {
+        // Your existing fetch. Consider setting a UA + short timeout.
+        return fetchImageBytes(u);
     };
 
     QString found;
 
-    const auto googleResult = fetchImageBytes(QUrl(
-        QStringLiteral("https://www.google.com/s2/favicons?domain=%1&sz=128").arg(d)));
-    if (!googleResult.bytes.isEmpty() && googleResult.bytes != googleGlobePlaceholder())
-        found = toDataUri(googleResult);
+    // ---- A) Origin HTML discovery ----
+    // If you don't already have an HTML fetcher, add one.
+    // Pseudocode: fetchHtml(QUrl) -> QString
+    auto tryOrigin = [&](const QString &scheme) -> bool {
+        const QUrl base(QStringLiteral("%1://%2/").arg(scheme, d));
+
+        const QString html = fetchHtml(base); // implement
+        if (html.isEmpty())
+            return false;
+
+        // Parse <link ...> candidates from <head>
+        // Use QXmlStreamReader only if you sanitize; HTML isn't XML.
+        // Practical: cheap regex for rel/icon + href, then resolve URLs.
+        const QList<QUrl> candidates = extractIconCandidates(html, base); // implement
+
+        // Fetch a few candidates and pick best.
+        ImageFetch best;
+        int bestScore = -1;
+
+        for (const QUrl &iconUrl : candidates.mid(0, 6)) {
+            const auto f = fetchUrl(iconUrl);
+            if (!isUsableImage(f))
+                continue;
+
+            const int score = scoreIcon(iconUrl, f, /*hintSizesFromLink*/{}); // implement
+            if (score > bestScore) {
+                bestScore = score;
+                best = f;
+            }
+        }
+
+        if (bestScore >= 0) {
+            found = toDataUri(best);
+            return true;
+        }
+
+        return false;
+    };
+
+    // Try HTTPS first.
+    if (found.isEmpty())
+        tryOrigin(QStringLiteral("https"));
+    if (found.isEmpty())
+        tryOrigin(QStringLiteral("http"));
+
+    // ---- B) /favicon.ico fallback ----
+    if (found.isEmpty()) {
+        for (const QString &scheme : {QStringLiteral("https"), QStringLiteral("http")}) {
+            const QUrl icoUrl(QStringLiteral("%1://%2/favicon.ico").arg(scheme, d));
+            const auto f = fetchUrl(icoUrl);
+            if (isUsableImage(f)) {
+                found = toDataUri(f);
+                break;
+            }
+        }
+    }
+
+    // ---- C) External services fallback (your current approach) ----
+    if (found.isEmpty()) {
+        const auto googleResult = fetchUrl(QUrl(
+            QStringLiteral("https://www.google.com/s2/favicons?domain=%1&sz=128").arg(d)));
+
+        if (isUsableImage(googleResult) && googleResult.bytes != googleGlobePlaceholder())
+            found = toDataUri(googleResult);
+    }
 
     if (found.isEmpty()) {
-        const auto ddgResult = fetchImageBytes(QUrl(QStringLiteral("https://icons.duckduckgo.com/ip3/%1.ico").arg(d)));
-        if (!ddgResult.bytes.isEmpty())
+        const auto ddgResult = fetchUrl(QUrl(QStringLiteral("https://icons.duckduckgo.com/ip3/%1.ico").arg(d)));
+        if (isUsableImage(ddgResult))
             found = toDataUri(ddgResult);
     }
 
-    {
-        QMutexLocker lock(&mutex);
-        cache.insert(d, found);
-    }
+    cache.insert(d, new QString(found), 1);
+
+    qInfo().noquote() << "[avatar-favicon]"
+                      << "domain=" << d
+                      << "result=" << (!found.isEmpty() ? "hit" : "miss");
 
     return found;
+}
+
+QString
+writeAvatarFile(const QString &email, const QString &dataUri)
+{
+    static const QRegularExpression re(QStringLiteral(R"(^data:(image/[^;,]+);base64,(.+)$)"),
+                                       QRegularExpression::DotMatchesEverythingOption);
+    const auto m = re.match(dataUri.trimmed());
+    if (!m.hasMatch())
+        return {};
+
+    const QString mime = m.captured(1).trimmed().toLower();
+    const QByteArray bytes = QByteArray::fromBase64(m.captured(2).trimmed().toLatin1());
+    if (bytes.isEmpty())
+        return {};
+
+    QString ext = QStringLiteral("bin");
+    if (mime.startsWith(QStringLiteral("image/png")))         ext = QStringLiteral("png");
+    else if (mime.contains(QStringLiteral("jpeg")) || mime.contains(QStringLiteral("jpg"))) ext = QStringLiteral("jpg");
+    else if (mime.startsWith(QStringLiteral("image/webp")))   ext = QStringLiteral("webp");
+    else if (mime.startsWith(QStringLiteral("image/gif")))    ext = QStringLiteral("gif");
+    else if (mime.startsWith(QStringLiteral("image/svg")))    ext = QStringLiteral("svg");
+
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+                        + QStringLiteral("/kestrel-mail/avatars");
+    QDir().mkpath(dir);
+
+    const QString hash = QString::fromLatin1(
+        QCryptographicHash::hash(email.trimmed().toLower().toUtf8(), QCryptographicHash::Sha1).toHex());
+    const QString absPath = dir + QStringLiteral("/") + hash + QStringLiteral(".") + ext;
+
+    QFile f(absPath);
+    if (!f.open(QIODevice::WriteOnly))
+        return {};
+    f.write(bytes);
+    f.close();
+
+    return QStringLiteral("file://") + absPath;
 }
 
 } // namespace Imap::AvatarResolver

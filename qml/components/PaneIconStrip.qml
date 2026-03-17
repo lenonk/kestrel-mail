@@ -5,6 +5,8 @@ import QtQuick.Layouts
 Item {
     id: root
 
+    signal itemClicked(int index, var item)
+
     property var items: []
     property bool vertical: false
     property bool showLabel: false
@@ -24,6 +26,7 @@ Item {
         Repeater {
             model: root.items
             delegate: PaneIconButton {
+                required property int index
                 required property var modelData
                 Layout.fillWidth: true
                 iconName: (modelData.iconName || "")
@@ -36,6 +39,7 @@ Item {
                 underlineOnLeft: root.underlineOnLeft
                 underlineOnRight: root.underlineOnRight
                 sideIndicatorInset: root.sideIndicatorInset
+                onClicked: root.itemClicked(index, modelData)
             }
         }
     }
@@ -49,6 +53,7 @@ Item {
         Repeater {
             model: root.items
             delegate: PaneIconButton {
+                required property int index
                 required property var modelData
                 Layout.fillWidth: true
                 iconName: (modelData.iconName || "")
@@ -61,6 +66,7 @@ Item {
                 underlineOnLeft: root.underlineOnLeft
                 underlineOnRight: root.underlineOnRight
                 sideIndicatorInset: root.sideIndicatorInset
+                onClicked: root.itemClicked(index, modelData)
             }
         }
     }
