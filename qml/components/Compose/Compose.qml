@@ -1309,7 +1309,7 @@ Window {
                                         id: chipLabel
 
                                         anchors.verticalCenter: parent.verticalCenter
-                                        color: sysPalette.highlightedText
+                                        color: systemPalette.highlightedText
                                         font.pixelSize: 12
                                         text: modelData.display || modelData.email
                                     }
@@ -1317,7 +1317,7 @@ Window {
                                         id: chipX
 
                                         anchors.verticalCenter: parent.verticalCenter
-                                        color: sysPalette.highlightedText
+                                        color: systemPalette.highlightedText
                                         font.pixelSize: 13
                                         opacity: 0.8
                                         text: "×"
@@ -1420,13 +1420,13 @@ Window {
                         readonly property bool isHighlighted: sugMouse.containsMouse || rowRoot._highlightedIndex === index
                         required property var modelData
 
-                        color: isHighlighted ? sysPalette.highlight : "transparent"
+                        color: isHighlighted ? systemPalette.highlight : "transparent"
                         height: 30
                         radius: 3
                         width: parent.width
 
                         Text {
-                            color: isHighlighted ? sysPalette.highlightedText : Kirigami.Theme.textColor
+                            color: isHighlighted ? systemPalette.highlightedText : Kirigami.Theme.textColor
                             elide: Text.ElideRight
                             font.pixelSize: 12
                             text: modelData.displayName ? modelData.displayName + "  <" + modelData.email + ">" : modelData.email
@@ -1472,14 +1472,14 @@ Window {
         QQC2.ToolTip.delay: 600
         QQC2.ToolTip.text: tip
         QQC2.ToolTip.visible: tbMouse.containsMouse
-        color: active ? Qt.rgba(sysPalette.highlight.r, sysPalette.highlight.g, sysPalette.highlight.b, 0.3) : tbMouse.pressed ? Qt.lighter(root._bg2, 1.2) : tbMouse.containsMouse ? Qt.lighter(root._bg2, 1.12) : "transparent"
+        color: active ? Qt.rgba(systemPalette.highlight.r, systemPalette.highlight.g, systemPalette.highlight.b, 0.3) : tbMouse.pressed ? Qt.lighter(root._bg2, 1.2) : tbMouse.containsMouse ? Qt.lighter(root._bg2, 1.12) : "transparent"
         height: 26
         radius: 4
         width: 28
 
         Kirigami.Icon {
             anchors.centerIn: parent
-            color: parent.active ? sysPalette.highlight : Kirigami.Theme.textColor
+            color: parent.active ? systemPalette.highlight : Kirigami.Theme.textColor
             implicitHeight: root._icoSz + 2
             implicitWidth: root._icoSz + 2
             isMask: true

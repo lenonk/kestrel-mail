@@ -21,7 +21,6 @@ QQC2.Button {
 
     flat: true
     Layout.fillWidth: true
-    Layout.bottomMargin: 4
     implicitHeight: rowHeight
     leftPadding: 0
     rightPadding: 0
