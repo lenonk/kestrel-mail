@@ -98,11 +98,13 @@ Kirigami.ApplicationWindow {
     property bool bootstrapFolderSyncRequested: false
 
     property var calendarSources: [
-        { id: "personal", name: i18n("Personal Gmail"), checked: true },
-        { id: "calendar", name: i18n("Calendar"), checked: true },
-        { id: "holidays", name: i18n("Holidays in United States"), checked: true },
-        { id: "mel", name: i18n("mellanyjo@gmail.com"), checked: false },
-        { id: "raven", name: i18n("Raven"), checked: true }
+        { id: "personal", name: i18n("Personal Gmail"), checked: true, color: "#6f8df7" },
+        { id: "calendar", name: i18n("Calendar"), checked: true, color: "#8bb2ff" },
+        { id: "holidays", name: i18n("Holidays in United States"), checked: true, color: "#d9b65d" },
+        { id: "mel", name: i18n("mellanyjo@gmail.com"), checked: false, color: "#8ccf8c" },
+        { id: "raven", name: i18n("Raven"), checked: true, color: "#c784ff" },
+        { id: "sebastian", name: i18n("Sebastian"), checked: true, color: "#73d2de" },
+        { id: "sandra", name: i18n("Sandra"), checked: true, color: "#f29bb2" }
     ]
 
     property var calendarEvents: [
@@ -125,7 +127,7 @@ Kirigami.ApplicationWindow {
         for (let i = 0; i < root.calendarSources.length; ++i) {
             const c = root.calendarSources[i]
             if (String(c.id) === String(sourceId))
-                next.push({ id: c.id, name: c.name, checked: !!checked })
+                next.push({ id: c.id, name: c.name, checked: !!checked, color: c.color })
             else
                 next.push(c)
         }
@@ -1819,13 +1821,42 @@ Kirigami.ApplicationWindow {
 
                         Repeater {
                             model: root.calendarSources
-                            delegate: QQC2.CheckDelegate {
+                            delegate: Item {
                                 required property var modelData
-                                text: modelData.name
-                                checked: !!modelData.checked
-                                leftPadding: 8
-                                rightPadding: 8
-                                onToggled: root.setCalendarSourceChecked(modelData.id, checked)
+                                Layout.fillWidth: true
+                                implicitHeight: 28
+
+                                QQC2.CheckBox {
+                                    id: calCheck
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    leftPadding: 8
+                                    rightPadding: 8
+                                    checked: !!modelData.checked
+                                    text: modelData.name
+                                    onToggled: root.setCalendarSourceChecked(modelData.id, checked)
+
+                                    indicator: Rectangle {
+                                        implicitWidth: 16
+                                        implicitHeight: 16
+                                        x: calCheck.leftPadding
+                                        y: (calCheck.height - height) / 2
+                                        radius: 3
+                                        color: modelData.color || "transparent"
+                                        border.width: 1
+                                        border.color: Qt.rgba(1, 1, 1, 0.45)
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 8
+                                            height: 8
+                                            radius: 2
+                                            visible: calCheck.checked
+                                            color: Qt.rgba(1, 1, 1, 0.92)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
