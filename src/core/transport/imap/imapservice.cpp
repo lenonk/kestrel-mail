@@ -1671,10 +1671,14 @@ ImapService::refreshGoogleCalendars() {
         const bool ok = reply->error() == QNetworkReply::NoError;
         const QString err = reply->errorString();
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString bodyText = QString::fromUtf8(payload).trimmed();
         reply->deleteLater();
         if (!ok) {
-            QMetaObject::invokeMethod(this, [this, err, httpStatus]() {
-                emit realtimeStatus(false, QStringLiteral("Google calendar list fetch failed (HTTP %1): %2. Reconnect Gmail to grant Calendar scope.").arg(httpStatus).arg(err));
+            QMetaObject::invokeMethod(this, [this, err, httpStatus, bodyText]() {
+                emit realtimeStatus(false, QStringLiteral("Google calendar list fetch failed (HTTP %1): %2 | body: %3")
+                                        .arg(httpStatus)
+                                        .arg(err)
+                                        .arg(bodyText));
             }, Qt::QueuedConnection);
             return;
         }
@@ -1762,10 +1766,15 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
             const bool ok = reply->error() == QNetworkReply::NoError;
             const QString err = reply->errorString();
             const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString bodyText = QString::fromUtf8(payload).trimmed();
             reply->deleteLater();
             if (!ok) {
-                QMetaObject::invokeMethod(this, [this, err, httpStatus, calendarId]() {
-                    emit realtimeStatus(false, QStringLiteral("Google events fetch failed for '%1' (HTTP %2): %3").arg(calendarId).arg(httpStatus).arg(err));
+                QMetaObject::invokeMethod(this, [this, err, httpStatus, calendarId, bodyText]() {
+                    emit realtimeStatus(false, QStringLiteral("Google events fetch failed for '%1' (HTTP %2): %3 | body: %4")
+                                            .arg(calendarId)
+                                            .arg(httpStatus)
+                                            .arg(err)
+                                            .arg(bodyText));
                 }, Qt::QueuedConnection);
                 continue;
             }
