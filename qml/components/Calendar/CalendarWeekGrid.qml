@@ -10,6 +10,7 @@ Item {
     property int startHour: 0
     property int endHour: 24
     property real hourHeight: 72
+    property var systemPalette
 
     // { dayIndex, startHour, durationHours, title, subtitle }
     property var events: [
@@ -26,6 +27,23 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(1, 1, 1, 0.02)
+    }
+
+    Repeater {
+        model: root.dayCount
+        delegate: Rectangle {
+            required property int index
+            x: Math.round(index * (root.width / root.dayCount))
+            y: 0
+            width: Math.ceil(root.width / root.dayCount)
+            height: root.height
+            color: {
+                const c = root.systemPalette ? root.systemPalette.highlight : Qt.rgba(0.4, 0.6, 1.0, 1.0)
+                const isWeekend = index >= 5
+                const alpha = isWeekend ? 0.10 : 0.04
+                return Qt.rgba(c.r, c.g, c.b, alpha)
+            }
+        }
     }
 
     Repeater {

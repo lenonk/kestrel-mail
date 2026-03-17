@@ -10,6 +10,7 @@ Item {
     property int startHour: 0
     property int endHour: 24
     property real hourHeight: 72
+    property var systemPalette
 
     function scrollToEightAm() {
         const target = 8 * root.hourHeight
@@ -84,6 +85,7 @@ Item {
                         startHour: root.startHour
                         endHour: root.endHour
                         hourHeight: root.hourHeight
+                        systemPalette: root.systemPalette
                     }
                 }
 

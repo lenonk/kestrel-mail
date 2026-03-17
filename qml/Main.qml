@@ -1900,6 +1900,7 @@ Kirigami.ApplicationWindow {
                 QQC2.SplitView.minimumWidth: visible ? 720 : 0
                 QQC2.SplitView.preferredWidth: visible ? 980 : 0
                 QQC2.SplitView.fillWidth: root.activeWorkspace === "calendar"
+                systemPalette: systemPalette
             }
 
             Rectangle {
