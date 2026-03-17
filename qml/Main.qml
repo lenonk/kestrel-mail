@@ -1896,31 +1896,41 @@ Kirigami.ApplicationWindow {
                         Repeater {
                             model: root.gmailCalendarsExpanded ? root.calendarSources.filter(c => (c.account || "") === "gmail") : []
                             delegate: QQC2.CheckBox {
+                                id: calendarCheck
                                 required property var modelData
                                 Layout.fillWidth: true
                                 checked: !!modelData.checked
                                 leftPadding: 8
                                 rightPadding: 8
+                                spacing: 8
+                                text: modelData.name
                                 onToggled: root.setCalendarSourceChecked(modelData.id, checked)
 
-                                contentItem: RowLayout {
-                                    spacing: Kirigami.Units.smallSpacing
-
-                                    Rectangle {
-                                        Layout.alignment: Qt.AlignVCenter
-                                        implicitWidth: 14
-                                        implicitHeight: 14
-                                        radius: 3
-                                        color: modelData.color || "transparent"
-                                        border.width: 1
-                                        border.color: modelData.color ? "transparent" : Qt.rgba(1, 1, 1, 0.35)
-                                    }
+                                indicator: Rectangle {
+                                    implicitWidth: 16
+                                    implicitHeight: 16
+                                    x: calendarCheck.leftPadding
+                                    y: (calendarCheck.height - height) / 2
+                                    radius: 3
+                                    color: modelData.color || Qt.rgba(1, 1, 1, 0.08)
+                                    border.width: 1
+                                    border.color: Qt.rgba(1, 1, 1, 0.45)
 
                                     QQC2.Label {
-                                        Layout.fillWidth: true
-                                        text: modelData.name
-                                        elide: Text.ElideRight
+                                        anchors.centerIn: parent
+                                        text: "✓"
+                                        visible: calendarCheck.checked
+                                        font.bold: true
+                                        font.pixelSize: 12
+                                        color: Qt.rgba(1, 1, 1, 0.95)
                                     }
+                                }
+
+                                contentItem: QQC2.Label {
+                                    text: calendarCheck.text
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: Kirigami.Theme.textColor
                                 }
                             }
                         }

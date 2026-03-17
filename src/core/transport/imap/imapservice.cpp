@@ -1678,11 +1678,9 @@ ImapService::refreshGoogleCalendars() {
                                  << "httpStatus=" << httpStatus
                                  << "error=" << err
                                  << "body=" << bodyText;
-            QMetaObject::invokeMethod(this, [this, err, httpStatus, bodyText]() {
-                emit realtimeStatus(false, QStringLiteral("Google calendar list fetch failed (HTTP %1): %2 | body: %3")
-                                        .arg(httpStatus)
-                                        .arg(err)
-                                        .arg(bodyText));
+            QMetaObject::invokeMethod(this, [this, httpStatus]() {
+                Q_UNUSED(httpStatus)
+                emit realtimeStatus(false, QStringLiteral("Calendar sync error. Please reconnect your Google account and try again."));
             }, Qt::QueuedConnection);
             return;
         }
@@ -1778,12 +1776,9 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                                      << "httpStatus=" << httpStatus
                                      << "error=" << err
                                      << "body=" << bodyText;
-                QMetaObject::invokeMethod(this, [this, err, httpStatus, calendarId, bodyText]() {
-                    emit realtimeStatus(false, QStringLiteral("Google events fetch failed for '%1' (HTTP %2): %3 | body: %4")
-                                            .arg(calendarId)
-                                            .arg(httpStatus)
-                                            .arg(err)
-                                            .arg(bodyText));
+                QMetaObject::invokeMethod(this, [this, calendarId]() {
+                    Q_UNUSED(calendarId)
+                    emit realtimeStatus(false, QStringLiteral("Calendar events couldn’t be loaded right now. Please try again."));
                 }, Qt::QueuedConnection);
                 continue;
             }
