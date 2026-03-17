@@ -22,6 +22,7 @@ Item {
 
             delegate: QQC2.Label {
                 required property int index
+                visible: index > 0 && index < root.halfHourSlots
                 x: 4
                 y: index * (root.hourHeight / 2) - (height / 2)
                 text: {

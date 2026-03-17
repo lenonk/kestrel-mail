@@ -9,7 +9,7 @@ Item {
 
     property int startHour: 0
     property int endHour: 24
-    property real hourHeight: 72
+    property real hourHeight: 108
     property var systemPalette
 
     function scrollToEightAm() {

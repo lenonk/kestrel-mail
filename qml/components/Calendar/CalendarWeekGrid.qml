@@ -40,7 +40,7 @@ Item {
             color: {
                 const c = root.systemPalette ? root.systemPalette.highlight : Qt.rgba(0.4, 0.6, 1.0, 1.0)
                 const isWeekend = index >= 5
-                const alpha = isWeekend ? 0.10 : 0.04
+                const alpha = isWeekend ? 0.04 : 0.10
                 return Qt.rgba(c.r, c.g, c.b, alpha)
             }
         }
