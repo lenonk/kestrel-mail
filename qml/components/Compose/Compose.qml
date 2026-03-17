@@ -36,6 +36,16 @@ Window {
 
     signal sendRequested
 
+    function _accountDisplayText(account) {
+        if (!account)
+            return i18n("Select account");
+        const name = (account.displayName || account.fullName || account.senderName || "").toString().trim();
+        const email = (account.email || "").toString().trim();
+        if (name.length && email.length)
+            return '"' + name + '" <' + email + '>';
+        return email.length ? email : (name.length ? name : i18n("Select account"));
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
     function _addChipToModel(model, raw) {
         const text = raw.trim();
@@ -84,15 +94,6 @@ Window {
         for (let i = 0; i < model.count; i++)
             arr.push('"' + model.get(i).display + '" <' + model.get(i).email + '>');
         return arr;
-    }
-    function _accountDisplayText(account) {
-        if (!account)
-            return i18n("Select account");
-        const name = (account.displayName || account.fullName || account.senderName || "").toString().trim();
-        const email = (account.email || "").toString().trim();
-        if (name.length && email.length)
-            return '"' + name + '" <' + email + '>';
-        return email.length ? email : (name.length ? name : i18n("Select account"));
     }
     function _doSend() {
         if (!smtpServiceObj) {
@@ -187,7 +188,7 @@ Window {
 
     // ── Internal state ─────────────────────────────────────────────────────
     SystemPalette {
-        id: sysPalette
+        id: systemPalette
 
     }
     ListModel {
@@ -267,7 +268,7 @@ Window {
                 TitleBarIconButton {
                     buttonHeight: root._btnH
                     buttonWidth: root._btnW
-                    highlightColor: sysPalette.highlight
+                    highlightColor: systemPalette.highlight
                     iconName: "open-menu-symbolic"
                     iconSize: root._icoSz
 
@@ -299,7 +300,7 @@ Window {
                     TitleBarIconButton {
                         buttonHeight: root._btnH
                         buttonWidth: root._btnW
-                        highlightColor: sysPalette.highlight
+                        highlightColor: systemPalette.highlight
                         iconName: "window-minimize-symbolic"
                         iconSize: root._icoSz
 
@@ -308,7 +309,7 @@ Window {
                     TitleBarIconButton {
                         buttonHeight: root._btnH
                         buttonWidth: root._btnW
-                        highlightColor: sysPalette.highlight
+                        highlightColor: systemPalette.highlight
                         iconName: root.visibility === Window.Maximized ? "window-restore-symbolic" : "window-maximize-symbolic"
                         iconSize: root._icoSz
 
@@ -317,14 +318,13 @@ Window {
                     TitleBarIconButton {
                         buttonHeight: root._btnH
                         buttonWidth: root._btnW
-                        highlightColor: sysPalette.highlight
+                        highlightColor: systemPalette.highlight
                         iconName: "window-close-symbolic"
                         iconSize: root._icoSz
 
                         onClicked: root.hide()
                     }
                 }
-
                 PopupMenu {
                     id: composeMenu
 
@@ -349,15 +349,14 @@ Window {
             // ── Action bar: Send + From ────────────────────────────────────
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: root._titleH + 6
                 Layout.leftMargin: 12
+                Layout.preferredHeight: root._titleH + 6
                 color: root._bg2
 
                 RowLayout {
                     Layout.alignment: Qt.AlignVCenter
-
-                    spacing: 8
                     anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
 
                     MailActionButton {
                         id: sendBtn
@@ -365,7 +364,6 @@ Window {
                         alwaysHighlighted: true
                         enabled: true
                         iconName: root.sending ? "view-refresh" : "mail-send"
-                        spinning: root.sending
                         menuItems: [
                             {
                                 text: i18n("Send as mass mail"),
@@ -376,6 +374,7 @@ Window {
                                 icon: "appointment-new"
                             }
                         ]
+                        spinning: root.sending
                         text: root.sending ? i18n("Sending…") : i18n("Send")
 
                         onTriggered: actionText => {
@@ -386,7 +385,6 @@ Window {
                         // TODO: mass mail / send later
                         }
                     }
-
                     Kirigami.Icon {
                         Layout.alignment: Qt.AlignVCenter
                         color: Kirigami.Theme.disabledTextColor
@@ -395,13 +393,12 @@ Window {
                         isMask: true
                         source: "user-identity"
                     }
-
                     QQC2.ComboBox {
                         id: accountCombo
 
+                        readonly property int arrowSize: 12
                         readonly property int edgeInset: 6
                         readonly property int menuGap: 2
-                        readonly property int arrowSize: 12
 
                         Layout.alignment: Qt.AlignVCenter
                         Layout.preferredHeight: root._rowH - 8
@@ -411,13 +408,13 @@ Window {
                         model: root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
 
                         background: Rectangle {
-                            color: accountCombo.hovered ? Qt.rgba(sysPalette.highlight.r, sysPalette.highlight.g, sysPalette.highlight.b, 0.22) : Qt.rgba(sysPalette.highlight.r, sysPalette.highlight.g, sysPalette.highlight.b, 0.09)
+                            color: accountCombo.hovered ? Qt.rgba(systemPalette.highlight.r, systemPalette.highlight.g, systemPalette.highlight.b, 0.22) : Qt.rgba(systemPalette.highlight.r, systemPalette.highlight.g, systemPalette.highlight.b, 0.09)
                             radius: 4
 
                             Rectangle {
                                 anchors.bottom: parent.bottom
                                 anchors.top: parent.top
-                                color: sysPalette.window
+                                color: systemPalette.window
                                 opacity: 0.95
                                 width: 1
                                 x: parent.width - accountCombo.arrowSize - accountCombo.menuGap * 2 - 1
@@ -470,7 +467,6 @@ Window {
                     }
                 }
             }
-
             Rectangle {
                 Layout.fillWidth: true
                 color: Qt.lighter(root._bg, 1.25)
@@ -556,7 +552,7 @@ Window {
                         Layout.preferredHeight: root._rowH - 8
                         Layout.rightMargin: 8
                         Layout.topMargin: 4
-                        border.color: subjectField.activeFocus ? sysPalette.highlight : Qt.rgba(root._border.r, root._border.g, root._border.b, 0.35)
+                        border.color: subjectField.activeFocus ? systemPalette.highlight : Qt.rgba(root._border.r, root._border.g, root._border.b, 0.35)
                         border.width: 1
                         color: "transparent"
                         radius: 4
@@ -900,6 +896,69 @@ Window {
                         }
                         bodyArea.insert(bodyArea.cursorPosition, open + event.text + close);
                     }
+
+                    Rectangle {
+                        id: dropZoneBorder
+
+                        border.color: dropZone.color
+                        border.width: 1
+                        color: "transparent"
+                        height: parent.height - 1
+                        opacity: dropZone.opacity > 0
+                        visible: true
+                        width: parent.width - 2
+                        x: parent.x + 1
+                        y: parent.y
+                        z: 9998
+
+                        Rectangle {
+                            id: dropZone
+
+                            anchors.fill: parent
+                            color: systemPalette.highlight
+                            opacity: 0
+                            z: 9999
+
+                            DropArea {
+                                anchors.fill: parent
+
+                                onDropped: drop => {
+                                    dropZone.opacity = 0;
+
+                                    if (drop.hasUrls) {
+                                        drop.urls.forEach(url => {
+                                            const urlString = url.toString();
+                                            if (!urlString || !urlString.startsWith("file://"))
+                                                return;
+
+                                            const path = decodeURIComponent(urlString.replace(/^file:\/\//, ""));
+                                            if (!path)
+                                                return;
+
+                                            const filename = path.split("/").pop();
+                                            if (!filename)
+                                                return;
+
+                                            attachmentModel.append({
+                                                filename: filename,
+                                                path: path
+                                            });
+                                        });
+                                    }
+
+                                    drop.accept();
+                                }
+
+                                onEntered: drag => {
+                                    dropZone.opacity = 0.075;
+                                }
+
+                                onExited: {
+                                    dropZone.opacity = 0;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1170,7 +1229,7 @@ Window {
                 Layout.fillWidth: true
                 Layout.rightMargin: 8
                 Layout.topMargin: 4
-                border.color: chipInput.activeFocus ? sysPalette.highlight : Qt.rgba(root._border.r, root._border.g, root._border.b, 0.35)
+                border.color: chipInput.activeFocus ? systemPalette.highlight : Qt.rgba(root._border.r, root._border.g, root._border.b, 0.35)
                 border.width: 1
                 clip: true
                 color: "transparent"
@@ -1180,7 +1239,7 @@ Window {
                 Text {
                     id: accLabel
 
-                    color: sysPalette.highlight
+                    color: systemPalette.highlight
                     font.pixelSize: 11
                     text: rowRoot.accessoryText
                     visible: rowRoot.showAccessory
@@ -1233,7 +1292,7 @@ Window {
                                 required property int index
                                 required property var modelData
 
-                                color: sysPalette.highlight
+                                color: systemPalette.highlight
                                 height: 22
                                 radius: 4
                                 width: chipLabel.implicitWidth + chipX.implicitWidth + 16

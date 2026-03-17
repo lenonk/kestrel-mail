@@ -16,16 +16,17 @@ ColumnLayout {
 
     visible: visibleInCalendar
     Layout.fillWidth: true
-    spacing: 4
+    spacing: Kirigami.Units.mediumSpacing
 
     Components.FolderSectionButton {
         expanded: root.gmailCalendarsExpanded
         sectionIcon: "internet-mail"
         title: i18n("Gmail")
         titleOpacity: 0.9
-        rowHeight: Kirigami.Units.gridUnit + 8
-        chevronSize: 20
+        rowHeight: Kirigami.Units.gridUnit + Kirigami.Units.largeSpacing
+        chevronSize: 16
         sectionIconSize: 24
+
         onActivated: {
             const next = !root.gmailCalendarsExpanded
             root.gmailCalendarsExpanded = next
@@ -40,9 +41,9 @@ ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
             checked: !!modelData.checked
-            leftPadding: 8
-            rightPadding: 8
-            spacing: 8
+            leftPadding: Kirigami.Units.largeSpacing
+            rightPadding: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.largeSpacing
             text: modelData.name
             onToggled: root.sourceToggled(modelData.id, checked)
 
@@ -61,8 +62,8 @@ ColumnLayout {
                     text: "✓"
                     visible: calendarCheck.checked
                     font.bold: true
-                    font.pixelSize: 14
-                    color: Qt.rgba(0, 0, 0, 0.95)
+                    font.pixelSize: 20
+                    color: Qt.rgba(0, 0, 0, 1)
                 }
             }
 
@@ -70,7 +71,7 @@ ColumnLayout {
                 text: calendarCheck.text
                 elide: Text.ElideRight
                 verticalAlignment: Text.AlignVCenter
-                leftPadding: calendarCheck.indicator.width + calendarCheck.spacing + 8
+                leftPadding: calendarCheck.indicator.width + calendarCheck.spacing
                 color: Kirigami.Theme.textColor
             }
         }

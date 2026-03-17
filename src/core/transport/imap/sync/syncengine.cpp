@@ -186,7 +186,18 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     const auto hasReplyTo    = !replyToHeader.isEmpty();
     const auto hasReturnPath = !returnPathHeader.isEmpty();
 
-    const auto senderEmail  = extractEmailAddress(fromHeader).trimmed().toLower();
+    // Try From first, then Sender:, then Reply-To: as fallbacks.
+    // Avoid Return-Path: — it is often a VERP/bounce address from an ESP, not the brand.
+    const auto senderEmail = [&]() -> QString {
+        auto e = extractEmailAddress(fromHeader).trimmed().toLower();
+        if (!e.isEmpty())
+            return e;
+        e = extractEmailAddress(senderHeader).trimmed().toLower();
+        if (!e.isEmpty())
+            return e;
+        return extractEmailAddress(replyToHeader).trimmed().toLower();
+    }();
+
     const auto listIdDomain = extractListIdDomain(headerSource);
     auto bimiLogoUrl        = extractBimiLogoUrl(headerSource);
 
@@ -354,79 +365,82 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
         h.insert("avatarDomain"_L1, listIdDomain);
 
     // Avatar resolution priority: Google People → Gravatar → BIMI header → BIMI DNS → favicon
-    QString avatarSource;
-    QString avatarUrl;
+    // avatarShouldRefresh returns false for file:// entries (already resolved); gate the
+    // entire pipeline so we skip expensive BIMI/favicon fetches on already-resolved contacts.
 
-    bool allowPeopleLookup = true;
+    bool allowAvatarLookup = true;
     if (!senderEmail.isEmpty() && ctx.avatarShouldRefresh)
-        allowPeopleLookup = ctx.avatarShouldRefresh(senderEmail, 3600, 3);
+        allowAvatarLookup = ctx.avatarShouldRefresh(senderEmail, 3600, 3);
 
-    if (!senderEmail.isEmpty() && allowPeopleLookup) {
-        avatarUrl = resolveGooglePeopleAvatarUrl(senderEmail, ctx.cxn->accessToken());
-        if (!avatarUrl.isEmpty())
-            avatarSource = "google-people"_L1;
-    }
-
-    if (avatarUrl.isEmpty() && !senderEmail.isEmpty() && allowPeopleLookup) {
-        avatarUrl = resolveGravatarUrl(senderEmail);
-        if (!avatarUrl.isEmpty())
-            avatarSource = "gravatar"_L1;
-    }
-
-    if (avatarUrl.isEmpty()) {
-        if (!bimiLogoUrl.isEmpty()) {
-            avatarUrl = bimiLogoUrl;
-            avatarSource = "bimi-header"_L1;
+    if (allowAvatarLookup) {
+        QString avatarUrl;
+        QString avatarSource;
+        if (!senderEmail.isEmpty()) {
+            avatarUrl = resolveGooglePeopleAvatarUrl(senderEmail, ctx.cxn->accessToken());
+            if (!avatarUrl.isEmpty())
+                avatarSource = "google-people"_L1;
         }
-        else {
-            const auto bimiDomain = !listIdDomain.isEmpty() ? listIdDomain : senderDomainFromHeader(fromHeader);
-            if (!bimiDomain.isEmpty()) {
-                bimiLogoUrl = resolveBimiLogoUrlViaDoh(bimiDomain);
 
-                if (!bimiLogoUrl.isEmpty()) {
-                    avatarUrl = bimiLogoUrl;
-                    avatarSource = "bimi-dns"_L1;
-                }
-                else {
-                    const auto favIconUrl = resolveFaviconLogoUrl(bimiDomain);
-                    if (!favIconUrl.isEmpty()) {
-                        avatarUrl = favIconUrl;
-                        avatarSource = "favicon"_L1;
+        if (avatarUrl.isEmpty() && !senderEmail.isEmpty()) {
+            avatarUrl = resolveGravatarUrl(senderEmail);
+            if (!avatarUrl.isEmpty())
+                avatarSource = "gravatar"_L1;
+        }
+
+        if (avatarUrl.isEmpty()) {
+            if (!bimiLogoUrl.isEmpty()) {
+                avatarUrl = bimiLogoUrl;
+                avatarSource = "bimi-header"_L1;
+            }
+            else {
+                const auto bimiDomain = !listIdDomain.isEmpty() ? listIdDomain : senderDomainFromHeader(senderEmail);
+                if (!bimiDomain.isEmpty()) {
+                    bimiLogoUrl = resolveBimiLogoUrlViaDoh(bimiDomain);
+
+                    if (!bimiLogoUrl.isEmpty()) {
+                        avatarUrl = bimiLogoUrl;
+                        avatarSource = "bimi-dns"_L1;
+                    }
+                    else {
+                        if (const auto favIconUrl = resolveFaviconLogoUrl(bimiDomain); !favIconUrl.isEmpty()) {
+                            avatarUrl = favIconUrl;
+                            avatarSource = "favicon"_L1;
+                        }
                     }
                 }
             }
         }
-    }
 
-    if (!avatarUrl.isEmpty()) {
-        // Pass the access token for Google People photo URLs — contact photos at
-        // lh3.googleusercontent.com/contacts/ require auth; without it the fetch
-        // returns HTML and the raw URL would be stored, then blocked by the UI guardrail.
-        const QString token = (avatarSource == "google-people"_L1) ? ctx.cxn->accessToken() : QString{};
-        const QString avatarBlob = fetchAvatarBlob(avatarUrl, token);
-        // Google auto-generated monogram/default avatars are tiny (often < 2 KB).
-        // Reject them so the UI falls back to initials instead of a generic placeholder.
-        const bool tinyGoogleAvatar = avatarSource == "google-people"_L1
-                                      && avatarBlob.startsWith("data:"_L1)
-                                      && avatarBlob.size() < 3000;
-        // Write data URI to disk on the worker thread so upsertHeader never does file I/O
-        // on the main thread. Pass the file:// URL to the store instead of the blob.
-        const bool resolvedToDataUri = avatarBlob.startsWith("data:"_L1);
-        if (tinyGoogleAvatar) {
-            qInfo().noquote() << "[avatar] discarding tiny google-people avatar for" << senderEmail;
-        } else if (resolvedToDataUri) {
-            const QString fileUrl = writeAvatarFile(senderEmail, avatarBlob);
-            if (!fileUrl.isEmpty()) {
-                h.insert("avatarUrl"_L1,    fileUrl);
+        if (!avatarUrl.isEmpty()) {
+            // Pass the access token for Google People photo URLs — contact photos at
+            // lh3.googleusercontent.com/contacts/ require auth; without it the fetch
+            // returns HTML and the raw URL would be stored, then blocked by the UI guardrail.
+            const QString token = (avatarSource == "google-people"_L1) ? ctx.cxn->accessToken() : QString{};
+            const QString avatarBlob = fetchAvatarBlob(avatarUrl, token);
+            // Google auto-generated monogram/default avatars are tiny (often < 2 KB).
+            // Reject them so the UI falls back to initials instead of a generic placeholder.
+            const bool tinyGoogleAvatar = avatarSource == "google-people"_L1
+                                          && avatarBlob.startsWith("data:"_L1)
+                                          && avatarBlob.size() < 3000;
+            // Write data URI to disk on the worker thread so upsertHeader never does file I/O
+            // on the main thread. Pass the file:// URL to the store instead of the blob.
+            const bool resolvedToDataUri = avatarBlob.startsWith("data:"_L1);
+            if (tinyGoogleAvatar) {
+                qInfo().noquote() << "[avatar] discarding tiny google-people avatar for" << senderEmail;
+            } else if (resolvedToDataUri) {
+                const QString fileUrl = writeAvatarFile(senderEmail, avatarBlob);
+                if (!fileUrl.isEmpty()) {
+                    h.insert("avatarUrl"_L1,    fileUrl);
+                    h.insert("avatarSource"_L1, avatarSource);
+                }
+            } else if (avatarSource != "google-people"_L1) {
+                // Defensive: non-Google sources always return data URIs; this branch shouldn't fire.
+                h.insert("avatarUrl"_L1,    avatarBlob);
                 h.insert("avatarSource"_L1, avatarSource);
             }
-        } else if (avatarSource != "google-people"_L1) {
-            // Defensive: non-Google sources always return data URIs; this branch shouldn't fire.
-            h.insert("avatarUrl"_L1,    avatarBlob);
-            h.insert("avatarSource"_L1, avatarSource);
+        } else if (!listIdDomain.isEmpty()) {
+            h.insert("avatarSource"_L1, "listid-domain"_L1);
         }
-    } else if (!listIdDomain.isEmpty()) {
-        h.insert("avatarSource"_L1, "listid-domain"_L1);
     }
 
     // Body HTML is intentionally not persisted during header sync.
