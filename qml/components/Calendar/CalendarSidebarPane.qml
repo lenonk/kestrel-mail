@@ -15,7 +15,10 @@ ColumnLayout {
     signal sourceToggled(string sourceId, bool checked)
 
     visible: visibleInCalendar
+    enabled: visibleInCalendar
     Layout.fillWidth: true
+    Layout.preferredHeight: visibleInCalendar ? implicitHeight : 0
+    Layout.maximumHeight: visibleInCalendar ? 16777215 : 0
     spacing: Kirigami.Units.mediumSpacing
 
     Components.FolderSectionButton {
