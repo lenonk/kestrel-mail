@@ -140,12 +140,9 @@ Kirigami.ApplicationWindow {
     }
 
     function calendarWeekBoundsIso() {
-        const now = new Date()
-        const start = new Date(now)
-        start.setHours(0, 0, 0, 0)
-        start.setDate(start.getDate() - start.getDay())
-        const end = new Date(start)
-        end.setDate(end.getDate() + 7)
+        // Keep API fetch aligned with the currently hard-coded week header/topbar (Mar 9-15, 2026).
+        const start = new Date(2026, 2, 9, 0, 0, 0, 0) // local time, month is 0-based
+        const end = new Date(2026, 2, 16, 0, 0, 0, 0)
         return { startIso: start.toISOString(), endIso: end.toISOString() }
     }
 
@@ -1922,7 +1919,7 @@ Kirigami.ApplicationWindow {
                                         visible: calendarCheck.checked
                                         font.bold: true
                                         font.pixelSize: 12
-                                        color: Qt.rgba(1, 1, 1, 0.95)
+                                        color: Qt.rgba(0, 0, 0, 0.90)
                                     }
                                 }
 
@@ -1930,6 +1927,7 @@ Kirigami.ApplicationWindow {
                                     text: calendarCheck.text
                                     elide: Text.ElideRight
                                     verticalAlignment: Text.AlignVCenter
+                                    leftPadding: calendarCheck.indicator.width + calendarCheck.spacing + 8
                                     color: Kirigami.Theme.textColor
                                 }
                             }
@@ -1986,6 +1984,8 @@ Kirigami.ApplicationWindow {
                                 }
                             }
                         }
+
+                        Item { Layout.preferredHeight: Kirigami.Units.largeSpacing }
                     }
 
                     Components.PaneDivider {

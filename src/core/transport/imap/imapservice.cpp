@@ -1793,13 +1793,29 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                 const auto startObj = o.value("start").toObject();
                 const auto endObj = o.value("end").toObject();
 
-                const QString startStr = startObj.value("dateTime").toString();
-                const QString endStr = endObj.value("dateTime").toString();
-                if (startStr.isEmpty() || endStr.isEmpty())
-                    continue;
+                const QString startDateTimeStr = startObj.value("dateTime").toString();
+                const QString endDateTimeStr = endObj.value("dateTime").toString();
+                const QString startDateStr = startObj.value("date").toString();
+                const QString endDateStr = endObj.value("date").toString();
 
-                const QDateTime startDt = QDateTime::fromString(startStr, Qt::ISODate);
-                const QDateTime endDt = QDateTime::fromString(endStr, Qt::ISODate);
+                QDateTime startDt;
+                QDateTime endDt;
+                bool isAllDay = false;
+
+                if (!startDateTimeStr.isEmpty() && !endDateTimeStr.isEmpty()) {
+                    startDt = QDateTime::fromString(startDateTimeStr, Qt::ISODate);
+                    endDt = QDateTime::fromString(endDateTimeStr, Qt::ISODate);
+                } else if (!startDateStr.isEmpty() && !endDateStr.isEmpty()) {
+                    // Google all-day end.date is exclusive.
+                    const QDate s = QDate::fromString(startDateStr, Qt::ISODate);
+                    const QDate eExclusive = QDate::fromString(endDateStr, Qt::ISODate);
+                    if (s.isValid() && eExclusive.isValid()) {
+                        isAllDay = true;
+                        startDt = QDateTime(s, QTime(0, 0, 0), Qt::LocalTime);
+                        endDt = QDateTime(eExclusive, QTime(0, 0, 0), Qt::LocalTime);
+                    }
+                }
+
                 if (!startDt.isValid() || !endDt.isValid())
                     continue;
 
@@ -1807,8 +1823,10 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                 if (dayIndex < 0 || dayIndex > 6)
                     continue;
 
-                const int minutes = startDt.time().hour() * 60 + startDt.time().minute();
-                const int durMinutes = qMax(15, static_cast<int>(startDt.secsTo(endDt) / 60));
+                const int minutes = isAllDay ? 0 : (startDt.time().hour() * 60 + startDt.time().minute());
+                const int durMinutes = isAllDay
+                                      ? (24 * 60)
+                                      : qMax(15, static_cast<int>(startDt.secsTo(endDt) / 60));
 
                 QVariantMap row;
                 row.insert("calendarId", calendarId);
@@ -1816,9 +1834,11 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                 row.insert("startHour", static_cast<double>(minutes) / 60.0);
                 row.insert("durationHours", static_cast<double>(durMinutes) / 60.0);
                 row.insert("title", o.value("summary").toString());
-                row.insert("subtitle", QStringLiteral("%1 - %2")
-                           .arg(startDt.time().toString("h:mmap").toLower())
-                           .arg(endDt.time().toString("h:mmap").toLower()));
+                row.insert("subtitle", isAllDay
+                           ? QStringLiteral("All day")
+                           : QStringLiteral("%1 - %2")
+                                 .arg(startDt.time().toString("h:mmap").toLower())
+                                 .arg(endDt.time().toString("h:mmap").toLower()));
                 out.push_back(row);
             }
         }
