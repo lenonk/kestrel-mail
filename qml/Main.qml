@@ -391,6 +391,16 @@ Kirigami.ApplicationWindow {
         moreFolderExpandedState = next
     }
 
+    function moreFolderLevel(rawName) {
+        const parts = (rawName || "").split("/")
+        let level = Math.max(0, parts.length - 1)
+        if (parts.length > 1) {
+            const head = (parts[0] || "").toLowerCase()
+            if (head === "[gmail]" || head === "[google mail]") level = Math.max(0, level - 1)
+        }
+        return level
+    }
+
     function moreAccountFolderItems() {
         const folders = root.dataStoreObj ? root.dataStoreObj.folders : []
         if (!folders || folders.length === 0) return []
@@ -410,12 +420,7 @@ Kirigami.ApplicationWindow {
             if (primaryKeys[norm]) continue
             if (rawName.indexOf("/") < 0 && !root.isSystemMailboxName(rawName, f.specialUse)) continue
 
-            const parts = rawName.split("/")
-            let level = Math.max(0, parts.length - 1)
-            if (parts.length > 1) {
-                const head = (parts[0] || "").toLowerCase()
-                if (head === "[gmail]" || head === "[google mail]") level = Math.max(0, level - 1)
-            }
+            const level = root.moreFolderLevel(rawName)
 
             byNorm[norm] = {
                 key: "account:" + norm,
@@ -448,7 +453,7 @@ Kirigami.ApplicationWindow {
                         categories: [],
                         flags: "\\Noselect (synthetic)",
                         noselect: true,
-                        level: Math.max(0, parentPath.split("/").length - 1)
+                        level: root.moreFolderLevel(parentPath)
                     }
                 }
                 parentPath += "/" + parts[p]
