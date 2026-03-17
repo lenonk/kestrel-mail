@@ -1815,15 +1815,20 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Components.FolderSectionButton {
+                    Components.FolderItemDelegate {
                         visible: root.activeWorkspace === "mail" && root.accountExpanded
-                        expanded: root.moreExpanded
-                        sectionIcon: "overflow-menu-horizontal"
-                        title: i18n("More")
-                        titleOpacity: 0.8
                         rowHeight: root.folderRowHeight
-                        chevronSize: root.sectionChevronSize
-                        sectionIconSize: root.folderListSectionIconSize
+                        iconSize: root.folderListIconSize
+                        indentLevel: 1
+                        folderKey: "account:more"
+                        folderName: i18n("More")
+                        folderIcon: "overflow-menu-horizontal"
+                        hasChildren: true
+                        expanded: root.moreExpanded
+                        unreadCount: 0
+                        selected: false
+                        tooltipText: i18n("Show additional Gmail folders")
+                        onToggleRequested: root.moreExpanded = !root.moreExpanded
                         onActivated: root.moreExpanded = !root.moreExpanded
                     }
 
@@ -1887,6 +1892,8 @@ Kirigami.ApplicationWindow {
                         onExpandedToggled: (expanded) => root.gmailCalendarsExpanded = expanded
                         onSourceToggled: (sourceId, checked) => root.setCalendarSourceChecked(sourceId, checked)
                     }
+
+                    Item { Layout.fillHeight: true }
 
                     Components.PaneDivider {
                         Layout.leftMargin: -Kirigami.Units.largeSpacing
