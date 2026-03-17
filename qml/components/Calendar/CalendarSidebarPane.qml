@@ -11,7 +11,7 @@ ColumnLayout {
     property bool gmailCalendarsExpanded: true
     property var calendarSources: []
 
-    signal gmailCalendarsExpandedChanged(bool expanded)
+    signal expandedToggled(bool expanded)
     signal sourceToggled(string sourceId, bool checked)
 
     visible: visibleInCalendar
@@ -29,7 +29,7 @@ ColumnLayout {
         onActivated: {
             const next = !root.gmailCalendarsExpanded
             root.gmailCalendarsExpanded = next
-            root.gmailCalendarsExpandedChanged(next)
+            root.expandedToggled(next)
         }
     }
 

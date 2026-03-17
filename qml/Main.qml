@@ -1884,7 +1884,7 @@ Kirigami.ApplicationWindow {
                         visibleInCalendar: root.activeWorkspace === "calendar"
                         gmailCalendarsExpanded: root.gmailCalendarsExpanded
                         calendarSources: root.calendarSources
-                        onGmailCalendarsExpandedChanged: (expanded) => root.gmailCalendarsExpanded = expanded
+                        onExpandedToggled: (expanded) => root.gmailCalendarsExpanded = expanded
                         onSourceToggled: (sourceId, checked) => root.setCalendarSourceChecked(sourceId, checked)
                     }
 
