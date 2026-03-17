@@ -7,11 +7,21 @@ import "." as Calendar
 Item {
     id: root
 
-    property int startHour: 8
-    property int endHour: 18
-    property real baseHourHeight: 72
-    readonly property int hoursVisible: Math.max(1, endHour - startHour)
-    readonly property real computedHourHeight: Math.max(baseHourHeight, calendarScroll.height / hoursVisible)
+    property int startHour: 0
+    property int endHour: 24
+    property real hourHeight: 72
+
+    function scrollToEightAm() {
+        const target = 8 * root.hourHeight
+        const maxY = Math.max(0, calendarScroll.contentHeight - calendarScroll.height)
+        calendarScroll.contentY = Math.max(0, Math.min(target, maxY))
+    }
+
+    onVisibleChanged: {
+        if (visible) {
+            Qt.callLater(scrollToEightAm)
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -35,49 +45,49 @@ Item {
             color: Qt.rgba(1, 1, 1, 0.10)
         }
 
-        RowLayout {
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
 
-            Calendar.CalendarTimeGutter {
-                Layout.fillHeight: true
-                Layout.preferredWidth: 58
-                startHour: root.startHour
-                endHour: root.endHour
-                hourHeight: root.computedHourHeight
-                topInset: weekHeader.height
+            Calendar.CalendarWeekHeader {
+                Layout.fillWidth: true
+                Layout.leftMargin: 58
+                Layout.rightMargin: 0
+                Layout.preferredHeight: 44
             }
 
-            ColumnLayout {
+            Flickable {
+                id: calendarScroll
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 0
+                clip: true
+                contentWidth: scrollContent.width
+                contentHeight: scrollContent.height
 
-                Calendar.CalendarWeekHeader {
-                    id: weekHeader
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 44
-                }
+                Row {
+                    id: scrollContent
+                    width: calendarScroll.width
+                    height: Math.max(gutter.implicitHeight, weekGrid.implicitHeight)
 
-                Flickable {
-                    id: calendarScroll
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    contentWidth: width
-                    contentHeight: weekGrid.implicitHeight
+                    Calendar.CalendarTimeGutter {
+                        id: gutter
+                        width: 58
+                        startHour: root.startHour
+                        endHour: root.endHour
+                        hourHeight: root.hourHeight
+                    }
 
                     Calendar.CalendarWeekGrid {
                         id: weekGrid
-                        width: parent.width
+                        width: Math.max(0, scrollContent.width - gutter.width)
                         startHour: root.startHour
                         endHour: root.endHour
-                        hourHeight: root.computedHourHeight
+                        hourHeight: root.hourHeight
                     }
-
-                    QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
                 }
+
+                QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
             }
         }
     }

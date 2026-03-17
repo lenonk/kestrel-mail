@@ -7,8 +7,8 @@ Item {
     id: root
 
     property int dayCount: 7
-    property int startHour: 8
-    property int endHour: 18
+    property int startHour: 0
+    property int endHour: 24
     property real hourHeight: 72
 
     // { dayIndex, startHour, durationHours, title, subtitle }
@@ -19,6 +19,7 @@ Item {
     ]
 
     readonly property int hours: endHour - startHour
+    readonly property int quarterHourLines: hours * 4
 
     implicitHeight: hours * hourHeight
 
@@ -40,14 +41,18 @@ Item {
     }
 
     Repeater {
-        model: root.hours + 1
+        model: root.quarterHourLines + 1
         delegate: Rectangle {
             required property int index
             x: 0
-            y: Math.round(index * root.hourHeight)
+            y: Math.round(index * (root.hourHeight / 4))
             width: root.width
             height: 1
-            color: Qt.rgba(1, 1, 1, 0.22)
+            color: {
+                if (index % 4 === 0) return Qt.rgba(1, 1, 1, 0.22)   // :00
+                if (index % 2 === 0) return Qt.rgba(1, 1, 1, 0.14)   // :30
+                return Qt.rgba(1, 1, 1, 0.08)                        // :15/:45
+            }
         }
     }
 
