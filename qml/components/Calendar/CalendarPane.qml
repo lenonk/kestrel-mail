@@ -11,6 +11,15 @@ Item {
     property int endHour: 24
     property real hourHeight: 108
     property var systemPalette
+    property var allEvents: []
+    property var visibleCalendarIds: []
+
+    readonly property var filteredEvents: {
+        const ev = Array.isArray(allEvents) ? allEvents : []
+        const visible = Array.isArray(visibleCalendarIds) ? visibleCalendarIds : []
+        if (visible.length === 0) return []
+        return ev.filter(e => visible.indexOf(String(e.calendarId || "")) >= 0)
+    }
 
     function scrollToEightAm() {
         const target = 8 * root.hourHeight
@@ -86,6 +95,7 @@ Item {
                         endHour: root.endHour
                         hourHeight: root.hourHeight
                         systemPalette: root.systemPalette
+                        events: root.filteredEvents
                     }
                 }
 

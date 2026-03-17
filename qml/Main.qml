@@ -97,6 +97,41 @@ Kirigami.ApplicationWindow {
     property int lastClickedMessageIndex: -1
     property bool bootstrapFolderSyncRequested: false
 
+    property var calendarSources: [
+        { id: "personal", name: i18n("Personal Gmail"), checked: true },
+        { id: "calendar", name: i18n("Calendar"), checked: true },
+        { id: "holidays", name: i18n("Holidays in United States"), checked: true },
+        { id: "mel", name: i18n("mellanyjo@gmail.com"), checked: false },
+        { id: "raven", name: i18n("Raven"), checked: true }
+    ]
+
+    property var calendarEvents: [
+        { calendarId: "personal", dayIndex: 0, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "10:00am - 11:00am" },
+        { calendarId: "calendar", dayIndex: 2, startHour: 10, durationHours: 1.0, title: "Lenon's Workout", subtitle: "Occurs every 1 week" },
+        { calendarId: "raven", dayIndex: 4, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "Private" }
+    ]
+
+    function visibleCalendarSourceIds() {
+        const out = []
+        for (let i = 0; i < root.calendarSources.length; ++i) {
+            const c = root.calendarSources[i]
+            if (c && c.checked) out.push(String(c.id || ""))
+        }
+        return out
+    }
+
+    function setCalendarSourceChecked(sourceId, checked) {
+        const next = []
+        for (let i = 0; i < root.calendarSources.length; ++i) {
+            const c = root.calendarSources[i]
+            if (String(c.id) === String(sourceId))
+                next.push({ id: c.id, name: c.name, checked: !!checked })
+            else
+                next.push(c)
+        }
+        root.calendarSources = next
+    }
+
     Settings {
         id: uiSettings
         category: "ui"
@@ -1605,7 +1640,7 @@ Kirigami.ApplicationWindow {
                     spacing: 0
 
                     Components.PaneHeaderBar {
-                        title: i18n("Mail")
+                        title: root.activeWorkspace === "calendar" ? i18n("Calendar") : i18n("Mail")
                         titleBold: true
                         titlePointSizeDelta: 1
                         headerHeight: root.folderHeaderHeight
@@ -1622,6 +1657,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Components.FolderSectionButton {
+                        visible: root.activeWorkspace === "mail"
                         expanded: root.favoritesExpanded
                         sectionIcon: "favorite"
                         title: i18n("Favorites")
@@ -1633,7 +1669,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Repeater {
-                        model: root.favoritesExpanded ? root.favoriteFolderItems : []
+                        model: (root.activeWorkspace === "mail" && root.favoritesExpanded) ? root.favoriteFolderItems : []
                         delegate: Components.FolderItemDelegate {
                             property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
@@ -1650,6 +1686,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Components.FolderSectionButton {
+                        visible: root.activeWorkspace === "mail"
                         expanded: root.tagsExpanded
                         sectionIcon: "tag"
                         title: i18n("Tags")
@@ -1661,7 +1698,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Repeater {
-                        model: root.tagsExpanded ? root.tagFolderItems() : []
+                        model: (root.activeWorkspace === "mail" && root.tagsExpanded) ? root.tagFolderItems() : []
                         delegate: Components.FolderItemDelegate {
                             property string rawFolderName: (modelData.rawName || modelData.name || "")
                             rowHeight: root.folderRowHeight
@@ -1679,6 +1716,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Components.FolderSectionButton {
+                        visible: root.activeWorkspace === "mail"
                         expanded: root.accountExpanded
                         sectionIcon: "internet-mail"
                         title: root.primaryAccountName
@@ -1693,7 +1731,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Repeater {
-                        model: root.accountExpanded ? root.accountFolderItems() : []
+                        model: (root.activeWorkspace === "mail" && root.accountExpanded) ? root.accountFolderItems() : []
                         delegate: Components.FolderItemDelegate {
                             property string rawFolderName: (modelData.rawName || modelData.name || "")
                             property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
@@ -1711,7 +1749,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Components.FolderSectionButton {
-                        visible: root.accountExpanded
+                        visible: root.activeWorkspace === "mail" && root.accountExpanded
                         expanded: root.moreExpanded
                         sectionIcon: "overflow-menu-horizontal"
                         title: i18n("More")
@@ -1723,7 +1761,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Repeater {
-                        model: (root.accountExpanded && root.moreExpanded) ? root.moreAccountFolderItems() : []
+                        model: (root.activeWorkspace === "mail" && root.accountExpanded && root.moreExpanded) ? root.moreAccountFolderItems() : []
                         delegate: Components.FolderItemDelegate {
                             property string rawFolderName: (modelData.rawName || modelData.name || "")
                             property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
@@ -1746,6 +1784,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Components.FolderSectionButton {
+                        visible: root.activeWorkspace === "mail"
                         expanded: root.localFoldersExpanded
                         sectionIcon: "folder"
                         title: i18n("Local Folders")
@@ -1757,7 +1796,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Repeater {
-                        model: root.localFoldersExpanded ? root.localFolderItems : []
+                        model: (root.activeWorkspace === "mail" && root.localFoldersExpanded) ? root.localFolderItems : []
                         delegate: Components.FolderItemDelegate {
                             property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
@@ -1773,7 +1812,75 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
+                    ColumnLayout {
+                        visible: root.activeWorkspace === "calendar"
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Repeater {
+                            model: root.calendarSources
+                            delegate: QQC2.CheckDelegate {
+                                required property var modelData
+                                text: modelData.name
+                                checked: !!modelData.checked
+                                leftPadding: 8
+                                rightPadding: 8
+                                onToggled: root.setCalendarSourceChecked(modelData.id, checked)
+                            }
+                        }
+                    }
+
                     Item { Layout.fillHeight: true }
+
+                    ColumnLayout {
+                        visible: root.activeWorkspace === "calendar"
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        QQC2.Label {
+                            text: Qt.formatDate(new Date(), "MMMM yyyy")
+                            font.bold: true
+                            opacity: 0.85
+                            leftPadding: 8
+                        }
+
+                        GridLayout {
+                            columns: 7
+                            columnSpacing: 4
+                            rowSpacing: 4
+                            Layout.fillWidth: true
+
+                            Repeater {
+                                model: ["S", "M", "T", "W", "T", "F", "S"]
+                                delegate: QQC2.Label {
+                                    required property var modelData
+                                    text: modelData
+                                    horizontalAlignment: Text.AlignHCenter
+                                    Layout.fillWidth: true
+                                    opacity: 0.7
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            Repeater {
+                                model: 35
+                                delegate: QQC2.Label {
+                                    required property int index
+                                    readonly property date nowDate: new Date()
+                                    readonly property date firstDay: new Date(nowDate.getFullYear(), nowDate.getMonth(), 1)
+                                    readonly property int startWeekday: firstDay.getDay()
+                                    readonly property int dayNum: index - startWeekday + 1
+                                    readonly property int daysInMonth: new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 0).getDate()
+                                    readonly property bool inMonth: dayNum >= 1 && dayNum <= daysInMonth
+                                    text: inMonth ? dayNum : ""
+                                    horizontalAlignment: Text.AlignHCenter
+                                    Layout.fillWidth: true
+                                    opacity: inMonth ? 0.9 : 0
+                                    font.pixelSize: 11
+                                }
+                            }
+                        }
+                    }
 
                     Components.PaneDivider {
                         Layout.leftMargin: -Kirigami.Units.largeSpacing
@@ -1901,6 +2008,8 @@ Kirigami.ApplicationWindow {
                 QQC2.SplitView.preferredWidth: visible ? 980 : 0
                 QQC2.SplitView.fillWidth: root.activeWorkspace === "calendar"
                 systemPalette: systemPalette
+                allEvents: root.calendarEvents
+                visibleCalendarIds: root.visibleCalendarSourceIds()
             }
 
             Rectangle {
