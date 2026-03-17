@@ -54,7 +54,7 @@ Item {
             y: 0
             width: 1
             height: root.height
-            color: Qt.rgba(1, 1, 1, 0.22)
+            color: Qt.rgba(1, 1, 1, 0.34)
         }
     }
 
@@ -67,9 +67,9 @@ Item {
             width: root.width
             height: 1
             color: {
-                if (index % 4 === 0) return Qt.rgba(1, 1, 1, 0.22)   // :00
-                if (index % 2 === 0) return Qt.rgba(1, 1, 1, 0.14)   // :30
-                return Qt.rgba(1, 1, 1, 0.08)                        // :15/:45
+                if (index % 4 === 0) return Qt.rgba(1, 1, 1, 0.34)   // :00
+                if (index % 2 === 0) return Qt.rgba(1, 1, 1, 0.24)   // :30
+                return Qt.rgba(1, 1, 1, 0.16)                        // :15/:45
             }
         }
     }
