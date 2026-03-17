@@ -391,16 +391,6 @@ Kirigami.ApplicationWindow {
         moreFolderExpandedState = next
     }
 
-    function moreFolderLevel(rawName) {
-        const parts = (rawName || "").split("/")
-        let level = Math.max(0, parts.length - 1)
-        if (parts.length > 1) {
-            const head = (parts[0] || "").toLowerCase()
-            if (head === "[gmail]" || head === "[google mail]") level = Math.max(0, level - 1)
-        }
-        return level
-    }
-
     function moreAccountFolderItems() {
         const folders = root.dataStoreObj ? root.dataStoreObj.folders : []
         if (!folders || folders.length === 0) return []
@@ -420,7 +410,12 @@ Kirigami.ApplicationWindow {
             if (primaryKeys[norm]) continue
             if (rawName.indexOf("/") < 0 && !root.isSystemMailboxName(rawName, f.specialUse)) continue
 
-            const level = root.moreFolderLevel(rawName)
+            const parts = rawName.split("/")
+            let level = Math.max(0, parts.length - 1)
+            if (parts.length > 1) {
+                const head = (parts[0] || "").toLowerCase()
+                if (head === "[gmail]" || head === "[google mail]") level = Math.max(0, level - 1)
+            }
 
             byNorm[norm] = {
                 key: "account:" + norm,
@@ -453,7 +448,7 @@ Kirigami.ApplicationWindow {
                         categories: [],
                         flags: "\\Noselect (synthetic)",
                         noselect: true,
-                        level: root.moreFolderLevel(parentPath)
+                        level: Math.max(0, parentPath.split("/").length - 1)
                     }
                 }
                 parentPath += "/" + parts[p]
@@ -1820,20 +1815,15 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Components.FolderItemDelegate {
+                    Components.FolderSectionButton {
                         visible: root.activeWorkspace === "mail" && root.accountExpanded
-                        rowHeight: root.folderRowHeight
-                        iconSize: root.folderListIconSize
-                        indentLevel: 1
-                        folderKey: "account:more"
-                        folderName: i18n("More")
-                        folderIcon: "overflow-menu-horizontal"
-                        hasChildren: true
                         expanded: root.moreExpanded
-                        unreadCount: 0
-                        selected: false
-                        tooltipText: i18n("Show additional Gmail folders")
-                        onToggleRequested: root.moreExpanded = !root.moreExpanded
+                        sectionIcon: "overflow-menu-horizontal"
+                        title: i18n("More")
+                        titleOpacity: 0.8
+                        rowHeight: root.folderRowHeight
+                        chevronSize: root.sectionChevronSize
+                        sectionIconSize: root.folderListSectionIconSize
                         onActivated: root.moreExpanded = !root.moreExpanded
                     }
 
@@ -1847,7 +1837,7 @@ Kirigami.ApplicationWindow {
                             folderKey: modelData.key
                             folderName: modelData.name
                             folderIcon: modelData.icon
-                            indentLevel: 2 + Number(modelData.level || 0)
+                            indentLevel: 1 + Number(modelData.level || 0)
                             hasChildren: !!modelData.hasChildren
                             expanded: !!modelData.expanded
                             unreadCount: modelData.noselect ? 0 : folderStats.unread
