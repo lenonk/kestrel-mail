@@ -1674,6 +1674,10 @@ ImapService::refreshGoogleCalendars() {
         const QString bodyText = QString::fromUtf8(payload).trimmed();
         reply->deleteLater();
         if (!ok) {
+            qWarning().noquote() << "[calendar][google] calendarList fetch failed"
+                                 << "httpStatus=" << httpStatus
+                                 << "error=" << err
+                                 << "body=" << bodyText;
             QMetaObject::invokeMethod(this, [this, err, httpStatus, bodyText]() {
                 emit realtimeStatus(false, QStringLiteral("Google calendar list fetch failed (HTTP %1): %2 | body: %3")
                                         .arg(httpStatus)
@@ -1769,6 +1773,11 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
             const QString bodyText = QString::fromUtf8(payload).trimmed();
             reply->deleteLater();
             if (!ok) {
+                qWarning().noquote() << "[calendar][google] events fetch failed"
+                                     << "calendarId=" << calendarId
+                                     << "httpStatus=" << httpStatus
+                                     << "error=" << err
+                                     << "body=" << bodyText;
                 QMetaObject::invokeMethod(this, [this, err, httpStatus, calendarId, bodyText]() {
                     emit realtimeStatus(false, QStringLiteral("Google events fetch failed for '%1' (HTTP %2): %3 | body: %4")
                                             .arg(calendarId)
