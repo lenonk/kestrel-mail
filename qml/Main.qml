@@ -97,20 +97,24 @@ Kirigami.ApplicationWindow {
     property int lastClickedMessageIndex: -1
     property bool bootstrapFolderSyncRequested: false
 
+    property bool gmailCalendarsExpanded: true
+
+    // Calendar source list is intentionally keyed like Google Calendar list entries
+    // (id/summary/backgroundColor). Hook this to real Google list when backend lands.
     property var calendarSources: [
-        { id: "personal", name: i18n("Personal Gmail"), checked: true, color: "#6f8df7" },
-        { id: "calendar", name: i18n("Calendar"), checked: true, color: "#8bb2ff" },
-        { id: "holidays", name: i18n("Holidays in United States"), checked: true, color: "#d9b65d" },
-        { id: "mel", name: i18n("mellanyjo@gmail.com"), checked: false, color: "#8ccf8c" },
-        { id: "raven", name: i18n("Raven"), checked: true, color: "#c784ff" },
-        { id: "sebastian", name: i18n("Sebastian"), checked: true, color: "#73d2de" },
-        { id: "sandra", name: i18n("Sandra"), checked: true, color: "#f29bb2" }
+        { account: "gmail", id: "calendar", name: i18n("Calendar"), checked: true, color: "" },
+        { account: "gmail", id: "holidays", name: i18n("Holidays in United States"), checked: true, color: "" },
+        { account: "gmail", id: "mel", name: i18n("mellanyjo@gmail.com"), checked: false, color: "" },
+        { account: "gmail", id: "raven", name: i18n("Raven"), checked: true, color: "" },
+        { account: "gmail", id: "sebastian", name: i18n("Sebastian"), checked: true, color: "" },
+        { account: "gmail", id: "sandra", name: i18n("sandrmarshall1953@gmail.com"), checked: true, color: "" }
     ]
 
     property var calendarEvents: [
-        { calendarId: "personal", dayIndex: 0, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "10:00am - 11:00am" },
         { calendarId: "calendar", dayIndex: 2, startHour: 10, durationHours: 1.0, title: "Lenon's Workout", subtitle: "Occurs every 1 week" },
-        { calendarId: "raven", dayIndex: 4, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "Private" }
+        { calendarId: "raven", dayIndex: 4, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "Private" },
+        { calendarId: "sebastian", dayIndex: 1, startHour: 13, durationHours: 1.0, title: "Sebastian Meeting", subtitle: "1:00pm - 2:00pm" },
+        { calendarId: "sandra", dayIndex: 3, startHour: 15, durationHours: 0.5, title: "Sandra Call", subtitle: "3:00pm - 3:30pm" }
     ]
 
     function visibleCalendarSourceIds() {
@@ -127,7 +131,7 @@ Kirigami.ApplicationWindow {
         for (let i = 0; i < root.calendarSources.length; ++i) {
             const c = root.calendarSources[i]
             if (String(c.id) === String(sourceId))
-                next.push({ id: c.id, name: c.name, checked: !!checked, color: c.color })
+                next.push({ account: c.account, id: c.id, name: c.name, checked: !!checked, color: c.color })
             else
                 next.push(c)
         }
@@ -1819,42 +1823,44 @@ Kirigami.ApplicationWindow {
                         Layout.fillWidth: true
                         spacing: 4
 
+                        Components.FolderSectionButton {
+                            expanded: root.gmailCalendarsExpanded
+                            sectionIcon: "internet-mail"
+                            title: i18n("Gmail")
+                            titleOpacity: 0.9
+                            rowHeight: root.folderRowHeight
+                            chevronSize: root.sectionChevronSize
+                            sectionIconSize: root.folderListSectionIconSize
+                            onActivated: root.gmailCalendarsExpanded = !root.gmailCalendarsExpanded
+                        }
+
                         Repeater {
-                            model: root.calendarSources
-                            delegate: Item {
+                            model: root.gmailCalendarsExpanded ? root.calendarSources.filter(c => (c.account || "") === "gmail") : []
+                            delegate: QQC2.CheckBox {
                                 required property var modelData
                                 Layout.fillWidth: true
-                                implicitHeight: 28
+                                checked: !!modelData.checked
+                                leftPadding: 8
+                                rightPadding: 8
+                                onToggled: root.setCalendarSourceChecked(modelData.id, checked)
 
-                                QQC2.CheckBox {
-                                    id: calCheck
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    leftPadding: 8
-                                    rightPadding: 8
-                                    checked: !!modelData.checked
-                                    text: modelData.name
-                                    onToggled: root.setCalendarSourceChecked(modelData.id, checked)
+                                contentItem: RowLayout {
+                                    spacing: Kirigami.Units.smallSpacing
 
-                                    indicator: Rectangle {
-                                        implicitWidth: 16
-                                        implicitHeight: 16
-                                        x: calCheck.leftPadding
-                                        y: (calCheck.height - height) / 2
+                                    Rectangle {
+                                        Layout.alignment: Qt.AlignVCenter
+                                        implicitWidth: 14
+                                        implicitHeight: 14
                                         radius: 3
                                         color: modelData.color || "transparent"
                                         border.width: 1
-                                        border.color: Qt.rgba(1, 1, 1, 0.45)
+                                        border.color: modelData.color ? "transparent" : Qt.rgba(1, 1, 1, 0.35)
+                                    }
 
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 8
-                                            height: 8
-                                            radius: 2
-                                            visible: calCheck.checked
-                                            color: Qt.rgba(1, 1, 1, 0.92)
-                                        }
+                                    QQC2.Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.name
+                                        elide: Text.ElideRight
                                     }
                                 }
                             }
