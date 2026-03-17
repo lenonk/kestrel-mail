@@ -25,6 +25,7 @@ class ImapService : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QVariantList googleCalendarList READ googleCalendarList NOTIFY googleCalendarListChanged)
+    Q_PROPERTY(QVariantList googleWeekEvents READ googleWeekEvents NOTIFY googleWeekEventsChanged)
 public:
     explicit ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent = nullptr);
     ~ImapService() override;
@@ -57,8 +58,12 @@ public:
     Q_INVOKABLE QString attachmentPreviewPath(const QString &accountEmail, const QString &uid, const QString &partId,
                                               const QString &fileName, const QString &mimeType);
     Q_INVOKABLE void refreshGoogleCalendars();
+    Q_INVOKABLE void refreshGoogleWeekEvents(const QStringList &calendarIds,
+                                             const QString &weekStartIso,
+                                             const QString &weekEndIso);
 
     [[nodiscard]] QVariantList googleCalendarList() const { return m_googleCalendarList; }
+    [[nodiscard]] QVariantList googleWeekEvents() const { return m_googleWeekEvents; }
 
 signals:
     void syncFinished(bool ok, const QString &message);
@@ -68,6 +73,7 @@ signals:
     void attachmentReady(const QString &accountEmail, const QString &uid, const QString &partId, const QString &localPath);
     void attachmentDownloadProgress(const QString &accountEmail, const QString &uid, const QString &partId, int progressPercent);
     void googleCalendarListChanged();
+    void googleWeekEventsChanged();
 
 private:
     // Internal result type for async sync work lambdas.
@@ -115,6 +121,7 @@ private:
     mutable QMutex                               m_attachmentFileCacheMutex;
 
     QVariantList                                 m_googleCalendarList;
+    QVariantList                                 m_googleWeekEvents;
 
     QSet<QString>                                m_inFlightAttachmentDownloads;
     mutable QMutex                               m_inFlightAttachmentDownloadsMutex;

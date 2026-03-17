@@ -136,6 +136,25 @@ Kirigami.ApplicationWindow {
                 next.push(c)
         }
         root.calendarSources = next
+        root.refreshVisibleGoogleWeekEvents()
+    }
+
+    function calendarWeekBoundsIso() {
+        const now = new Date()
+        const start = new Date(now)
+        start.setHours(0, 0, 0, 0)
+        start.setDate(start.getDate() - start.getDay())
+        const end = new Date(start)
+        end.setDate(end.getDate() + 7)
+        return { startIso: start.toISOString(), endIso: end.toISOString() }
+    }
+
+    function refreshVisibleGoogleWeekEvents() {
+        if (!root.imapServiceObj || !root.imapServiceObj.refreshGoogleWeekEvents)
+            return
+        const ids = root.visibleCalendarSourceIds()
+        const b = root.calendarWeekBoundsIso()
+        root.imapServiceObj.refreshGoogleWeekEvents(ids, b.startIso, b.endIso)
     }
 
     function rebuildCalendarSourcesFromGoogle() {
@@ -165,6 +184,7 @@ Kirigami.ApplicationWindow {
             })
         }
         root.calendarSources = next
+        root.refreshVisibleGoogleWeekEvents()
     }
 
     Settings {
@@ -2084,7 +2104,9 @@ Kirigami.ApplicationWindow {
                 QQC2.SplitView.preferredWidth: visible ? 980 : 0
                 QQC2.SplitView.fillWidth: root.activeWorkspace === "calendar"
                 systemPalette: systemPalette
-                allEvents: root.calendarEvents
+                allEvents: (root.imapServiceObj && root.imapServiceObj.googleWeekEvents && root.imapServiceObj.googleWeekEvents.length > 0)
+                           ? root.imapServiceObj.googleWeekEvents
+                           : root.calendarEvents
                 visibleCalendarIds: root.visibleCalendarSourceIds()
             }
 

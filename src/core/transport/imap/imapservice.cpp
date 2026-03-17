@@ -21,6 +21,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSet>
@@ -1653,7 +1654,11 @@ ImapService::refreshGoogleCalendars() {
             return;
 
         QNetworkAccessManager nam;
-        QNetworkRequest req{QUrl(QStringLiteral("https://www.googleapis.com/calendar/v3/users/me/calendarList"))};
+        QUrl listUrl(QStringLiteral("https://www.googleapis.com/calendar/v3/users/me/calendarList"));
+        QUrlQuery listQuery;
+        listQuery.addQueryItem(QStringLiteral("colorRgbFormat"), QStringLiteral("true"));
+        listUrl.setQuery(listQuery);
+        QNetworkRequest req{listUrl};
         req.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
@@ -1689,6 +1694,113 @@ ImapService::refreshGoogleCalendars() {
         QMetaObject::invokeMethod(this, [this, list]() {
             m_googleCalendarList = list;
             emit googleCalendarListChanged();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void
+ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
+                                     const QString &weekStartIso,
+                                     const QString &weekEndIso) {
+    if (m_destroying || !m_accounts)
+        return;
+
+    const auto accounts = m_accounts->accounts();
+    if (accounts.isEmpty() || calendarIds.isEmpty()) {
+        if (!m_googleWeekEvents.isEmpty()) {
+            m_googleWeekEvents.clear();
+            emit googleWeekEventsChanged();
+        }
+        return;
+    }
+
+    runBackgroundTask([this, accounts, calendarIds, weekStartIso, weekEndIso]() {
+        QString accessToken;
+        for (const auto &info : resolveAccounts(accounts)) {
+            if (info.host.contains("gmail", Qt::CaseInsensitive)) {
+                accessToken = info.accessToken;
+                break;
+            }
+        }
+        if (accessToken.isEmpty())
+            return;
+
+        const QDateTime weekStart = QDateTime::fromString(weekStartIso, Qt::ISODate);
+        const QDateTime weekEnd = QDateTime::fromString(weekEndIso, Qt::ISODate);
+        if (!weekStart.isValid() || !weekEnd.isValid())
+            return;
+
+        QNetworkAccessManager nam;
+        QVariantList out;
+
+        for (const QString &calendarId : calendarIds) {
+            QUrl evUrl(QStringLiteral("https://www.googleapis.com/calendar/v3/calendars/%1/events")
+                       .arg(QString::fromUtf8(QUrl::toPercentEncoding(calendarId))));
+            QUrlQuery q;
+            q.addQueryItem(QStringLiteral("singleEvents"), QStringLiteral("true"));
+            q.addQueryItem(QStringLiteral("orderBy"), QStringLiteral("startTime"));
+            q.addQueryItem(QStringLiteral("timeMin"), weekStart.toUTC().toString(Qt::ISODate));
+            q.addQueryItem(QStringLiteral("timeMax"), weekEnd.toUTC().toString(Qt::ISODate));
+            evUrl.setQuery(q);
+
+            QNetworkRequest req{evUrl};
+            req.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
+            req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+            QEventLoop loop;
+            QNetworkReply *reply = nam.get(req);
+            QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+            loop.exec();
+
+            const QByteArray payload = reply->readAll();
+            const bool ok = reply->error() == QNetworkReply::NoError;
+            reply->deleteLater();
+            if (!ok)
+                continue;
+
+            const auto doc = QJsonDocument::fromJson(payload);
+            if (!doc.isObject())
+                continue;
+
+            const auto items = doc.object().value("items").toArray();
+            for (const auto &v : items) {
+                const auto o = v.toObject();
+                const auto startObj = o.value("start").toObject();
+                const auto endObj = o.value("end").toObject();
+
+                const QString startStr = startObj.value("dateTime").toString();
+                const QString endStr = endObj.value("dateTime").toString();
+                if (startStr.isEmpty() || endStr.isEmpty())
+                    continue;
+
+                const QDateTime startDt = QDateTime::fromString(startStr, Qt::ISODate);
+                const QDateTime endDt = QDateTime::fromString(endStr, Qt::ISODate);
+                if (!startDt.isValid() || !endDt.isValid())
+                    continue;
+
+                const qint64 dayIndex = weekStart.date().daysTo(startDt.date());
+                if (dayIndex < 0 || dayIndex > 6)
+                    continue;
+
+                const int minutes = startDt.time().hour() * 60 + startDt.time().minute();
+                const int durMinutes = qMax(15, static_cast<int>(startDt.secsTo(endDt) / 60));
+
+                QVariantMap row;
+                row.insert("calendarId", calendarId);
+                row.insert("dayIndex", static_cast<int>(dayIndex));
+                row.insert("startHour", static_cast<double>(minutes) / 60.0);
+                row.insert("durationHours", static_cast<double>(durMinutes) / 60.0);
+                row.insert("title", o.value("summary").toString());
+                row.insert("subtitle", QStringLiteral("%1 - %2")
+                           .arg(startDt.time().toString("h:mmap").toLower())
+                           .arg(endDt.time().toString("h:mmap").toLower()));
+                out.push_back(row);
+            }
+        }
+
+        QMetaObject::invokeMethod(this, [this, out]() {
+            m_googleWeekEvents = out;
+            emit googleWeekEventsChanged();
         }, Qt::QueuedConnection);
     });
 }
