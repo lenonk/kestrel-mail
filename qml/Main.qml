@@ -2104,9 +2104,9 @@ Kirigami.ApplicationWindow {
                 QQC2.SplitView.preferredWidth: visible ? 980 : 0
                 QQC2.SplitView.fillWidth: root.activeWorkspace === "calendar"
                 systemPalette: systemPalette
-                allEvents: (root.imapServiceObj && root.imapServiceObj.googleWeekEvents && root.imapServiceObj.googleWeekEvents.length > 0)
+                allEvents: (root.imapServiceObj && root.imapServiceObj.googleWeekEvents)
                            ? root.imapServiceObj.googleWeekEvents
-                           : root.calendarEvents
+                           : []
                 visibleCalendarIds: root.visibleCalendarSourceIds()
             }
 

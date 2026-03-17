@@ -1669,9 +1669,15 @@ ImapService::refreshGoogleCalendars() {
 
         const QByteArray payload = reply->readAll();
         const bool ok = reply->error() == QNetworkReply::NoError;
+        const QString err = reply->errorString();
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         reply->deleteLater();
-        if (!ok)
+        if (!ok) {
+            QMetaObject::invokeMethod(this, [this, err, httpStatus]() {
+                emit realtimeStatus(false, QStringLiteral("Google calendar list fetch failed (HTTP %1): %2. Reconnect Gmail to grant Calendar scope.").arg(httpStatus).arg(err));
+            }, Qt::QueuedConnection);
             return;
+        }
 
         const auto doc = QJsonDocument::fromJson(payload);
         if (!doc.isObject())
@@ -1754,9 +1760,15 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
 
             const QByteArray payload = reply->readAll();
             const bool ok = reply->error() == QNetworkReply::NoError;
+            const QString err = reply->errorString();
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             reply->deleteLater();
-            if (!ok)
+            if (!ok) {
+                QMetaObject::invokeMethod(this, [this, err, httpStatus, calendarId]() {
+                    emit realtimeStatus(false, QStringLiteral("Google events fetch failed for '%1' (HTTP %2): %3").arg(calendarId).arg(httpStatus).arg(err));
+                }, Qt::QueuedConnection);
                 continue;
+            }
 
             const auto doc = QJsonDocument::fromJson(payload);
             if (!doc.isObject())
