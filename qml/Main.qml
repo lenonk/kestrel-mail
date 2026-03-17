@@ -1842,7 +1842,7 @@ Kirigami.ApplicationWindow {
                             folderKey: modelData.key
                             folderName: modelData.name
                             folderIcon: modelData.icon
-                            indentLevel: 1 + Number(modelData.level || 0)
+                            indentLevel: 2 + Number(modelData.level || 0)
                             hasChildren: !!modelData.hasChildren
                             expanded: !!modelData.expanded
                             unreadCount: modelData.noselect ? 0 : folderStats.unread
