@@ -140,9 +140,14 @@ Kirigami.ApplicationWindow {
     }
 
     function calendarWeekBoundsIso() {
-        // Keep API fetch aligned with the currently hard-coded week header/topbar (Mar 9-15, 2026).
-        const start = new Date(2026, 2, 9, 0, 0, 0, 0) // local time, month is 0-based
-        const end = new Date(2026, 2, 16, 0, 0, 0, 0)
+        // Monday -> next Monday (matches week header layout Mon..Sun)
+        const now = new Date()
+        const start = new Date(now)
+        start.setHours(0, 0, 0, 0)
+        const mondayOffset = (start.getDay() + 6) % 7
+        start.setDate(start.getDate() - mondayOffset)
+        const end = new Date(start)
+        end.setDate(end.getDate() + 7)
         return { startIso: start.toISOString(), endIso: end.toISOString() }
     }
 
@@ -1904,21 +1909,21 @@ Kirigami.ApplicationWindow {
                                 onToggled: root.setCalendarSourceChecked(modelData.id, checked)
 
                                 indicator: Rectangle {
-                                    implicitWidth: 16
-                                    implicitHeight: 16
+                                    implicitWidth: 18
+                                    implicitHeight: 18
                                     x: calendarCheck.leftPadding
                                     y: (calendarCheck.height - height) / 2
-                                    radius: 3
-                                    color: modelData.color || Qt.rgba(1, 1, 1, 0.08)
-                                    border.width: 1
-                                    border.color: Qt.rgba(1, 1, 1, 0.45)
+                                    radius: 4
+                                    color: modelData.color || Qt.rgba(1, 1, 1, 0.12)
+                                    border.width: 2
+                                    border.color: Qt.rgba(1, 1, 1, 0.60)
 
                                     QQC2.Label {
                                         anchors.centerIn: parent
                                         text: "✓"
                                         visible: calendarCheck.checked
                                         font.bold: true
-                                        font.pixelSize: 12
+                                        font.pixelSize: 13
                                         color: Qt.rgba(0, 0, 0, 0.90)
                                     }
                                 }
