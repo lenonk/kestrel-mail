@@ -3254,126 +3254,154 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         // like Trash/All Mail show only a handful of rows.
         QVariantList filtered;
         if (database.isValid() && database.isOpen()) {
-            QSqlQuery qFolder(database);
-            if (selectedIsTrash) {
-                qFolder.prepare(QStringLiteral(R"(
-                    SELECT mfm.account_email,
-                           mfm.folder,
-                           mfm.uid,
-                           cm.id,
-                           cm.sender,
-                           cm.subject,
-                           cm.recipient,
-                           '' as recipient_avatar_url,
-                           cm.received_at,
-                           cm.snippet,
-                           COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
-                           '' as avatar_domain,
-                           '' as avatar_url,
-                           '' as avatar_source,
-                           mfm.unread,
-                           COALESCE(cm.thread_id, '') as thread_id,
-                           COALESCE((SELECT COUNT(DISTINCT m2.id) FROM messages m2
-                                     WHERE m2.account_email = cm.account_email
-                                       AND m2.thread_id = cm.thread_id
-                                       AND cm.thread_id IS NOT NULL
-                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
-                           COALESCE(cm.gm_thr_id, '') as gm_thr_id
-                    FROM message_folder_map mfm
-                    JOIN messages cm ON cm.id = mfm.message_id
-                    WHERE lower(mfm.folder)=:folder
-                    ORDER BY cm.received_at DESC
-                    LIMIT :limit OFFSET :offset
-                )"));
-                qFolder.bindValue(QStringLiteral(":folder"), selectedFolder);
-                qFolder.bindValue(QStringLiteral(":limit"), (limit > 0 ? (limit + 1) : 5000));
-                qFolder.bindValue(QStringLiteral(":offset"), qMax(0, offset));
-            } else {
-                qFolder.prepare(QStringLiteral(R"(
-                    SELECT mfm.account_email,
-                           mfm.folder,
-                           mfm.uid,
-                           cm.id,
-                           cm.sender,
-                           cm.subject,
-                           cm.recipient,
-                           '' as recipient_avatar_url,
-                           cm.received_at,
-                           cm.snippet,
-                           COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
-                           '' as avatar_domain,
-                           '' as avatar_url,
-                           '' as avatar_source,
-                           mfm.unread,
-                           COALESCE(cm.thread_id, '') as thread_id,
-                           COALESCE((SELECT COUNT(DISTINCT m2.id) FROM messages m2
-                                     WHERE m2.account_email = cm.account_email
-                                       AND m2.thread_id = cm.thread_id
-                                       AND cm.thread_id IS NOT NULL
-                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
-                           COALESCE(cm.gm_thr_id, '') as gm_thr_id
-                    FROM message_folder_map mfm
-                    JOIN messages cm ON cm.id = mfm.message_id
-                    WHERE lower(mfm.folder)=:folder
-                      AND NOT EXISTS (
-                          SELECT 1 FROM message_folder_map t
-                          WHERE t.account_email=mfm.account_email
-                            AND t.message_id=mfm.message_id
-                            AND (lower(t.folder)='trash' OR lower(t.folder)='[gmail]/trash' OR lower(t.folder)='[google mail]/trash' OR lower(t.folder) LIKE '%/trash')
-                      )
-                    ORDER BY cm.received_at DESC
-                    LIMIT :limit OFFSET :offset
-                )"));
-                qFolder.bindValue(QStringLiteral(":folder"), selectedFolder);
-                qFolder.bindValue(QStringLiteral(":limit"), (limit > 0 ? (limit + 1) : 5000));
-                qFolder.bindValue(QStringLiteral(":offset"), qMax(0, offset));
-            }
+            const int safeOffset = qMax(0, offset);
+            const int chunkSize = (limit > 0) ? qMax(200, limit * 4) : 5000;
+            const int targetCount = (limit > 0) ? (safeOffset + limit + 1) : -1;
 
-            if (qFolder.exec()) {
-                QSet<QString> seenFolderTids;
-                while (qFolder.next()) {
-                    const QString tid   = qFolder.value(15).toString().trimmed();
-                    QString gtid        = qFolder.value(17).toString().trimmed();
-                    const QString acct  = qFolder.value(0).toString();
-                    const QString mid   = qFolder.value(3).toString();
-                    if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
-                        gtid = tid.mid(3).trimmed();
-                    const QString tkey  = !gtid.isEmpty()
-                        ? acct + QStringLiteral("|gtid:") + gtid
-                        : (tid.isEmpty()
-                            ? acct + QStringLiteral("|msg:") + mid
-                            : acct + QStringLiteral("|tid:") + tid);
-                    if (seenFolderTids.contains(tkey)) continue;
-                    seenFolderTids.insert(tkey);
+            QSet<QString> seenFolderTids;
+            int rawOffset = 0;
+            bool exhausted = false;
 
-                    QVariantMap row;
-                    row.insert(QStringLiteral("accountEmail"), qFolder.value(0));
-                    row.insert(QStringLiteral("folder"), qFolder.value(1));
-                    row.insert(QStringLiteral("uid"), qFolder.value(2));
-                    row.insert(QStringLiteral("messageId"), mid);
-                    row.insert(QStringLiteral("sender"), qFolder.value(4));
-                    row.insert(QStringLiteral("subject"), qFolder.value(5));
-                    row.insert(QStringLiteral("recipient"), qFolder.value(6));
-                    row.insert(QStringLiteral("recipientAvatarUrl"), qFolder.value(7));
-                    row.insert(QStringLiteral("receivedAt"), qFolder.value(8));
-                    row.insert(QStringLiteral("snippet"),          qFolder.value(9));
-                    row.insert(QStringLiteral("hasTrackingPixel"), qFolder.value(10).toInt() == 1);
-                    row.insert(QStringLiteral("avatarDomain"),     qFolder.value(11));
-                    row.insert(QStringLiteral("avatarUrl"), qFolder.value(12));
-                    row.insert(QStringLiteral("avatarSource"), qFolder.value(13));
-                    row.insert(QStringLiteral("unread"), qFolder.value(14).toInt() == 1);
-                    row.insert(QStringLiteral("threadId"),    tid);
-                    row.insert(QStringLiteral("threadCount"), qFolder.value(16).toInt());
-                    row.insert(QStringLiteral("gmThrId"),     gtid);
-                    filtered.push_back(row);
+            while (!exhausted) {
+                QSqlQuery qFolder(database);
+                if (selectedIsTrash) {
+                    qFolder.prepare(QStringLiteral(R"(
+                        SELECT mfm.account_email,
+                               mfm.folder,
+                               mfm.uid,
+                               cm.id,
+                               cm.sender,
+                               cm.subject,
+                               cm.recipient,
+                               '' as recipient_avatar_url,
+                               cm.received_at,
+                               cm.snippet,
+                               COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
+                               '' as avatar_domain,
+                               '' as avatar_url,
+                               '' as avatar_source,
+                               mfm.unread,
+                               COALESCE(cm.thread_id, '') as thread_id,
+                               COALESCE((SELECT COUNT(DISTINCT m2.id) FROM messages m2
+                                         WHERE m2.account_email = cm.account_email
+                                           AND m2.thread_id = cm.thread_id
+                                           AND cm.thread_id IS NOT NULL
+                                           AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                               COALESCE(cm.gm_thr_id, '') as gm_thr_id
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id
+                        WHERE lower(mfm.folder)=:folder
+                        ORDER BY cm.received_at DESC
+                        LIMIT :limit OFFSET :offset
+                    )"));
+                } else {
+                    qFolder.prepare(QStringLiteral(R"(
+                        SELECT mfm.account_email,
+                               mfm.folder,
+                               mfm.uid,
+                               cm.id,
+                               cm.sender,
+                               cm.subject,
+                               cm.recipient,
+                               '' as recipient_avatar_url,
+                               cm.received_at,
+                               cm.snippet,
+                               COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
+                               '' as avatar_domain,
+                               '' as avatar_url,
+                               '' as avatar_source,
+                               mfm.unread,
+                               COALESCE(cm.thread_id, '') as thread_id,
+                               COALESCE((SELECT COUNT(DISTINCT m2.id) FROM messages m2
+                                         WHERE m2.account_email = cm.account_email
+                                           AND m2.thread_id = cm.thread_id
+                                           AND cm.thread_id IS NOT NULL
+                                           AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                               COALESCE(cm.gm_thr_id, '') as gm_thr_id
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id
+                        WHERE lower(mfm.folder)=:folder
+                          AND NOT EXISTS (
+                              SELECT 1 FROM message_folder_map t
+                              WHERE t.account_email=mfm.account_email
+                                AND t.message_id=mfm.message_id
+                                AND (lower(t.folder)='trash' OR lower(t.folder)='[gmail]/trash' OR lower(t.folder)='[google mail]/trash' OR lower(t.folder) LIKE '%/trash')
+                          )
+                        ORDER BY cm.received_at DESC
+                        LIMIT :limit OFFSET :offset
+                    )"));
                 }
+                qFolder.bindValue(QStringLiteral(":folder"), selectedFolder);
+                qFolder.bindValue(QStringLiteral(":limit"), chunkSize);
+                qFolder.bindValue(QStringLiteral(":offset"), rawOffset);
+
+                int fetchedRaw = 0;
+                if (qFolder.exec()) {
+                    while (qFolder.next()) {
+                        ++fetchedRaw;
+
+                        const QString tid   = qFolder.value(15).toString().trimmed();
+                        QString gtid        = qFolder.value(17).toString().trimmed();
+                        const QString acct  = qFolder.value(0).toString();
+                        const QString mid   = qFolder.value(3).toString();
+                        if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
+                            gtid = tid.mid(3).trimmed();
+                        const QString tkey  = !gtid.isEmpty()
+                            ? acct + QStringLiteral("|gtid:") + gtid
+                            : (tid.isEmpty()
+                                ? acct + QStringLiteral("|msg:") + mid
+                                : acct + QStringLiteral("|tid:") + tid);
+                        if (seenFolderTids.contains(tkey)) continue;
+                        seenFolderTids.insert(tkey);
+
+                        QVariantMap row;
+                        row.insert(QStringLiteral("accountEmail"), qFolder.value(0));
+                        row.insert(QStringLiteral("folder"), qFolder.value(1));
+                        row.insert(QStringLiteral("uid"), qFolder.value(2));
+                        row.insert(QStringLiteral("messageId"), mid);
+                        row.insert(QStringLiteral("sender"), qFolder.value(4));
+                        row.insert(QStringLiteral("subject"), qFolder.value(5));
+                        row.insert(QStringLiteral("recipient"), qFolder.value(6));
+                        row.insert(QStringLiteral("recipientAvatarUrl"), qFolder.value(7));
+                        row.insert(QStringLiteral("receivedAt"), qFolder.value(8));
+                        row.insert(QStringLiteral("snippet"),          qFolder.value(9));
+                        row.insert(QStringLiteral("hasTrackingPixel"), qFolder.value(10).toInt() == 1);
+                        row.insert(QStringLiteral("avatarDomain"),     qFolder.value(11));
+                        row.insert(QStringLiteral("avatarUrl"), qFolder.value(12));
+                        row.insert(QStringLiteral("avatarSource"), qFolder.value(13));
+                        row.insert(QStringLiteral("unread"), qFolder.value(14).toInt() == 1);
+                        row.insert(QStringLiteral("threadId"),    tid);
+                        row.insert(QStringLiteral("threadCount"), qFolder.value(16).toInt());
+                        row.insert(QStringLiteral("gmThrId"),     gtid);
+                        filtered.push_back(row);
+
+                        if (targetCount > 0 && filtered.size() >= targetCount)
+                            break;
+                    }
+                }
+
+                if (targetCount > 0 && filtered.size() >= targetCount)
+                    break;
+                if (fetchedRaw < chunkSize)
+                    exhausted = true;
+                rawOffset += fetchedRaw;
+                if (fetchedRaw == 0)
+                    exhausted = true;
+            }
+
+            if (limit > 0) {
+                if (safeOffset >= filtered.size()) {
+                    if (hasMore) *hasMore = false;
+                    return {};
+                }
+                const int end = qMin(filtered.size(), safeOffset + limit);
+                if (hasMore) *hasMore = (filtered.size() > safeOffset + limit);
+                filtered = filtered.mid(safeOffset, end - safeOffset);
+            } else {
+                if (hasMore) *hasMore = false;
             }
         }
 
-        if (limit > 0 && filtered.size() > limit) {
-            if (hasMore) *hasMore = true;
-            filtered = filtered.mid(0, limit);
-        }
         annotateMessageFlags(filtered);
         return filtered;
     }
