@@ -366,6 +366,40 @@ Item {
         }
     }
 
+    function _forwardAttachmentPathsForMessage(msg) {
+        const out = [];
+        const seen = {};
+        if (!msg || !appRoot || !appRoot.imapServiceObj)
+            return out;
+        const key = _threadMessageKey(msg);
+        const items = cardAttachmentItems[key] || [];
+        const paths = cardAttachmentLocalPaths[key] || {};
+        const account = (msg.accountEmail || "").toString();
+        const uid = (msg.uid || "").toString();
+        const folder = (msg.folder || "").toString();
+
+        for (let i = 0; i < items.length; ++i) {
+            const a = items[i] || {};
+            const partId = (a.partId || "").toString();
+            if (!partId.length) continue;
+            let p = (paths[partId] || "").toString();
+            if (!p.length && appRoot.imapServiceObj.cachedAttachmentPath)
+                p = (appRoot.imapServiceObj.cachedAttachmentPath(account, uid, partId) || "").toString();
+            const k = account + "|" + uid + "|" + partId;
+            if (seen[k]) continue;
+            seen[k] = true;
+            out.push({
+                filename: (a.name || "attachment").toString(),
+                path: p,
+                accountEmail: account,
+                folder: folder,
+                uid: uid,
+                partId: partId
+            });
+        }
+        return out;
+    }
+
     function _startCardAttachmentPrefetch(msg) {
         if (!msg || !appRoot || !appRoot.imapServiceObj)
             return;
@@ -755,24 +789,26 @@ Item {
                                                 if (!msg)
                                                     return;
                                                 if (actionText === i18n("Reply all")) {
-                                                    appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject);
-                                                    appRoot.openComposerTo(msg.recipient || "", i18n("reply all"));
-                                                } else if (actionText === i18n("Forward")) {
-                                                    appRoot.composeDraftTo = "";
-                                                    appRoot.composeDraftSubject = i18n("Fwd: %1").arg(root.messageSubject);
-                                                    appRoot.composeDraftBody = i18n("\n\n--- Forwarded message ---\nFrom: %1\nDate: %2\n\n%3").arg(msg.sender || "").arg(root._threadDate(msg)).arg(msg.snippet || "");
-                                                    appRoot.openComposeDialog(i18n("forward"));
-                                                } else {
-                                                    appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject);
-                                                    appRoot.openComposerTo(msg.replyTo || msg.sender || "", i18n("reply"));
+                                                    const subject =  i18n("Re: %1", root.messageSubject);
+                                                    appRoot.openComposerTo(msg.recipient || "", i18n("reply all"), subject);
+                                                }
+                                                else if (actionText === i18n("Forward")) {
+                                                    const forwardAttachments = root._forwardAttachmentPathsForMessage(msg);
+                                                    appRoot.forwardMessageFromData(msg, root._threadDate(msg), forwardAttachments);
+                                                }
+                                                else {
+                                                    const subject = i18n("Re: %1", root.messageSubject);
+                                                    appRoot.openComposerTo(msg.replyTo || msg.sender || "", i18n("reply"), subject);
                                                 }
                                             }
                                         }
-                                        QQC2.Button {
-                                            icon.name: root._threadCardDarkMode(threadCard.index) ? "weather-clear-night" : "weather-clear"
-                                            text: root._threadCardDarkMode(threadCard.index) ? i18n("Dark") : i18n("Light")
 
-                                            onClicked: root._threadToggleCardDark(threadCard.index)
+                                        DarkLightToggleButton {
+                                            darkMode: root._threadCardDarkMode(threadCard.index)
+
+                                            onModeToggled: {
+                                                root._threadToggleCardDark(threadCard.index)
+                                            }
                                         }
                                     }
                                 }

@@ -2148,6 +2148,98 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
 }
 
 void
+ImapService::addMessageToFolder(const QString &accountEmail, const QString &folder,
+                                const QString &uid, const QString &targetFolder) {
+    if (m_destroying || accountEmail.isEmpty() || folder.isEmpty() || uid.isEmpty() || targetFolder.isEmpty())
+        return;
+
+    QString resolvedTarget = targetFolder.trimmed();
+    if (m_store) {
+        const QVariantList allFolders = m_store->folders();
+        const QString desired = resolvedTarget.toLower();
+
+        // Prefer canonical remote folder name/case from folders table.
+        for (const QVariant &fv : allFolders) {
+            const QVariantMap f = fv.toMap();
+            const QString acc = f.value("accountEmail"_L1).toString().trimmed();
+            if (acc.compare(accountEmail, Qt::CaseInsensitive) != 0) continue;
+
+            const QString name = f.value("name"_L1).toString().trimmed();
+            const QString special = f.value("specialUse"_L1).toString().trimmed().toLower();
+            const QString lname = name.toLower();
+
+            if (desired == QStringLiteral("important")) {
+                if (special == QStringLiteral("important") || lname.endsWith(QStringLiteral("/important"))) {
+                    resolvedTarget = name;
+                    break;
+                }
+            } else if (lname == desired) {
+                resolvedTarget = name;
+                break;
+            }
+        }
+    }
+
+    if (resolvedTarget.compare(folder.trimmed(), Qt::CaseInsensitive) == 0)
+        return;
+
+    qint64 messageId = -1;
+    int unreadVal = 0;
+    if (m_store) {
+        const QVariantMap edge = m_store->folderMapRowForEdge(accountEmail, folder, uid);
+        messageId = edge.value("messageId"_L1, -1LL).toLongLong();
+        unreadVal = edge.value("unread"_L1, 0).toInt();
+
+        // Optimistic local membership so UI reflects the tag immediately.
+        if (messageId > 0)
+            m_store->insertFolderEdge(accountEmail, messageId, resolvedTarget, uid, unreadVal);
+    }
+
+    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, messageId, unreadVal]() {
+        if (m_destroying.load()) return;
+
+        auto cxn = getPooledConnection(accountEmail, "add-folder-membership");
+        if (!cxn) return;
+
+        if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(folder);
+            if (!ok) return;
+        }
+
+        const QString resp = cxn->execute(QStringLiteral("UID COPY %1 \"%2\"").arg(uid, resolvedTarget));
+
+        static const QRegularExpression kCopyUidRe(
+            R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
+            QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpressionMatch m = kCopyUidRe.match(resp);
+
+        const bool ok = resp.contains("OK"_L1, Qt::CaseInsensitive);
+        if (!ok) {
+            QMetaObject::invokeMethod(this, [this, accountEmail, resolvedTarget, uid]() {
+                if (!m_destroying.load() && m_store)
+                    m_store->deleteSingleFolderEdge(accountEmail, resolvedTarget, uid);
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        if (m.hasMatch() && messageId > 0) {
+            const QString newUid = m.captured(1);
+            QMetaObject::invokeMethod(this, [this, accountEmail, resolvedTarget, uid, newUid, messageId, unreadVal]() {
+                if (m_destroying.load() || !m_store) return;
+                if (newUid != uid)
+                    m_store->deleteSingleFolderEdge(accountEmail, resolvedTarget, uid);
+                m_store->insertFolderEdge(accountEmail, messageId, resolvedTarget, newUid, unreadVal);
+            }, Qt::QueuedConnection);
+        }
+
+        QMetaObject::invokeMethod(this, [this, resolvedTarget]() {
+            if (!m_destroying.load())
+                syncFolder(resolvedTarget, false);
+        }, Qt::QueuedConnection);
+    });
+}
+
+void
 ImapService::syncFolder(const QString &folderName, bool announce) {
     if (m_destroying)
         return;

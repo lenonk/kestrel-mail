@@ -23,6 +23,29 @@
 
 using namespace Qt::Literals::StringLiterals;
 
+namespace {
+static const QRegularExpression kReWhitespace(QStringLiteral("\\s+"));
+static const QRegularExpression kReNonAlnumSplit(QStringLiteral("[^a-z0-9]+"));
+static const QRegularExpression kReHasLetters(QStringLiteral("[A-Za-z]"));
+static const QRegularExpression kReCsvSemicolonOutsideQuotes(QStringLiteral("[,;](?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)"));
+static const QRegularExpression kReEmailAddress(QStringLiteral("([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})"),
+                                                QRegularExpression::CaseInsensitiveOption);
+
+static const QRegularExpression kReSnippetUrl(QStringLiteral("https?://\\S+"),
+                                              QRegularExpression::CaseInsensitiveOption);
+static const QRegularExpression kReSnippetCharsetBoundary(QStringLiteral("\\b(?:charset|boundary)\\s*=\\s*\"?[^\"\\s]+\"?"),
+                                                          QRegularExpression::CaseInsensitiveOption);
+static const QRegularExpression kReSnippetViewEmailInBrowser(QStringLiteral("(?i)view\\s+(?:this\\s+)?email\\s+in\\s+(?:a|your)?\\s*browser[:!\\-\\s]*(?:https?://\\S+)?"));
+static const QRegularExpression kReSnippetViewInBrowser(QStringLiteral("(?i)view\\s+in\\s+(?:a|your)?\\s*browser[:!\\-\\s]*(?:https?://\\S+)?"));
+static const QRegularExpression kReSnippetViewAsWebPage(QStringLiteral("(?i)view\\s+as\\s+(?:a\\s+)?web\\s+page[:!\\-\\s]*(?:https?://\\S+)?"));
+static const QRegularExpression kReSnippetTrailingPunct(QStringLiteral("\\s*[()\\[\\]{}|:;.,-]+\\s*$"));
+
+static const QRegularExpression kReHtmlish(QStringLiteral("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"),
+                                           QRegularExpression::CaseInsensitiveOption);
+static const QRegularExpression kReMarkdownLinks(QStringLiteral("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"),
+                                                 QRegularExpression::CaseInsensitiveOption);
+}
+
 // Extract the first RFC 5322 Message-ID from a header value (e.g. References, In-Reply-To).
 // Returns a normalized (lowercase, no angle-brackets) form.
 static QString extractFirstMessageIdFromHeader(const QString &val)
@@ -33,7 +56,7 @@ static QString extractFirstMessageIdFromHeader(const QString &val)
     if (m.hasMatch())
         return m.captured(1).trimmed().toLower();
     // Bare message-id without angle brackets — take first whitespace-delimited token.
-    const QStringList parts = val.trimmed().split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    const QStringList parts = val.trimmed().split(kReWhitespace, Qt::SkipEmptyParts);
     return parts.isEmpty() ? QString() : parts.first().toLower();
 }
 
@@ -50,8 +73,7 @@ static QString computeThreadId(const QString &refs, const QString &irt, const QS
 
 QString extractFirstEmail(const QString &raw)
 {
-    const QRegularExpression re(QStringLiteral("([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})"), QRegularExpression::CaseInsensitiveOption);
-    const auto m = re.match(raw);
+    const auto m = kReEmailAddress.match(raw);
     return m.hasMatch() ? m.captured(1).trimmed().toLower() : QString();
 }
 
@@ -110,13 +132,13 @@ int displayNameScoreForEmail(const QString &nameRaw, const QString &emailRaw)
     if (name.contains(' ')) score += 3;
     if (name.size() >= 4 && name.size() <= 40) score += 2;
 
-    const QStringList nameTokens = lower.split(QRegularExpression(QStringLiteral("[^a-z0-9]+")), Qt::SkipEmptyParts);
+    const QStringList nameTokens = lower.split(kReNonAlnumSplit, Qt::SkipEmptyParts);
     if (nameTokens.size() >= 2) score += 4;
 
     if (!email.isEmpty()) {
         const int at = email.indexOf('@');
         const QString local = (at > 0) ? email.left(at) : email;
-        const QStringList localTokens = local.split(QRegularExpression(QStringLiteral("[^a-z0-9]+")), Qt::SkipEmptyParts);
+        const QStringList localTokens = local.split(kReNonAlnumSplit, Qt::SkipEmptyParts);
         for (const QString &tok : localTokens) {
             if (tok.size() < 3) continue;
             if (nameTokens.contains(tok)) score += 8;
@@ -139,7 +161,7 @@ int displayNameScoreForEmail(const QString &nameRaw, const QString &emailRaw)
     if (name.contains('_')) score -= 4;
     if (name.contains('-')) score -= 3;
 
-    const bool hasLetters = name.contains(QRegularExpression(QStringLiteral("[A-Za-z]")));
+    const bool hasLetters = name.contains(kReHasLetters);
     if (hasLetters && name == name.toUpper() && name.size() > 3) score -= 3;
     if (hasLetters && name == name.toLower() && name.size() > 3) score -= 3;
 
@@ -157,7 +179,7 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
     }
 
     // If this is a mailbox list, pick the segment most likely associated with knownEmail.
-    const QStringList parts = s.split(QRegularExpression(QStringLiteral("[,;](?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)")), Qt::SkipEmptyParts);
+    const QStringList parts = s.split(kReCsvSemicolonOutsideQuotes, Qt::SkipEmptyParts);
     if (parts.size() > 1) {
         QString best;
         int bestScore = std::numeric_limits<int>::min() / 4;
@@ -174,10 +196,7 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
             candidate.remove('\'');
             candidate = candidate.trimmed();
             if (candidate.isEmpty()) continue;
-            static const QRegularExpression emailTokenRe(
-                QStringLiteral("([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})"),
-                QRegularExpression::CaseInsensitiveOption);
-            if (emailTokenRe.match(candidate).hasMatch()) continue;
+            if (kReEmailAddress.match(candidate).hasMatch()) continue;
 
             const QString scoreEmail = email.isEmpty() ? pEmail : email;
             if (!scoreEmail.isEmpty()) {
@@ -204,10 +223,7 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
     s = s.trimmed();
     if (s.isEmpty()) return {};
 
-    static const QRegularExpression emailTokenRe(
-        QStringLiteral("([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})"),
-        QRegularExpression::CaseInsensitiveOption);
-    if (emailTokenRe.match(s).hasMatch()) return {};
+    if (kReEmailAddress.match(s).hasMatch()) return {};
 
     if (!email.isEmpty()) {
         if (s.compare(email, Qt::CaseInsensitive) == 0) return {};
@@ -1095,7 +1111,7 @@ bool DataStore::init()
         )
     )"));
 
-    reloadInbox();
+    notifyDataChanged();
     reloadFolders();
     return true;
 }
@@ -1194,22 +1210,22 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
         QString s = normalizeSnippetWhitespace(snippetRaw);
         const QString originalNormalized = s;
-        const bool hadUrl = QRegularExpression(QStringLiteral("https?://\\S+"), QRegularExpression::CaseInsensitiveOption).match(s).hasMatch();
-        s.replace(QRegularExpression(QStringLiteral("https?://\\S+"), QRegularExpression::CaseInsensitiveOption), QString());
-        s.replace(QRegularExpression(QStringLiteral("\\b(?:charset|boundary)\\s*=\\s*\"?[^\"\\s]+\"?"), QRegularExpression::CaseInsensitiveOption), QString());
+        const bool hadUrl = kReSnippetUrl.match(s).hasMatch();
+        s.replace(kReSnippetUrl, QString());
+        s.replace(kReSnippetCharsetBoundary, QString());
         s = normalizeSnippetWhitespace(s);
 
         // Strip common web-view boilerplate (at start or embedded), including optional URLs.
-        s.replace(QRegularExpression(QStringLiteral("(?i)view\\s+(?:this\\s+)?email\\s+in\\s+(?:a|your)?\\s*browser[:!\\-\\s]*(?:https?://\\S+)?")), QString());
-        s.replace(QRegularExpression(QStringLiteral("(?i)view\\s+in\\s+(?:a|your)?\\s*browser[:!\\-\\s]*(?:https?://\\S+)?")), QString());
-        s.replace(QRegularExpression(QStringLiteral("(?i)view\\s+as\\s+(?:a\\s+)?web\\s+page[:!\\-\\s]*(?:https?://\\S+)?")), QString());
+        s.replace(kReSnippetViewEmailInBrowser, QString());
+        s.replace(kReSnippetViewInBrowser, QString());
+        s.replace(kReSnippetViewAsWebPage, QString());
         s = normalizeSnippetWhitespace(s);
 
-        s.replace(QRegularExpression(QStringLiteral("\\s*[()\\[\\]{}|:;.,-]+\\s*$")), QString());
+        s.replace(kReSnippetTrailingPunct, QString());
         s = normalizeSnippetWhitespace(s);
 
         const QString t = s.toLower();
-        const int alphaCount = s.count(QRegularExpression(QStringLiteral("[A-Za-z]")));
+        const int alphaCount = s.count(kReHasLetters);
         const bool danglingShort = s.endsWith('(') || s.endsWith(':') || s.endsWith('-');
         const bool junk = s.isEmpty()
                 || t.startsWith(QStringLiteral("* "))
@@ -1329,7 +1345,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
             }
 
             upsertFolderEdge(database, accountEmail, existingMessageId, folderValue, uidValue, unreadValue);
-            scheduleReloadInbox();
+            scheduleDataChangedSignal();
             return;
         }
     }
@@ -1714,7 +1730,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
     // Migration scaffold write path: persist observed Gmail labels with provenance.
     if (!rawGmailLabels.trimmed().isEmpty()) {
-        const QRegularExpression tokenRe(QStringLiteral("\"([^\"]+)\"|([^\\s()]+)"));
+        static const QRegularExpression tokenRe(QStringLiteral("\"([^\"]+)\"|([^\\s()]+)"));
         QRegularExpressionMatchIterator it = tokenRe.globalMatch(rawGmailLabels);
         while (it.hasNext()) {
             const auto m = it.next();
@@ -1840,12 +1856,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
         }
     }
 
-    scheduleReloadInbox();
-}
-
-QVariantList DataStore::inbox() const
-{
-    return m_inbox;
+    scheduleDataChangedSignal();
 }
 
 QVariantList DataStore::folders() const
@@ -2061,7 +2072,7 @@ void DataStore::pruneFolderToUids(const QString &accountEmail, const QString &fo
                       << "removedCanonicalRows=" << removedCanonicalRows;
 
     if (removedFolderRows > 0 || removedCanonicalRows > 0)
-        scheduleReloadInbox();
+        scheduleDataChangedSignal();
 }
 
 void DataStore::removeAccountUidsEverywhere(const QString &accountEmail, const QStringList &uids,
@@ -2126,7 +2137,7 @@ void DataStore::removeAccountUidsEverywhere(const QString &accountEmail, const Q
                       << "removedCanonicalRows=" << removedCanonicalRows;
 
     if (removedFolderRows > 0 || removedCanonicalRows > 0)
-        scheduleReloadInbox();
+        scheduleDataChangedSignal();
 }
 
 void DataStore::markMessageRead(const QString &accountEmail, const QString &uid)
@@ -2164,7 +2175,7 @@ void DataStore::markMessageRead(const QString &accountEmail, const QString &uid)
 
     emit messageMarkedRead(acc, uid);
     if (qMsg.numRowsAffected() > 0)
-        scheduleReloadInbox();
+        scheduleDataChangedSignal();
 }
 
 void DataStore::reconcileReadFlags(const QString &accountEmail, const QString &folder,
@@ -2217,7 +2228,7 @@ void DataStore::reconcileReadFlags(const QString &accountEmail, const QString &f
                           << "folder=" << folder
                           << "readUids=" << readUids.size()
                           << "edgesUpdated=" << edgesUpdated;
-        scheduleReloadInbox();
+        scheduleDataChangedSignal();
     }
 }
 
@@ -2251,7 +2262,7 @@ void DataStore::deleteSingleFolderEdge(const QString &accountEmail,
     QSqlQuery q(database);
     q.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
     if (removed > 0 || q.numRowsAffected() > 0)
-        scheduleReloadInbox();
+        scheduleDataChangedSignal();
 }
 
 void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId,
@@ -2279,7 +2290,7 @@ void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId,
     // The just-inserted edge protects its own message_id; only truly stale rows are removed.
     QSqlQuery qOrphan(database);
     qOrphan.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
-    scheduleReloadInbox();
+    scheduleDataChangedSignal();
 }
 
 void DataStore::removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId)
@@ -2296,7 +2307,7 @@ void DataStore::removeAllEdgesForMessageId(const QString &accountEmail, qint64 m
     QSqlQuery qOrphan(database);
     qOrphan.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
     if (removedEdges > 0 || qOrphan.numRowsAffected() > 0)
-        scheduleReloadInbox();
+        scheduleDataChangedSignal();
 }
 
 QStringList DataStore::folderUids(const QString &accountEmail, const QString &folder) const
@@ -2907,10 +2918,8 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
     const bool changed = q.numRowsAffected() > 0;
 
     const QString htmlLower = html.left(1024).toLower();
-    const bool hasHtmlish = QRegularExpression(QStringLiteral("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"),
-                                             QRegularExpression::CaseInsensitiveOption).match(html).hasMatch();
-    const bool hasMarkdownLinks = QRegularExpression(QStringLiteral("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"),
-                                                     QRegularExpression::CaseInsensitiveOption).match(html).hasMatch();
+    const bool hasHtmlish = kReHtmlish.match(html).hasMatch();
+    const bool hasMarkdownLinks = kReMarkdownLinks.match(html).hasMatch();
     const bool hasMimeHeaders = htmlLower.contains(QStringLiteral("content-type:"))
                              || htmlLower.contains(QStringLiteral("mime-version:"));
     const bool suspicious = !hasHtmlish || hasMarkdownLinks || hasMimeHeaders || html.size() < 160;
@@ -2933,7 +2942,7 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
     // a list model role; QML bindings that need the fresh body listen to
     // bodyHtmlUpdated instead of waiting for an inbox reload.
     if (changed && hasTP != prevTP)
-        scheduleReloadInbox();
+        scheduleDataChangedSignal();
 
     if (changed)
         emit bodyHtmlUpdated(accountEmail.trimmed(), folder.trimmed(), uid.trimmed());
@@ -2941,7 +2950,7 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
     return changed;
 }
 
-void DataStore::scheduleReloadInbox()
+void DataStore::scheduleDataChangedSignal()
 {
     if (m_reloadInboxScheduled)
         return;
@@ -2949,100 +2958,14 @@ void DataStore::scheduleReloadInbox()
     m_reloadInboxScheduled = true;
     QTimer::singleShot(300, this, [this]() {
         m_reloadInboxScheduled = false;
-        reloadInbox();
+        notifyDataChanged();
     });
 }
 
-void DataStore::reloadInbox()
+void DataStore::notifyDataChanged()
 {
-    m_inbox.clear();
-    auto database = db();
-    if (!database.isValid() || !database.isOpen()) {
-        emit inboxChanged();
-        return;
-    }
-
-    QSqlQuery q(database);
-    q.exec(QStringLiteral(R"(
-      SELECT mfm.account_email,
-             mfm.folder,
-             mfm.uid,
-             cm.id,
-             cm.sender,
-             cm.subject,
-             cm.recipient,
-             '' as recipient_avatar_url,
-             cm.received_at,
-             cm.snippet,
-             '' as avatar_domain,
-             '' as avatar_url,
-             '' as avatar_source,
-             mfm.unread,
-             COALESCE(cm.thread_id, '') as thread_id,
-             COALESCE((
-               SELECT COUNT(DISTINCT m2.id) FROM messages m2
-               WHERE m2.account_email = cm.account_email
-                 AND m2.thread_id = cm.thread_id
-                 AND cm.thread_id IS NOT NULL
-                 AND length(trim(COALESCE(cm.thread_id, ''))) > 0
-             ), 1) as thread_count,
-             COALESCE(cm.gm_thr_id, '') as gm_thr_id,
-             COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel
-      FROM message_folder_map mfm
-      JOIN messages cm ON cm.id = mfm.message_id
-      ORDER BY cm.received_at DESC
-      LIMIT 500
-    )"));
-
-    while (q.next()) {
-        QVariantMap row;
-        row.insert(QStringLiteral("accountEmail"), q.value(0));
-        row.insert(QStringLiteral("folder"), q.value(1));
-        row.insert(QStringLiteral("uid"), q.value(2));
-        row.insert(QStringLiteral("messageId"), q.value(3));
-        row.insert(QStringLiteral("sender"), q.value(4));
-        row.insert(QStringLiteral("subject"), q.value(5));
-        row.insert(QStringLiteral("recipient"), q.value(6));
-        row.insert(QStringLiteral("recipientAvatarUrl"), q.value(7));
-        row.insert(QStringLiteral("receivedAt"), q.value(8));
-        row.insert(QStringLiteral("snippet"), q.value(9));
-        row.insert(QStringLiteral("avatarDomain"), q.value(10));
-        row.insert(QStringLiteral("avatarUrl"), q.value(11));
-        row.insert(QStringLiteral("avatarSource"), q.value(12));
-        row.insert(QStringLiteral("unread"), q.value(13).toInt() == 1);
-        row.insert(QStringLiteral("threadId"),         q.value(14).toString());
-        row.insert(QStringLiteral("threadCount"),      q.value(15).toInt());
-        row.insert(QStringLiteral("gmThrId"),          q.value(16).toString());
-        row.insert(QStringLiteral("hasTrackingPixel"), q.value(17).toInt() == 1);
-        m_inbox.push_back(row);
-    }
-
-    // Deduplicate by thread: the SQL orders newest-first, so the first occurrence
-    // of each thread_id is the latest message — keep it and discard older siblings.
-    {
-        QSet<QString> seenThreads;
-        QVariantList deduped;
-        deduped.reserve(m_inbox.size());
-        for (const QVariant &v : m_inbox) {
-            const QVariantMap r  = v.toMap();
-            const QString tid    = r.value(QStringLiteral("threadId")).toString().trimmed();
-            QString gtid         = r.value(QStringLiteral("gmThrId")).toString().trimmed();
-            const QString acct   = r.value(QStringLiteral("accountEmail")).toString();
-            if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
-                gtid = tid.mid(3).trimmed();
-            const QString key    = !gtid.isEmpty()
-                ? acct + QStringLiteral("|gtid:") + gtid
-                : (tid.isEmpty()
-                    ? acct + QStringLiteral("|msg:") + r.value(QStringLiteral("messageId")).toString()
-                    : acct + QStringLiteral("|tid:") + tid);
-            if (seenThreads.contains(key)) continue;
-            seenThreads.insert(key);
-            deduped.push_back(v);
-        }
-        m_inbox = deduped;
-    }
-
-    emit inboxChanged();
+    // Legacy notification hook retained for listeners while m_inbox cache is removed.
+    emit dataChanged();
 }
 
 QVariantList DataStore::messagesForSelection(const QString &folderKey,
@@ -3304,8 +3227,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         const bool selectedIsTrash = isTrashFolderName(selectedFolder);
         const bool selectedIsImportantPseudo = (selectedFolder == QStringLiteral("important"));
 
-        // Folder views must come from DB (not m_inbox window), otherwise large folders
-        // like Trash/All Mail show only a handful of rows.
+        // Folder views come directly from DB source-of-truth so large folders
+        // like Trash/All Mail can page fully.
         QVariantList filtered;
         if (database.isValid() && database.isOpen()) {
             const int safeOffset = qMax(0, offset);

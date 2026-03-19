@@ -32,7 +32,12 @@ Window {
     property string sendError: ""
     property bool sending: false
     property bool showCcBcc: false
+    property bool composeDarkView: false
+    property bool _updatingBodyForViewToggle: false
     property var smtpServiceObj: null
+    property var imapServiceObj: null
+    property bool pendingSendRequested: false
+    property double pendingSendStartedMs: 0
 
     signal sendRequested
 
@@ -95,6 +100,49 @@ Window {
             arr.push('"' + model.get(i).display + '" <' + model.get(i).email + '>');
         return arr;
     }
+
+    function _bodyForSending() {
+        return (bodyArea.text || "").toString();
+    }
+
+    function _resolveAttachmentPaths(startFetch) {
+        const ready = [];
+        let pending = 0;
+        for (let i = 0; i < attachmentModel.count; i++) {
+            const a = attachmentModel.get(i);
+            let p = (a.path || "").toString();
+            if (!p.length && imapServiceObj && imapServiceObj.cachedAttachmentPath
+                    && a.accountEmail && a.uid && a.partId) {
+                p = (imapServiceObj.cachedAttachmentPath(a.accountEmail, a.uid, a.partId) || "").toString();
+                if (p.length)
+                    attachmentModel.setProperty(i, "path", p);
+            }
+            if (p.length) {
+                ready.push(p);
+                continue;
+            }
+            pending++;
+            if (startFetch && imapServiceObj && imapServiceObj.prefetchAttachments
+                    && a.accountEmail && a.folder && a.uid) {
+                imapServiceObj.prefetchAttachments(a.accountEmail, a.folder, a.uid);
+            }
+        }
+        return ({ ready: ready, pending: pending });
+    }
+
+    function _sendWithAttachmentPaths(attachPaths) {
+        const fromEmail = accountCombo.currentIndex >= 0 && accountRepositoryObj ? accountRepositoryObj.accounts[accountCombo.currentIndex].email : "";
+        smtpServiceObj.sendEmail({
+            fromEmail: fromEmail,
+            toList: _chipListToStrings(toChipModel),
+            ccList: _chipListToStrings(ccChipModel),
+            bccList: _chipListToStrings(bccChipModel),
+            subject: subjectField.text,
+            body: bodyArea.text,
+            attachments: attachPaths
+        });
+    }
+
     function _doSend() {
         if (!smtpServiceObj) {
             sendError = i18n("SMTP service not available");
@@ -107,23 +155,49 @@ Window {
             sendError = i18n("Please add at least one recipient");
             return;
         }
+
+        const resolved = _resolveAttachmentPaths(true);
+        if (resolved.pending > 0) {
+            sending = true;
+            pendingSendRequested = true;
+            pendingSendStartedMs = Date.now();
+            sendError = i18n("Preparing attachments…");
+            sendRetryTimer.restart();
+            return;
+        }
+
         sending = true;
+        pendingSendRequested = false;
         sendError = "";
-        const fromEmail = accountCombo.currentIndex >= 0 && accountRepositoryObj ? accountRepositoryObj.accounts[accountCombo.currentIndex].email : "";
-        const attachPaths = [];
-        for (let i = 0; i < attachmentModel.count; i++)
-            attachPaths.push(attachmentModel.get(i).path);
-        smtpServiceObj.sendEmail({
-            fromEmail: fromEmail,
-            toList: _chipListToStrings(toChipModel),
-            ccList: _chipListToStrings(ccChipModel),
-            bccList: _chipListToStrings(bccChipModel),
-            subject: subjectField.text,
-            body: bodyArea.text,
-            attachments: attachPaths
-        });
+        _sendWithAttachmentPaths(resolved.ready);
     }
-    function openCompose(to, subject, body) {
+    function _applyAttachments(paths) {
+        attachmentModel.clear();
+        const arr = paths || [];
+        for (let i = 0; i < arr.length; ++i) {
+            const v = arr[i];
+            if (typeof v === "string") {
+                const p = (v || "").toString().trim();
+                if (!p.length)
+                    continue;
+                attachmentModel.append({ filename: p.split("/").pop(), path: p });
+                continue;
+            }
+            const obj = v || {};
+            const p = (obj.path || "").toString().trim();
+            const fn = (obj.filename || (p.length ? p.split("/").pop() : "attachment")).toString();
+            attachmentModel.append({
+                filename: fn,
+                path: p,
+                accountEmail: (obj.accountEmail || "").toString(),
+                folder: (obj.folder || "").toString(),
+                uid: (obj.uid || "").toString(),
+                partId: (obj.partId || "").toString()
+            });
+        }
+    }
+
+    function openCompose(to, subject, body, attachments, initialDarkMode) {
         toChipModel.clear();
         ccChipModel.clear();
         bccChipModel.clear();
@@ -132,11 +206,14 @@ Window {
         showCcBcc = false;
         sendError = "";
         sending = false;
+        pendingSendRequested = false;
+        sendRetryTimer.stop();
         fmtBold = false;
         fmtItalic = false;
         fmtUnderline = false;
         fmtStrike = false;
-        attachmentModel.clear();
+        _applyAttachments(attachments);
+        composeDarkView = !!initialDarkMode;
         if (to && to.trim().length > 0)
             _addChipToModel(toChipModel, to.trim());
         root.show();
@@ -156,11 +233,14 @@ Window {
         showCcBcc = !!(params.ccList && params.ccList.length > 0);
         sendError = "";
         sending = false;
+        pendingSendRequested = false;
+        sendRetryTimer.stop();
         fmtBold = false;
         fmtItalic = false;
         fmtUnderline = false;
         fmtStrike = false;
-        attachmentModel.clear();
+        _applyAttachments(params.attachments || []);
+        composeDarkView = !!params.darkMode;
         const toList = params.toList || [];
         for (let i = 0; i < toList.length; i++)
             _addChipToModel(toChipModel, toList[i]);
@@ -210,6 +290,8 @@ Window {
     Connections {
         function onSendFinished(ok, message) {
             sending = false;
+            pendingSendRequested = false;
+            sendRetryTimer.stop();
             if (ok) {
                 root.hide();
                 root.sendRequested();
@@ -219,6 +301,31 @@ Window {
         }
 
         target: root.smtpServiceObj
+    }
+
+    Timer {
+        id: sendRetryTimer
+        interval: 300
+        repeat: true
+        running: false
+        onTriggered: {
+            if (!root.pendingSendRequested)
+                return;
+            const resolved = root._resolveAttachmentPaths(false);
+            if (resolved.pending === 0) {
+                root.pendingSendRequested = false;
+                root.sendError = "";
+                stop();
+                root._sendWithAttachmentPaths(resolved.ready);
+                return;
+            }
+            if ((Date.now() - root.pendingSendStartedMs) > 15000) {
+                root.pendingSendRequested = false;
+                root.sending = false;
+                root.sendError = i18n("Timed out preparing attachments. Please try again.");
+                stop();
+            }
+        }
     }
     FileDialog {
         id: attachDialog
@@ -642,7 +749,7 @@ Window {
                     anchors {
                         fill: parent
                         leftMargin: 6
-                        rightMargin: 6
+                        rightMargin: 0
                     }
                     TbBtn {
                         ico: "mail-attachment"
@@ -761,6 +868,42 @@ Window {
                     Item {
                         Layout.fillWidth: true
                     }
+
+                    DarkLightToggleButton {
+                        Layout.rightMargin: 7
+                        darkMode: root.composeDarkView
+
+                        onModeToggled: {
+                            const raw = bodyArea.text.toString()
+                            root.composeDarkView = !root.composeDarkView
+                            // Sync theme colors to C++ processor (reading these creates reactive deps).
+                            htmlProcessor.darkBg      = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
+                            htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
+                            htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
+                            htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
+
+                            let html = htmlProcessor.sanitize(raw);
+                                html = htmlProcessor.neutralizeExternalImages(raw);
+
+                            bodyArea.text = htmlProcessor.prepare(raw, darkMode);
+
+                        }
+                    }
+
+
+                    // QQC2.Button {
+                    //     Layout.rightMargin: 7
+                    //     icon.name: root.composeDarkView ? "weather-clear-night" : "weather-clear"
+                    //     text: root.composeDarkView ? i18n("Dark") : i18n("Light")
+                    //
+                    //     onClicked: {
+                    //         const raw = root._stripViewWrapper(bodyArea.text)
+                    //         root.composeDarkView = !root.composeDarkView
+                    //         root._updatingBodyForViewToggle = true
+                    //         bodyArea.text = root._applyViewThemeToBody(raw)
+                    //         root._updatingBodyForViewToggle = false
+                    //     }
+                    // }
                 }
             }
 
@@ -841,18 +984,18 @@ Window {
                 clip: true
 
                 background: Rectangle {
-                    color: root._bg
+                    color: root.composeDarkView ? "#0d1220" : root._bg
                 }
 
                 QQC2.TextArea {
                     id: bodyArea
 
                     bottomPadding: 12
-                    color: Kirigami.Theme.textColor
+                    color: root.composeDarkView ? "#dfe9ff" : Kirigami.Theme.textColor
                     font.pixelSize: 14
                     leftPadding: 14
                     placeholderText: i18n("Type a message here")
-                    placeholderTextColor: Kirigami.Theme.disabledTextColor
+                    placeholderTextColor: root.composeDarkView ? "#90a4cf" : Kirigami.Theme.disabledTextColor
                     rightPadding: 14
                     textFormat: TextEdit.RichText
                     topPadding: 12

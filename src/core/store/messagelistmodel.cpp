@@ -157,7 +157,7 @@ void MessageListModel::setDataStore(DataStore *store)
     }
     m_dataStore = store;
     if (m_dataStore) {
-        connect(m_dataStore, &DataStore::inboxChanged, this, &MessageListModel::scheduleRefresh);
+        connect(m_dataStore, &DataStore::dataChanged, this, &MessageListModel::scheduleRefresh);
         connect(m_dataStore, &DataStore::messageMarkedRead, this, &MessageListModel::onMessageMarkedRead);
         connect(m_dataStore, &QObject::destroyed, this, [this]() {
             m_dataStore = nullptr;

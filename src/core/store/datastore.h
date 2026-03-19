@@ -10,14 +10,12 @@ class QSqlDatabase;
 class DataStore : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QVariantList inbox READ inbox NOTIFY inboxChanged)
     Q_PROPERTY(QVariantList folders READ folders NOTIFY foldersChanged)
-    Q_PROPERTY(QStringList inboxCategoryTabs READ inboxCategoryTabs NOTIFY inboxChanged)
+    Q_PROPERTY(QStringList inboxCategoryTabs READ inboxCategoryTabs NOTIFY dataChanged)
 public:
     explicit DataStore(QObject *parent = nullptr);
     ~DataStore() override;
 
-    QVariantList inbox() const;
     QVariantList folders() const;
 
     Q_INVOKABLE bool init();
@@ -61,7 +59,7 @@ public:
                                       const QString &folder,
                                       const QString &uid,
                                       const QString &bodyHtml);
-    Q_INVOKABLE void reloadInbox();
+    Q_INVOKABLE void notifyDataChanged();
     Q_INVOKABLE void reloadFolders();
     Q_INVOKABLE QVariantList messagesForSelection(const QString &folderKey,
                                                   const QStringList &selectedCategories,
@@ -104,7 +102,7 @@ public:
     Q_INVOKABLE bool deleteUserFolder(const QString &name);
 
 signals:
-    void inboxChanged();
+    void dataChanged();
     void foldersChanged();
     void favoritesConfigChanged();
     void userFoldersChanged();
@@ -117,7 +115,6 @@ signals:
 
 private:
     QString m_connectionName;
-    QVariantList m_inbox;
     QVariantList m_folders;
     bool m_reloadInboxScheduled = false;
 
@@ -128,7 +125,7 @@ private:
     static constexpr int kAvatarCacheNotQueried = -1;  // sentinel: email not yet looked up
 
     QSqlDatabase db() const;
-    void scheduleReloadInbox();
+    void scheduleDataChangedSignal();
     QString avatarDirPath() const;
     // Parses a data URI, writes bytes to avatarDirPath(), stores file:// URL in DB.
     // Returns the file:// URL on success, empty string on failure.

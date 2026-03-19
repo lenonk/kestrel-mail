@@ -107,6 +107,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
     FILES
         qml/Main.qml
         qml/components/AccountWizardDialog.qml
+        qml/components/DarkLightToggleButton.qml
         qml/components/PaneIconButton.qml
         qml/components/TextToolTip.qml
         qml/components/MailActionButton.qml

@@ -40,6 +40,8 @@ public:
                                  const QString &uid, const QString &targetFolder);
     Q_INVOKABLE void markMessageRead(const QString &accountEmail, const QString &folder,
                                      const QString &uid);
+    Q_INVOKABLE void addMessageToFolder(const QString &accountEmail, const QString &folder,
+                                        const QString &uid, const QString &targetFolder);
 
     Q_INVOKABLE void initialize();
     Q_INVOKABLE void shutdown();

@@ -782,6 +782,7 @@ Kirigami.ApplicationWindow {
         id: composeDialog
         accountRepositoryObj: root.accountRepositoryObj
         dataStoreObj: root.dataStoreObj
+        imapServiceObj: root.imapServiceObj
         smtpServiceObj: (typeof smtpService !== "undefined") ? smtpService : null
         onSendRequested: root.showInlineStatus(i18n("Message sent"), false)
     }
@@ -1214,43 +1215,13 @@ Kirigami.ApplicationWindow {
 
     function messageByKey(key) {
         const p = root.parseMessageKey(key)
-        if (!p || !root.dataStoreObj || !root.dataStoreObj.inbox) return null
-        const rows = root.dataStoreObj.inbox
+        if (!p || !root.dataStoreObj || !root.dataStoreObj.messageByKey) return null
 
-        const wantedAccount = (p.accountEmail || "").toString()
-        const wantedFolder = (p.folder || "").toString()
-        const wantedUid = (p.uid || "").toString()
-
-        let base = null
-        for (let i = 0; i < rows.length; ++i) {
-            const r = rows[i]
-            if ((r.accountEmail || "") === wantedAccount
-                    && ((r.folder || "").toString().toLowerCase() === wantedFolder.toLowerCase())
-                    && (r.uid || "") === wantedUid) {
-                base = r
-                break
-            }
-        }
-
-        let dbRow = null
-        if (root.dataStoreObj && root.dataStoreObj.messageByKey) {
-            const raw = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
-            // C++ returns an empty {} QVariantMap when no row is found.
-            // In JS `if ({})` is truthy, so check for a real field instead.
-            if (raw && (raw.accountEmail || "") !== "") {
-                dbRow = raw
-                base = dbRow
-            }
-        }
-
-        if (!base) return null
-
-        // If DB has fresher hydrated body for this exact key, prefer it over stale inbox cache row.
-        if (dbRow && root.isBodyHtmlUsable(dbRow.bodyHtml) && !root.isBodyHtmlUsable(base.bodyHtml)) {
-            base = dbRow
-        }
-
-        return base
+        const raw = root.dataStoreObj.messageByKey(p.accountEmail, p.folder, p.uid)
+        // C++ returns an empty {} QVariantMap when no row is found.
+        if (raw && (raw.accountEmail || "") !== "")
+            return raw
+        return null
     }
 
     function formatContentDate(dateValue) {
@@ -1349,10 +1320,55 @@ Kirigami.ApplicationWindow {
         composeDialog.openCompose("", "", "")
     }
 
-    function openComposerTo(address, contextLabel) {
+    function openForwardCompose(subject, body, attachments, initialDarkMode) {
+        composeDialog.openCompose("", subject || "", body || "", attachments || [], !!initialDarkMode)
+    }
+
+    function _forwardDateText(d) {
+        if (!d || !d.receivedAt)
+            return ""
+        return new Date(d.receivedAt).toLocaleString(Qt.locale(), "ddd M/d/yyyy h:mm AP")
+    }
+
+    function forwardMessageFromData(d, dateText, attachments) {
+        if (!d) return
+
+        const fromText = ((d.sender && d.sender.toString().length > 0) ? d.sender.toString() : (d.accountEmail || "").toString())
+        const dt = (dateText && dateText.toString().length > 0) ? dateText.toString() : root._forwardDateText(d)
+
+        // Preserve original payload; only prepend forward metadata header.
+        let body = ""
+        const originalHtml = (d.bodyHtml && d.bodyHtml.toString().length > 0) ? d.bodyHtml.toString() : ""
+        const originalText = (d.body && d.body.toString().length > 0) ? d.body.toString() : ((d.snippet || "").toString())
+
+        if (originalHtml.length > 0) {
+            const esc = function(s) {
+                return (s || "").toString()
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+            }
+            body = "<div>--- Forwarded message ---<br>"
+                 + "From: " + esc(fromText) + "<br>"
+                 + "Date: " + esc(dt) + "</div><br>"
+                 + originalHtml
+        } else {
+            body = "--- Forwarded message ---\n"
+                 + "From: " + fromText + "\n"
+                 + "Date: " + dt + "\n\n"
+                 + originalText
+        }
+
+        root.openForwardCompose(root._fwdSubject(d.subject), body, attachments || [], root.contentPaneDarkModeEnabled)
+    }
+
+    function openComposerTo(address, contextLabel, subjectParam = "") {
         const email = (address || "").toString().trim()
-        const subject = (!email.length && root.selectedMessageData && root.selectedMessageData.subject)
-                        ? i18n("Re: %1").arg(root.selectedMessageData.subject) : ""
+        let subject = subjectParam
+        if (subject === "") {
+            subject = (!email.length && root.selectedMessageData && root.selectedMessageData.subject)
+                ? i18n("Re: %1").arg(root.selectedMessageData.subject) : ""
+        }
         composeDialog.openCompose(email, subject, "")
     }
 
@@ -1570,8 +1586,9 @@ Kirigami.ApplicationWindow {
 
     function folderStatsByKey(folderKey, rawFolderName) {
         if (!root.dataStoreObj || !root.dataStoreObj.statsForFolder) return ({ total: 0, unread: 0 })
-        // touch inbox so bindings update when message data changes
-        const _inboxDep = root.dataStoreObj.inbox
+        // Re-establish reactive dependency for count tooltips/badges when datastore emits dataChanged.
+        // inboxCategoryTabs is lightweight and NOTIFY-wired to dataChanged.
+        const _statsDep = root.dataStoreObj.inboxCategoryTabs
         return root.dataStoreObj.statsForFolder(folderKey || "", rawFolderName || "")
     }
 
@@ -1848,10 +1865,9 @@ Kirigami.ApplicationWindow {
                         text: i18n("Forward")
                         onTriggered: {
                             const d = root.selectedMessageData; if (!d) return
-                            composeDialog.openComposeReply({
-                                toList: [],
-                                subject: root._fwdSubject(d.subject), body: root._quotedBody(d)
-                            })
+                            const a = (messageContentPane && messageContentPane.forwardAttachmentPathsForCurrentMessage)
+                                        ? messageContentPane.forwardAttachmentPathsForCurrentMessage() : []
+                            root.forwardMessageFromData(d, root._forwardDateText(d), a)
                         }
                     }
                     Components.MailActionButton { iconName: "mail-mark-important"; text: i18n("Mark"); menuItems: [{ text: i18n("Read"), icon: "mail-mark-read" }, { text: i18n("Unread"), icon: "mail-mark-unread" }] }

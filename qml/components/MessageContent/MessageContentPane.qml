@@ -70,8 +70,15 @@ Rectangle {
     property var attachmentItems: []
     property var attachmentLocalPaths: ({})
     property var attachmentProgress: ({})
+    property string attachmentSourceUid: ""
+    property string attachmentSourceFolder: ""
 
-    readonly property string folderName: i18n("Inbox")
+    readonly property string folderName: {
+        const raw = (messageData && messageData.folder) ? messageData.folder.toString() : ""
+        if (!raw.length)
+            return i18n("Folder")
+        return (appRoot && appRoot.displayFolderName) ? appRoot.displayFolderName(raw) : raw
+    }
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
         const html = (root.messageBodyHtml || "").toString();
@@ -185,11 +192,8 @@ Rectangle {
     readonly property var threadMessages: {
         if (!threadId.length || threadCount < 2 || !appRoot || !appRoot.dataStoreObj)
             return [];
-        // Reading .inbox creates a dependency on inboxChanged, so the thread
-        // re-queries whenever any body is hydrated or messages are updated.
-        void appRoot.dataStoreObj.inbox;
-        // Also depend on _bodyUpdateVersion so thread members re-appear when their
-        // bodies are hydrated (bodyHtmlUpdated fires without an inbox reload).
+        // Depend on _bodyUpdateVersion so thread members re-appear when their
+        // bodies are hydrated.
         void appRoot._bodyUpdateVersion;
         return appRoot.dataStoreObj.messagesForThread(messageData.accountEmail, threadId);
     }
@@ -225,6 +229,35 @@ Rectangle {
         const tags = activeTags.slice();
         tags.push(tagObj);
         setCurrentTags(tags);
+    }
+
+    function applyTagToSelection(tagObj, targetFolderName) {
+        if (!appRoot || !appRoot.imapServiceObj || !appRoot.imapServiceObj.addMessageToFolder)
+            return;
+
+        const target = (targetFolderName || tagObj.name || "").toString().trim();
+        if (!target.length)
+            return;
+
+        const seen = {};
+        function applyOne(row) {
+            if (!row) return;
+            const account = (row.accountEmail || "").toString();
+            const folder = (row.folder || "").toString();
+            const uid = (row.uid || "").toString();
+            if (!account.length || !folder.length || !uid.length) return;
+            const k = account + "|" + folder.toLowerCase() + "|" + uid;
+            if (seen[k]) return;
+            seen[k] = true;
+            appRoot.imapServiceObj.addMessageToFolder(account, folder, uid, target);
+        }
+
+        if (root.isThreadView && root.threadMessages && root.threadMessages.length > 0) {
+            for (let i = 0; i < root.threadMessages.length; ++i)
+                applyOne(root.threadMessages[i]);
+        } else {
+            applyOne(root.messageData);
+        }
     }
     function bodyDataImageHashes(baseHtml) {
         const html = (baseHtml || "").toString();
@@ -374,8 +407,48 @@ Rectangle {
             return "";
         return a + "|" + f + "|" + u;
     }
+    function forwardAttachmentPathsForCurrentMessage() {
+        const refs = [];
+        const seen = {};
+        if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
+            return refs;
+
+        const account = (root.messageData.accountEmail || "").toString();
+        const uid = (root.attachmentSourceUid || root.messageData.uid || "").toString();
+        const folder = (root.attachmentSourceFolder || root.messageData.folder || "").toString();
+        for (let i = 0; i < root.attachmentItems.length; ++i) {
+            const a = root.attachmentItems[i] || {};
+            const partId = (a.partId || "").toString();
+            if (!partId.length)
+                continue;
+
+            let p = "";
+            if (root.attachmentLocalPaths && root.attachmentLocalPaths[partId])
+                p = (root.attachmentLocalPaths[partId] || "").toString();
+            if (!p.length && appRoot.imapServiceObj.cachedAttachmentPath)
+                p = (appRoot.imapServiceObj.cachedAttachmentPath(account, uid, partId) || "").toString();
+
+            const key = account + "|" + uid + "|" + partId;
+            if (seen[key])
+                continue;
+            seen[key] = true;
+
+            refs.push({
+                filename: (a.name || "attachment").toString(),
+                path: p,
+                accountEmail: account,
+                folder: folder,
+                uid: uid,
+                partId: partId
+            });
+        }
+        return refs;
+    }
+
     function reloadAttachmentsForCurrentMessage() {
         root.attachmentLocalPaths = {};
+        root.attachmentSourceUid = "";
+        root.attachmentSourceFolder = "";
         if (!root.messageData || !appRoot || !appRoot.imapServiceObj) {
             root.attachmentItems = [];
             return;
@@ -392,6 +465,7 @@ Rectangle {
         // Single-shot lookup per message selection; avoid heavy reevaluation via bindings.
         let items = appRoot.imapServiceObj.attachmentsForMessage(account, folder, uid);
         let activeUid = uid;
+        let activeFolder = folder;
 
         // Fallback: selected edge may not be the one that carries attachment metadata
         // in non-Inbox views. Try all known folder/uid edges for this logical message.
@@ -407,12 +481,15 @@ Rectangle {
                 if (trial && trial.length > 0) {
                     items = trial;
                     activeUid = cu;
+                    activeFolder = cf;
                     break;
                 }
             }
         }
 
         root.attachmentItems = items || [];
+        root.attachmentSourceUid = activeUid;
+        root.attachmentSourceFolder = activeFolder;
 
         if (root.attachmentItems.length > 0) {
             // Pre-populate local paths from the 60-min prefetch cache (instant on revisit).
@@ -450,6 +527,61 @@ Rectangle {
         const next = Object.assign({}, tagMap);
         next[key] = tags;
         tagMap = next;
+    }
+
+    function rebuildTagsFromDbForCurrentMessage() {
+        if (!appRoot || !appRoot.dataStoreObj || !appRoot.dataStoreObj.fetchCandidatesForMessageKey)
+            return;
+
+        const account = (root.messageData && root.messageData.accountEmail) ? root.messageData.accountEmail.toString() : "";
+        const folder = (root.messageData && root.messageData.folder) ? root.messageData.folder.toString() : "";
+        const uid = (root.messageData && root.messageData.uid) ? root.messageData.uid.toString() : "";
+        if (!account.length || !folder.length || !uid.length) {
+            setCurrentTags([]);
+            return;
+        }
+
+        const available = (appRoot && appRoot.tagFolderItems) ? appRoot.tagFolderItems() : [];
+        const byRaw = {};
+        for (let i = 0; i < available.length; ++i) {
+            const t = available[i] || {};
+            const raw = ((t.rawName || t.name || "").toString()).trim().toLowerCase();
+            if (!raw.length) continue;
+            byRaw[raw] = t;
+        }
+
+        const out = [];
+        const seen = {};
+        function pushTag(name, accent) {
+            const n = (name || "").toString().trim();
+            if (!n.length) return;
+            const key = n.toLowerCase();
+            if (seen[key]) return;
+            seen[key] = true;
+            const c = (accent || "#D6E8FF").toString();
+            out.push({ name: n, color: c, textColor: root.textColorForAccent(c) });
+        }
+
+        const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
+        for (let i = 0; i < candidates.length; ++i) {
+            const c = candidates[i] || {};
+            const f = (c.folder || "").toString().trim();
+            if (!f.length) continue;
+            const lf = f.toLowerCase();
+
+            // Product rule: Important always appears as Important tag if edge exists.
+            if (lf === "important" || lf.endsWith("/important")) {
+                const imp = byRaw["important"];
+                pushTag(imp && imp.name ? imp.name : i18n("Important"), imp && imp.accentColor ? imp.accentColor : "#FFD600");
+                continue;
+            }
+
+            const t = byRaw[lf];
+            if (!t) continue;
+            pushTag(t.name || f, t.accentColor || "#D6E8FF");
+        }
+
+        setCurrentTags(out);
     }
     function startAllAttachmentPrefetchForCurrentMessage() {
         if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
@@ -556,6 +688,8 @@ Rectangle {
             root.attachmentLocalPaths = ({});
             root.attachmentProgress = ({});
             root.attachmentDownloading = ({});
+            root.attachmentSourceUid = "";
+            root.setCurrentTags([]);
         } else if (!isSameMessage) {
             // Different message — reset state and load fresh.
             root.lastAttachmentMessageKey = messageKey;
@@ -564,10 +698,12 @@ Rectangle {
             root.attachmentProgress = ({});
             root.attachmentDownloading = ({});
             root.reloadAttachmentsForCurrentMessage();
+            root.startAllAttachmentPrefetchForCurrentMessage();
             root.startImageAttachmentPrefetchForCurrentMessage();
         } else if (root.attachmentItems.length === 0) {
             // Same message, attachments not yet loaded — retry (race with DB hydration).
             root.reloadAttachmentsForCurrentMessage();
+            root.startAllAttachmentPrefetchForCurrentMessage();
             root.startImageAttachmentPrefetchForCurrentMessage();
         }
         // Same message with attachments already loaded: leave all state untouched.
@@ -600,6 +736,8 @@ Rectangle {
         }
 
         trackingAllowed = false;
+
+        root.rebuildTagsFromDbForCurrentMessage();
 
         // Only start a new transition when the message key changes.
         // Background updates (mark-read, header refreshes) must not restart the animation.
@@ -748,11 +886,14 @@ Rectangle {
 
                         onTriggered: {
                             const accent = (modelData && modelData.accentColor) ? modelData.accentColor : "#D6E8FF"
-                            root.addTag({
+                            const tagObj = {
                                 name: text,
                                 color: accent,
                                 textColor: root.textColorForAccent(accent)
-                            })
+                            }
+                            root.addTag(tagObj)
+                            const targetFolder = (modelData && modelData.rawName) ? modelData.rawName : text
+                            root.applyTagToSelection(tagObj, targetFolder)
                         }
                     }
 
@@ -885,6 +1026,7 @@ Rectangle {
                 spacing: 2
 
                 QQC2.Label {
+                    Layout.alignment: Qt.AlignRight
                     opacity: 0.82
                     text: root.receivedAtText
                 }
@@ -911,26 +1053,25 @@ Rectangle {
 
                         onTriggered: function (actionText) {
                             if (actionText === i18n("Reply") || actionText.length === 0) {
-                                appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject);
-                                appRoot.openComposerTo(root.senderEmail, i18n("reply"));
-                            } else if (actionText === i18n("Reply all")) {
-                                appRoot.composeDraftSubject = i18n("Re: %1").arg(root.messageSubject);
-                                appRoot.openComposerTo(root.recipientsText, i18n("reply all"));
-                            } else if (actionText === i18n("Forward")) {
-                                appRoot.composeDraftTo = "";
-                                appRoot.composeDraftSubject = i18n("Fwd: %1").arg(root.messageSubject);
-                                appRoot.composeDraftBody = i18n("\n\n--- Forwarded message ---\nFrom: %1\nDate: %2\n\n%3").arg(root.senderText).arg(root.receivedAtText).arg((root.messageData && root.messageData.snippet) ? root.messageData.snippet : "");
-                                appRoot.openComposeDialog(i18n("forward"));
+                                const subject = i18n("Re: %1", root.messageSubject);
+                                appRoot.openComposerTo(root.senderEmail, i18n("reply"), subject);
+                            }
+                            else if (actionText === i18n("Reply all")) {
+                                const subject = i18n("Re: %1", root.messageSubject);
+                                appRoot.openComposerTo(root.recipientsText, i18n("reply all"), subject);
+                            }
+                            else if (actionText === i18n("Forward")) {
+                                const forwardAttachments = root.forwardAttachmentPathsForCurrentMessage();
+                                appRoot.forwardMessageFromData(root.messageData, root.receivedAtText, forwardAttachments);
                             }
                         }
                     }
-                    QQC2.Button {
-                        icon.name: root.forceDarkHtml ? "weather-clear-night" : "weather-clear"
-                        text: root.forceDarkHtml ? i18n("Dark") : i18n("Light")
 
-                        onClicked: {
-                            if (appRoot)
-                                appRoot.contentPaneDarkModeEnabled = !appRoot.contentPaneDarkModeEnabled;
+                    DarkLightToggleButton {
+                        darkMode: root.appRoot.contentPaneDarkModeEnabled
+
+                        onModeToggled: {
+                            root.appRoot.contentPaneDarkModeEnabled = !root.appRoot.contentPaneDarkModeEnabled;
                         }
                     }
                 }
