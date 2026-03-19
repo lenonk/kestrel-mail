@@ -1910,15 +1910,21 @@ QVariantList DataStore::tagItems() const
     )"));
     if (qImportant.exec() && qImportant.next()) {
         const int total = qImportant.value(0).toInt();
-        if (total > 0) {
-            QVariantMap row;
-            row.insert(QStringLiteral("label"), QStringLiteral("important"));
-            row.insert(QStringLiteral("name"), QStringLiteral("Important"));
-            row.insert(QStringLiteral("total"), total);
-            row.insert(QStringLiteral("unread"), qImportant.value(1).toInt());
-            row.insert(QStringLiteral("color"), QString());
-            byLabel.insert(QStringLiteral("important"), row);
-        }
+        QVariantMap row;
+        row.insert(QStringLiteral("label"), QStringLiteral("important"));
+        row.insert(QStringLiteral("name"), QStringLiteral("Important"));
+        row.insert(QStringLiteral("total"), total);
+        row.insert(QStringLiteral("unread"), qImportant.value(1).toInt());
+        row.insert(QStringLiteral("color"), QString());
+        byLabel.insert(QStringLiteral("important"), row);
+    } else {
+        QVariantMap row;
+        row.insert(QStringLiteral("label"), QStringLiteral("important"));
+        row.insert(QStringLiteral("name"), QStringLiteral("Important"));
+        row.insert(QStringLiteral("total"), 0);
+        row.insert(QStringLiteral("unread"), 0);
+        row.insert(QStringLiteral("color"), QString());
+        byLabel.insert(QStringLiteral("important"), row);
     }
 
     // Fallback/union with top-level custom folders so Tags section isn't empty when

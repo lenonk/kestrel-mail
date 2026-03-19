@@ -160,6 +160,8 @@ qt_add_resources(kestrel-mail kestrel_mail_data
     PREFIX "/data"
     FILES
         ${KESTREL_PROVIDERS_RESOURCE}
+        assets/kestrel-mail.png
+        assets/splash.png
 )
 
 target_link_libraries(kestrel-mail

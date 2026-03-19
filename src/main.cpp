@@ -7,6 +7,14 @@
 #include <QAction>
 #include <QSystemTrayIcon>
 #include <QWindow>
+#include <QSplashScreen>
+#include <QElapsedTimer>
+#include <QCoreApplication>
+#include <QFont>
+#include <QPainter>
+#include <QThread>
+#include <QRandomGenerator>
+#include <cmath>
 #include <KLocalizedContext>
 #include <KLocalizedString>
 #include <QNetworkAccessManager>
@@ -52,9 +60,29 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("kestrel-mail"));
     app.setOrganizationDomain(QStringLiteral("github.com"));
     app.setOrganizationName(QStringLiteral("lenonk"));
-    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("mail-message-new")));
+    const QIcon kestrelIcon(QStringLiteral(":/data/assets/kestrel-mail.png"));
+    app.setWindowIcon(kestrelIcon.isNull()
+                          ? QIcon::fromTheme(QStringLiteral("mail-message-new"))
+                          : kestrelIcon);
 
     KLocalizedString::setApplicationDomain("kestrel-mail");
+
+    QSplashScreen *splash = nullptr;
+    QElapsedTimer splashTimer;
+    {
+        QPixmap splashPixmap(QStringLiteral(":/data/assets/splash.png"));
+        if (!splashPixmap.isNull()) {
+            splash = new QSplashScreen(splashPixmap);
+            splash->setWindowFlag(Qt::WindowStaysOnTopHint, true);
+            QFont splashMsgFont = splash->font();
+            splashMsgFont.setPointSize(12);
+            splashMsgFont.setBold(true);
+            splash->setFont(splashMsgFont);
+            splash->show();
+            splashTimer.start();
+            app.processEvents();
+        }
+    }
 
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(new CachingNetworkAccessManagerFactory());
@@ -93,10 +121,156 @@ int main(int argc, char *argv[])
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
         &app,
-        []() { QCoreApplication::exit(-1); },
+        [splash]() {
+            if (splash) {
+                splash->close();
+                splash->deleteLater();
+            }
+            QCoreApplication::exit(-1);
+        },
         Qt::QueuedConnection);
 
     engine.load(url);
+
+    QWindow *mainWindow = nullptr;
+    if (!engine.rootObjects().isEmpty()) {
+        mainWindow = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
+    }
+
+    if (splash) {
+        // Keep app window hidden until splash finishes.
+        if (mainWindow) {
+            mainWindow->setVisibility(QWindow::Hidden);
+            app.processEvents();
+        }
+
+        static constexpr qint64 kSplashMinMs = 10000;
+
+        const QPixmap baseSplash(QStringLiteral(":/data/assets/splash.png"));
+        int frame = 0;
+        static constexpr qint64 kSpinnerFrameMs = 300;
+        qint64 lastFrameMs = -kSpinnerFrameMs;
+
+        static const QStringList statusLines = {
+            QStringLiteral("Warming up tiny mail hawks…"), QStringLiteral("Syncing bird thoughts…"),
+            QStringLiteral("Untangling inbox vines…"), QStringLiteral("Teaching owls to sort receipts…"),
+            QStringLiteral("Locating suspicious newsletters…"), QStringLiteral("Polishing unread counters…"),
+            QStringLiteral("Rehydrating forgotten threads…"), QStringLiteral("Sharpening reply claws…"),
+            QStringLiteral("Dusting off archived chaos…"), QStringLiteral("Calibrating smug filters…"),
+            QStringLiteral("Aligning stars and sender names…"), QStringLiteral("Fluffing mailbox feathers…"),
+            QStringLiteral("Negotiating with Promotions tab…"), QStringLiteral("Gently poking IMAP…"),
+            QStringLiteral("Bribing spam goblins…"), QStringLiteral("Whispering to sync daemons…"),
+            QStringLiteral("Counting unread anxieties…"), QStringLiteral("Folding notifications neatly…"),
+            QStringLiteral("Aerating stale email threads…"), QStringLiteral("Detangling category spaghetti…"),
+            QStringLiteral("Repainting tiny envelope icons…"), QStringLiteral("Finding where that one email went…"),
+            QStringLiteral("Loading strategic sass…"), QStringLiteral("Calming the junk vortex…"),
+            QStringLiteral("Summoning responsible productivity…"), QStringLiteral("Auditing subject line nonsense…"),
+            QStringLiteral("Inflating courage for reply-all…"), QStringLiteral("Sharpening search instincts…"),
+            QStringLiteral("Refilling coffee for workers…"), QStringLiteral("Untwisting quoted replies…"),
+            QStringLiteral("Locating attachments in the void…"), QStringLiteral("Tuning folder gravity…"),
+            QStringLiteral("Buffing thread dedupe routines…"), QStringLiteral("Decrypting calendar vibes…"),
+            QStringLiteral("Politely ignoring tracking pixels…"), QStringLiteral("Restoring inbox equilibrium…"),
+            QStringLiteral("Counting very important pigeons…"), QStringLiteral("Untangling signature markdown…"),
+            QStringLiteral("Waking cautious automations…"), QStringLiteral("Flipping unread bits with flair…"),
+            QStringLiteral("Training filters to behave…"), QStringLiteral("Cross-checking sent folder lore…"),
+            QStringLiteral("Loading socially acceptable confidence…"), QStringLiteral("Decoding cryptic invites…"),
+            QStringLiteral("Polishing Important chevrons…"), QStringLiteral("Refreshing message plumage…"),
+            QStringLiteral("Staring firmly at race conditions…"), QStringLiteral("Sweeping draft-folder cobwebs…"),
+            QStringLiteral("Applying tasteful chaos…"), QStringLiteral("Reassuring fragile SQLite feelings…"),
+            QStringLiteral("Measuring sync optimism…"), QStringLiteral("Converting panic into pagination…"),
+            QStringLiteral("Pretending this is under control…"), QStringLiteral("Gathering tiny facts quickly…"),
+            QStringLiteral("Smoothing jagged inbox edges…"), QStringLiteral("Massaging folder hierarchies…"),
+            QStringLiteral("Unhiding deeply buried context…"), QStringLiteral("Verifying that mail was definitely sent…"),
+            QStringLiteral("Brushing lint off message IDs…"), QStringLiteral("Translating corporate urgency…"),
+            QStringLiteral("Inspecting suspiciously cheerful updates…"), QStringLiteral("Disarming newsletter ambushes…"),
+            QStringLiteral("Hunting duplicate thread ghosts…"), QStringLiteral("Hydrating message bodies…"),
+            QStringLiteral("Reconciling folder reality…"), QStringLiteral("Finding peace in UID space…"),
+            QStringLiteral("Threading needles through haystacks…"), QStringLiteral("Optimizing dramatic pauses…"),
+            QStringLiteral("Assembling seriousness from spare parts…"), QStringLiteral("Re-centering Inbox chakra…"),
+            QStringLiteral("Reindexing chaos with confidence…"), QStringLiteral("Tickling stale caches awake…"),
+            QStringLiteral("Negotiating with SMTP politely…"), QStringLiteral("Preventing accidental nonsense…"),
+            QStringLiteral("Rounding up rogue labels…"), QStringLiteral("Applying anti-doomscroll varnish…"),
+            QStringLiteral("Inflating thread previews…"), QStringLiteral("Teaching Trash to let go…"),
+            QStringLiteral("Reconciling all things All Mail…"), QStringLiteral("Stabilizing specific edge cases…"),
+            QStringLiteral("Carefully poking background sync…"), QStringLiteral("Sweeping search index crumbs…"),
+            QStringLiteral("Asking IMAP nicely, again…"), QStringLiteral("Transmuting backlog into progress…"),
+            QStringLiteral("Compiling tiny acts of competence…"), QStringLiteral("Finessing folder indentation drama…"),
+            QStringLiteral("Polishing pre-alpha audacity…"), QStringLiteral("Preparing for unread mail…"),
+            QStringLiteral("Inspecting feral notifications…"), QStringLiteral("Smoothing avatar edge pixels…"),
+            QStringLiteral("Plotting inbox maneuvers…"), QStringLiteral("Converting TODOs into done-ish…"),
+            QStringLiteral("Training categorization gremlins…"), QStringLiteral("Dodging flaky network weather…"),
+            QStringLiteral("Mapping tiny constellations of mail…"), QStringLiteral("Balancing urgency and calm…"),
+            QStringLiteral("Deploying miniature mail falcons…"), QStringLiteral("Herding message metadata…"),
+            QStringLiteral("Reinforcing anti-chaos scaffolding…"), QStringLiteral("Making pre-alpha look intentional…"),
+            QStringLiteral("Summoning one more clean sync…")
+        };
+
+        QString currentStatus = statusLines.at(QRandomGenerator::global()->bounded(statusLines.size()));
+        qint64 nextStatusChangeMs = QRandomGenerator::global()->bounded(1000, 3001);
+
+        while (splashTimer.isValid() && splashTimer.elapsed() < kSplashMinMs) {
+            const qint64 nowMs = splashTimer.elapsed();
+            if (nowMs >= nextStatusChangeMs) {
+                currentStatus = statusLines.at(QRandomGenerator::global()->bounded(statusLines.size()));
+                nextStatusChangeMs = nowMs + QRandomGenerator::global()->bounded(1000, 3001);
+            }
+
+            if (nowMs - lastFrameMs >= kSpinnerFrameMs) {
+                QPixmap framePix = baseSplash;
+                QPainter p(&framePix);
+                p.setRenderHint(QPainter::Antialiasing, true);
+
+                const int cx = framePix.width() / 2;
+                const int cy = 418;
+                const int radius = 24;
+                const int dotR = 6;
+                const int dotCount = 10;
+
+                for (int i = 0; i < dotCount; ++i) {
+                    constexpr double kTwoPi = 6.28318530717958647692;
+                    const double a = (kTwoPi * i) / dotCount;
+                    const int x = cx + static_cast<int>(std::cos(a) * radius);
+                    const int y = cy + static_cast<int>(std::sin(a) * radius);
+
+                    const int frameIdx = frame % dotCount;
+                    const int age = (i - frameIdx + dotCount) % dotCount;
+                    const int alpha = qBound(40, 255 - age * 20, 255);
+                    QColor c(QStringLiteral("#c58bff"));
+                    c.setAlpha(alpha);
+                    p.setBrush(c);
+                    p.setPen(Qt::NoPen);
+                    p.drawEllipse(QPoint(x, y), dotR, dotR);
+                }
+
+                QFont f = p.font();
+                f.setPointSize(12);
+                f.setBold(true);
+                p.setFont(f);
+                p.setPen(QColor(QStringLiteral("#498CFD")));
+                p.drawText(QRect(12, cy + 42, framePix.width() - 24, 58),
+                           Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap,
+                           currentStatus);
+
+                p.end();
+                splash->setPixmap(framePix);
+                frame++;
+                lastFrameMs = nowMs;
+            }
+
+            app.processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(25);
+        }
+
+        splash->close();
+        splash->deleteLater();
+
+        if (mainWindow) {
+            mainWindow->show();
+            mainWindow->setVisibility(QWindow::Windowed);
+            mainWindow->raise();
+            mainWindow->requestActivate();
+        }
+    }
 
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
         auto *trayMenu = new QMenu();
@@ -105,7 +279,8 @@ int main(int argc, char *argv[])
         auto *quitAction = trayMenu->addAction(QStringLiteral("Quit"));
 
         auto *trayIcon = new QSystemTrayIcon(&app);
-        const QIcon tray = QIcon::fromTheme(QStringLiteral("mail-message-new"), app.windowIcon());
+        // const QIcon tray = QIcon::fromTheme(QStringLiteral("mail-message-new"), app.windowIcon());
+        const QIcon tray = kestrelIcon;
         trayIcon->setIcon(tray);
         trayIcon->setToolTip(QStringLiteral("Kestrel Mail"));
         trayIcon->setContextMenu(trayMenu);
