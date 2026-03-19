@@ -400,6 +400,7 @@ Item {
         cardAttachmentProgress = ({});
         cardSelectedKey = ({});
     }
+
     onVisibleThreadMessagesChanged: {
         Qt.callLater(function () {
             if (!root.threadLoadingOlder)
@@ -509,7 +510,6 @@ Item {
         Item {
             Layout.fillHeight: true
             Layout.fillWidth: true
-            Layout.rightMargin: -20
 
             Flickable {
                 id: threadFlickable
@@ -517,10 +517,10 @@ Item {
                 QQC2.ScrollBar.vertical: threadVScroll
                 anchors.fill: parent
                 anchors.rightMargin: threadVScroll.width + Kirigami.Units.largeSpacing * 2
-                boundsBehavior: Flickable.StopAtBounds
                 clip: true
-                contentHeight: Math.max(height + 1, threadScrollContent.implicitHeight)
                 contentWidth: width
+                contentHeight: Math.max(height + 1, threadScrollContent.implicitHeight)
+                boundsBehavior: Flickable.StopAtBounds
 
                 onContentYChanged: {
                     if (contentY <= 24 && root.threadHiddenCount > 0 && !root.threadLoadingOlder)
@@ -580,6 +580,10 @@ Item {
                             radius: 8
                             width: threadScrollContent.width
 
+                            Component.onCompleted: {
+                                if (isExpanded)
+                                    root._threadOnCardExpanded(index);
+                            }
                             onIsExpandedChanged: {
                                 if (isExpanded)
                                     root._threadOnCardExpanded(index);
@@ -622,12 +626,12 @@ Item {
 
                                 ColumnLayout {
                                     Layout.alignment: Qt.AlignTop
-                                    Layout.fillWidth: false
+                                    Layout.fillWidth: true
                                     spacing: 2
 
                                     QQC2.Label {
                                         id: threadSenderLabel
-                                        Layout.fillWidth: false
+                                        Layout.fillWidth: true
                                         color: "#4ea3ff"
                                         elide: Text.ElideRight
                                         font.bold: true
@@ -636,7 +640,10 @@ Item {
 
                                         MouseArea {
                                             id: threadSenderMouse
-                                            anchors.fill: parent
+                                            // Only cover the rendered text — not the blank fill area.
+                                            width: parent.contentWidth
+                                            height: parent.contentHeight
+                                            y: (parent.height - height) / 2
                                             cursorShape: Qt.PointingHandCursor
                                             hoverEnabled: true
                                             onClicked: appRoot.openComposerTo(appRoot.senderEmail(threadCard.modelData.sender || ""), i18n("sender"))
@@ -706,10 +713,6 @@ Item {
                                             }
                                         }
                                     }
-                                }
-
-                                Item {
-                                    Layout.fillWidth: true
                                 }
 
                                 // Date + action buttons
@@ -788,7 +791,7 @@ Item {
                                 visible: threadCard.isExpanded && _items.length > 0
                                 width: threadCard.width - 20
                                 x: 10
-                                y: cardHeaderRow.implicitHeight + 16
+                                y: threadCard.collapsedHeight
 
                                 Repeater {
                                     model: cardAttachFlow._items
@@ -885,7 +888,7 @@ Item {
                                 height: threadCard.bodyHeight
                                 width: threadCard.width - 20
                                 x: 10
-                                y: cardHeaderRow.implicitHeight + 16 + threadCard.attachFlowH
+                                y: threadCard.collapsedHeight + threadCard.attachFlowH
 
                                 sourceComponent: Component {
                                     Item {
@@ -1004,13 +1007,13 @@ Item {
             QQC2.ScrollBar {
                 id: threadVScroll
 
-                anchors.bottom: parent.bottom
-                anchors.right: parent.right
-                anchors.rightMargin: 5
-                anchors.top: parent.top
                 policy: QQC2.ScrollBar.AsNeeded
-                visible: false
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: 5
                 width: 5
+                visible: true
             }
         }
     }
