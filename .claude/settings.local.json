@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(make kestrel-mail:*)",
+      "Bash(cmake ..:*)",
+      "Bash(cmake:*)",
+      "Bash(find:*)",
+      "Bash(sqlite3:*)",
+      "Bash(touch:*)",
+      "Bash(grep:*)",
+      "Bash(ninja kestrel-mail:*)",
+      "Bash(ls /home/lenon/dev/kestrel-mail/build/*.sqlite /home/lenon/dev/kestrel-mail/*.sqlite)",
+      "Read(//home/lenon/**)",
+      "Bash(xargs sh:*)",
+      "Bash(make:*)",
+      "Bash(ls -lt /home/lenon/.claude/projects/-home-lenon-dev-kestrel-mail/*.jsonl 2>/dev/null | head -5)",
+      "Bash(stat /home/lenon/.claude/projects/-home-lenon-dev-kestrel-mail/*.jsonl 2>/dev/null | grep -E \"File:|Modify:\" | head -20)",
+      "Bash(git mv:*)",
+      "Bash(pwd && git -C /home/lenon/dev/kestrel-mail mv qml/components/Messages/MessageCard.qml qml/components/MessageList/MessageCard.qml)",
+      "Bash(git -C /home/lenon/dev/kestrel-mail status --short | head -20)",
+      "Bash(cd /home/lenon/dev/kestrel-mail/qml/components/MessageContent && for func in \"_threadBodyKey\" \"_threadCardHeight\" \"_threadMarkAllRead\" \"_threadOpenExternal\" \"_threadParticipantsSummary\" \"_threadRenderedHtml\" \"_threadReply\" \"_threadScrollToCard\" \"_threadSubject\" \"_threadUnreadCount\" \"escapeHtml\" \"extractAttachmentItemsFromHtml\"; do\n  echo \"=== $func ===\"\n  grep -n \"$func\" MessageContentPane.qml | head -5\ndone)",
+      "Bash(ls /home/lenon/Desktop/*.png 2>/dev/null || ls /home/lenon/Desktop/ | grep -i untitled)"
+    ]
+  }
+}

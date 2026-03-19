@@ -1,0 +1,17 @@
+# Hashes of file build rules.
+82ef29bba6c57911a7d37470973a3549 .qt/qml_imports/kestrel-imap-lab_build.cmake
+ca2d37a61ae45f76a63d22494c32e971 .qt/qml_imports/kestrel-mail_build.cmake
+602855f138be0a7c695be5a6b4af5a71 .qt/rcc/qrc_kestrel_imap_lab_qml.cpp
+e8f5b371704d46575e28486bd75fd5cc .qt/rcc/qrc_kestrel_mail_data.cpp
+6e69ebb2c1e566e60762743dee0e973b .qt/rcc/qrc_kestrel_mail_qml.cpp
+167ba167ecd456ed043893057eff0557 CMakeFiles/fetch-translations
+e96e8fbf58e0fffdd3b61929519ae976 CMakeFiles/kestrel-imap-lab_autogen
+e96e8fbf58e0fffdd3b61929519ae976 CMakeFiles/kestrel-imap-lab_qmlimportscan
+e96e8fbf58e0fffdd3b61929519ae976 CMakeFiles/kestrel-mail_autogen
+e96e8fbf58e0fffdd3b61929519ae976 CMakeFiles/kestrel-mail_qmlimportscan
+636e9321977685b84e8160aff6daf7a9 CMakeFiles/uninstall
+38690e126c24855430cb1baec7c08d7f external/mailio/CMakeFiles/mailio_autogen
+484c43c27c60d5a80c1c12d0f1a07fc3 external/mailio/mailio_autogen/timestamp
+f2457f42eae396ff4c9c4b84068886e5 kestrel-imap-lab_autogen/timestamp
+31a09dd93d84e279a36491514e2fbe5b kestrel-mail_autogen/timestamp
+c26ab5d3fb11eb657f667145cb99b6cf releaseme

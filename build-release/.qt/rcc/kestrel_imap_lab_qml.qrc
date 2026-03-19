@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="qml/ImapLab.qml">/home/lenon/dev/kestrel-mail/qml/ImapLab.qml</file>
+  </qresource>
+</RCC>
+

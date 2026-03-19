@@ -968,6 +968,42 @@ bool DataStore::init()
         return false;
     }
 
+    if (!q.exec(QStringLiteral(R"(
+        CREATE TABLE IF NOT EXISTS favorites_config (
+          key     TEXT PRIMARY KEY,
+          enabled INTEGER NOT NULL DEFAULT 1
+        )
+    )"))) {
+        return false;
+    }
+
+    // Seed defaults: All Inboxes / Unread / Flagged visible; rest hidden.
+    q.exec(QStringLiteral(R"(
+        INSERT OR IGNORE INTO favorites_config (key, enabled) VALUES
+          ('all-inboxes', 1),
+          ('unread',      1),
+          ('flagged',     1),
+          ('outbox',      0),
+          ('sent',        0),
+          ('trash',       0),
+          ('drafts',      0),
+          ('junk',        0),
+          ('archive',     0),
+          ('unreplied',   0),
+          ('snoozed',     0)
+    )"));
+
+    if (!q.exec(QStringLiteral(R"(
+        CREATE TABLE IF NOT EXISTS user_folders (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          name       TEXT    NOT NULL UNIQUE,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+    )"))) {
+        return false;
+    }
+
     // Paging/list performance indexes.
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_received_at_id ON messages(received_at DESC, id DESC)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_folder_message ON message_folder_map(folder, message_id)"));
@@ -4169,4 +4205,95 @@ QVariantList DataStore::attachmentsForMessage(const QString &accountEmail, const
         out.push_back(row);
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Favorites config
+// ---------------------------------------------------------------------------
+
+QVariantList DataStore::favoritesConfig() const
+{
+    struct FavDef { QString key; QString name; };
+    static const QList<FavDef> kDefs = {
+        {"all-inboxes"_L1, "All Inboxes"_L1},
+        {"unread"_L1,      "Unread"_L1     },
+        {"flagged"_L1,     "Flagged"_L1    },
+        {"outbox"_L1,      "Outbox"_L1     },
+        {"sent"_L1,        "Sent"_L1       },
+        {"trash"_L1,       "Trash"_L1      },
+        {"drafts"_L1,      "Drafts"_L1     },
+        {"junk"_L1,        "Junk Email"_L1 },
+        {"archive"_L1,     "Archive"_L1    },
+        {"unreplied"_L1,   "Unreplied"_L1  },
+        {"snoozed"_L1,     "Snoozed"_L1   },
+    };
+    static const QSet<QString> kDefaultEnabled{"all-inboxes"_L1, "unread"_L1, "flagged"_L1};
+
+    QSqlQuery q(db());
+    q.exec("SELECT key, enabled FROM favorites_config"_L1);
+    QHash<QString, bool> enabledMap;
+    while (q.next())
+        enabledMap.insert(q.value(0).toString(), q.value(1).toBool());
+
+    QVariantList out;
+    for (const auto &def : kDefs) {
+        const bool en = enabledMap.contains(def.key)
+                        ? enabledMap[def.key]
+                        : kDefaultEnabled.contains(def.key);
+        QVariantMap m;
+        m["key"_L1]     = def.key;
+        m["name"_L1]    = def.name;
+        m["enabled"_L1] = en;
+        out << m;
+    }
+    return out;
+}
+
+void DataStore::setFavoriteEnabled(const QString &key, bool enabled)
+{
+    QSqlQuery q(db());
+    q.prepare("INSERT INTO favorites_config(key,enabled) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET enabled=excluded.enabled"_L1);
+    q.addBindValue(key);
+    q.addBindValue(enabled ? 1 : 0);
+    q.exec();
+    emit favoritesConfigChanged();
+}
+
+// ---------------------------------------------------------------------------
+// User-created local folders
+// ---------------------------------------------------------------------------
+
+QVariantList DataStore::userFolders() const
+{
+    QSqlQuery q(db());
+    q.exec("SELECT name FROM user_folders ORDER BY sort_order ASC, name ASC"_L1);
+    QVariantList out;
+    while (q.next()) {
+        QVariantMap m;
+        m["name"_L1] = q.value(0).toString();
+        out << m;
+    }
+    return out;
+}
+
+bool DataStore::createUserFolder(const QString &name)
+{
+    const QString n = name.trimmed();
+    if (n.isEmpty()) return false;
+    QSqlQuery q(db());
+    q.prepare("INSERT OR IGNORE INTO user_folders (name) VALUES (?)"_L1);
+    q.addBindValue(n);
+    if (!q.exec() || q.numRowsAffected() < 1) return false;
+    emit userFoldersChanged();
+    return true;
+}
+
+bool DataStore::deleteUserFolder(const QString &name)
+{
+    QSqlQuery q(db());
+    q.prepare("DELETE FROM user_folders WHERE name = ?"_L1);
+    q.addBindValue(name.trimmed());
+    if (!q.exec() || q.numRowsAffected() < 1) return false;
+    emit userFoldersChanged();
+    return true;
 }

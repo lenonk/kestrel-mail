@@ -1,0 +1,6 @@
+set(__QT_DEPLOY_TARGET_mailio_FILE /home/lenon/dev/kestrel-mail/build-release/external/mailio/libmailio.so)
+set(__QT_DEPLOY_TARGET_mailio_TYPE SHARED_LIBRARY)
+set(__QT_DEPLOY_TARGET_kestrel-mail_FILE /home/lenon/dev/kestrel-mail/build-release/kestrel-mail)
+set(__QT_DEPLOY_TARGET_kestrel-mail_TYPE EXECUTABLE)
+set(__QT_DEPLOY_TARGET_kestrel-imap-lab_FILE /home/lenon/dev/kestrel-mail/build-release/kestrel-imap-lab)
+set(__QT_DEPLOY_TARGET_kestrel-imap-lab_TYPE EXECUTABLE)

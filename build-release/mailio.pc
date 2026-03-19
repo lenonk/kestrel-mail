@@ -1,0 +1,13 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+sharedlibdir=${exec_prefix}/lib
+includedir=${prefix}/include/mailio
+
+Name: mailio
+Description: Cross-platform MIME library for SMTP, POP3, and IMAP protocols
+Version: 0.26.0
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lmailio
+Cflags: -I${includedir}
+ 

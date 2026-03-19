@@ -224,33 +224,80 @@ Kirigami.ApplicationWindow {
     // Keep list pane width updates immediate so splitters stay responsive.
     // rightPaneExpandedWidth should track SplitView drag immediately; no animation.
 
+    Connections {
+        target: root.dataStoreObj
+        function onFavoritesConfigChanged() { root._favoritesConfigRev++ }
+        function onUserFoldersChanged()     { root._userFoldersRev++ }
+    }
+
     property int windowEdgeGrabSize: 8
     property int minWindowWidth: 980
     property int minWindowHeight: 640
 
-    readonly property var favoriteFolderItems: [
-        { key: "favorites:all-inboxes", name: i18n("All Inboxes"), icon: "mail-folder-inbox", categories: [] },
-        { key: "favorites:unread", name: i18n("Unread"), icon: "mail-mark-unread", categories: [] },
-        { key: "favorites:flagged", name: i18n("Flagged"), icon: "mail-mark-important", categories: [] }
+    // All possible favorites in display order.
+    readonly property var allFavoriteDefinitions: [
+        { key: "all-inboxes", name: i18n("All Inboxes"), icon: "mail-folder-inbox"   },
+        { key: "unread",      name: i18n("Unread"),      icon: "mail-mark-unread"    },
+        { key: "flagged",     name: i18n("Flagged"),     icon: "mail-mark-important" },
+        { key: "outbox",      name: i18n("Outbox"),      icon: "mail-folder-outbox"  },
+        { key: "sent",        name: i18n("Sent"),        icon: "mail-folder-sent"    },
+        { key: "trash",       name: i18n("Trash"),       icon: "user-trash"          },
+        { key: "drafts",      name: i18n("Drafts"),      icon: "document-edit"       },
+        { key: "junk",        name: i18n("Junk Email"),  icon: "mail-mark-junk"      },
+        { key: "archive",     name: i18n("Archive"),     icon: "folder"              },
+        { key: "unreplied",   name: i18n("Unreplied"),   icon: "mail-reply-sender"   },
+        { key: "snoozed",     name: i18n("Snoozed"),     icon: "appointment-soon"    }
     ]
 
-    readonly property var defaultAccountFolderItems: [
-        { key: "account:inbox", name: i18n("Inbox"), icon: "mail-folder-inbox", categories: [i18n("Primary"), i18n("Promotions"), i18n("Social")] },
-        { key: "account:sent", name: i18n("Sent"), icon: "mail-folder-sent", categories: [] },
-        { key: "account:trash", name: i18n("Trash"), icon: "user-trash", categories: [] },
-        { key: "account:drafts", name: i18n("Drafts"), icon: "document-edit", categories: [] },
-        { key: "account:junk", name: i18n("Junk Email"), icon: "mail-mark-junk", categories: [] },
-        { key: "account:all", name: i18n("All Mail"), icon: "folder", categories: [] }
+    // Reactivity version bumped by Connections below.
+    property int _favoritesConfigRev: 0
+    property int _userFoldersRev: 0
+
+    function visibleFavoriteItems() {
+        void root._favoritesConfigRev
+        const config = root.dataStoreObj ? root.dataStoreObj.favoritesConfig() : []
+        const enabledKeys = new Set()
+        for (let i = 0; i < config.length; ++i)
+            if (config[i].enabled) enabledKeys.add(config[i].key)
+        // Fallback on empty DB (very first run)
+        if (enabledKeys.size === 0) {
+            enabledKeys.add("all-inboxes")
+            enabledKeys.add("unread")
+            enabledKeys.add("flagged")
+        }
+        const out = []
+        for (let i = 0; i < root.allFavoriteDefinitions.length; ++i) {
+            const f = root.allFavoriteDefinitions[i]
+            if (enabledKeys.has(f.key))
+                out.push({ key: "favorites:" + f.key, name: f.name, icon: f.icon, categories: [] })
+        }
+        return out
+    }
+
+    // Default local folders always present.
+    readonly property var defaultLocalFolderDefs: [
+        { key: "local:inbox",  name: i18n("Inbox"),      icon: "mail-folder-inbox"  },
+        { key: "local:outbox", name: i18n("Outbox"),     icon: "mail-folder-outbox" },
+        { key: "local:sent",   name: i18n("Sent"),       icon: "mail-folder-sent"   },
+        { key: "local:trash",  name: i18n("Trash"),      icon: "user-trash"         },
+        { key: "local:drafts", name: i18n("Drafts"),     icon: "document-edit"      },
+        { key: "local:junk",   name: i18n("Junk Email"), icon: "mail-mark-junk"     }
     ]
 
-    readonly property var localFolderItems: [
-        { key: "local:inbox", name: i18n("Inbox"), icon: "mail-folder-inbox", categories: [] },
-        { key: "local:outbox", name: i18n("Outbox"), icon: "mail-folder-outbox", categories: [] },
-        { key: "local:sent", name: i18n("Sent"), icon: "mail-folder-sent", categories: [] },
-        { key: "local:trash", name: i18n("Trash"), icon: "user-trash", categories: [] },
-        { key: "local:drafts", name: i18n("Drafts"), icon: "document-edit", categories: [] },
-        { key: "local:junk", name: i18n("Junk Email"), icon: "mail-mark-junk", categories: [] }
-    ]
+    function allLocalFolderItems() {
+        void root._userFoldersRev
+        const out = root.defaultLocalFolderDefs.map(function(f) {
+            return { key: f.key, name: f.name, icon: f.icon, categories: [] }
+        })
+        const userFolders = root.dataStoreObj ? root.dataStoreObj.userFolders() : []
+        for (let i = 0; i < userFolders.length; ++i) {
+            const n = (userFolders[i].name || "").toString()
+            if (!n.length) continue
+            const k = n.toLowerCase().replace(/\s+/g, "-")
+            out.push({ key: "local:" + k, name: n, icon: "folder", categories: [] })
+        }
+        return out
+    }
 
     function displayFolderName(rawName) {
         const name = (rawName || "").toString()
@@ -280,7 +327,8 @@ Kirigami.ApplicationWindow {
 
     function isNoSelectFolder(flags) {
         const f = (flags || "").toString().toLowerCase()
-        return f.indexOf("\\noselect") >= 0
+        // Match both "\\Noselect" (with backslash from IMAP) and plain "noselect"
+        return f.indexOf("\\noselect") >= 0 || f.indexOf("noselect") >= 0
     }
 
     function isSystemMailboxName(name, specialUse) {
@@ -293,10 +341,11 @@ Kirigami.ApplicationWindow {
     }
 
     function tagColorForName(name) {
+        const lower = (name || "").toString().toLowerCase()
+        if (lower === "important") return "#FFD600"
         const colors = ["#F39C12", "#E74C3C", "#F1C40F", "#2ECC71", "#3498DB", "#9B59B6", "#1ABC9C", "#E67E22", "#8E44AD"]
-        const s = (name || "").toString().toLowerCase()
         let h = 0
-        for (let i = 0; i < s.length; ++i) h = ((h * 31) + s.charCodeAt(i)) & 0x7fffffff
+        for (let i = 0; i < lower.length; ++i) h = ((h * 31) + lower.charCodeAt(i)) & 0x7fffffff
         return colors[h % colors.length]
     }
 
@@ -319,46 +368,71 @@ Kirigami.ApplicationWindow {
 
     function accountFolderItems() {
         const folders = root.dataStoreObj ? root.dataStoreObj.folders : []
-        if (!folders || folders.length === 0) return []
 
+        if (!folders || folders.length === 0)
+            return []
+
+        // Top-level = folders with a special_use flag.
+        // INBOX without a flag is treated as inbox (all IMAP servers have INBOX).
+        const bySpecialUse = {}
         const byNorm = {}
+
         for (let i = 0; i < folders.length; ++i) {
             const f = folders[i]
             const rawName = root.normalizedRemoteFolderName((f.name || "").toString())
+
             if (!rawName.length) continue
             if (root.isCategoryFolder(rawName)) continue
             if (root.isNoSelectFolder(f.flags)) continue
-            if (rawName.indexOf("/") < 0 && !root.isSystemMailboxName(rawName, f.specialUse)) continue
+
+            let specialUse = (f.specialUse || "").toString().toLowerCase()
+
+            // Fallback: INBOX is always top-level even without a special_use annotation
+            if (!specialUse.length && rawName.toLowerCase() === "inbox")
+                specialUse = "inbox"
+
+            if (!specialUse.length) continue
 
             const norm = rawName.toLowerCase()
             if (byNorm[norm]) continue
-            byNorm[norm] = {
+
+            // \Spam → display as "Junk Email"
+            let displayName = root.displayFolderName(rawName)
+            if (specialUse === "junk") displayName = i18n("Junk Email")
+
+            const item = {
                 key: "account:" + norm,
-                name: root.displayFolderName(rawName),
+                name: displayName,
                 rawName: rawName,
-                icon: root.iconForSpecialUse(f.specialUse, rawName),
-                categories: []
+                icon: root.iconForSpecialUse(specialUse, rawName),
+                categories: [],
+                specialUse: specialUse
             }
+            byNorm[norm] = item
+
+            if (!bySpecialUse[specialUse])
+                bySpecialUse[specialUse] = item
         }
 
+        // Preferred order by special_use, then any remaining alphabetically.
+        const preferredUse = ["inbox", "sent", "trash", "drafts", "junk", "all"]
         const ordered = []
-        const preferred = ["inbox", "[gmail]/sent mail", "[gmail]/trash", "[gmail]/drafts", "[gmail]/spam", "[gmail]/all mail"]
-        for (let p = 0; p < preferred.length; ++p) {
-            const k = preferred[p]
-            if (byNorm[k]) {
-                ordered.push(byNorm[k])
-                delete byNorm[k]
+        const used = new Set()
+        for (let p = 0; p < preferredUse.length; ++p) {
+            const item = bySpecialUse[preferredUse[p]]
+            if (item && !used.has(item.rawName.toLowerCase())) {
+                ordered.push(item)
+                used.add(item.rawName.toLowerCase())
             }
         }
-
-        const rest = Object.keys(byNorm).sort()
-        for (let r = 0; r < rest.length; ++r) {
-            const item = byNorm[rest[r]]
-            if (root.isPrimaryAccountFolderNorm((item.rawName || "").toString().toLowerCase())) ordered.push(item)
+        const remaining = Object.keys(byNorm).sort()
+        for (let r = 0; r < remaining.length; ++r) {
+            if (!used.has(remaining[r])) ordered.push(byNorm[remaining[r]])
         }
 
+        // Attach Gmail category tabs to the inbox entry.
         for (let j = 0; j < ordered.length; ++j) {
-            if (ordered[j].name.toLowerCase() === "inbox") {
+            if ((ordered[j].specialUse || "") === "inbox") {
                 const derived = root.dataStoreObj ? root.dataStoreObj.inboxCategoryTabs : ["Primary"]
                 const cats = []
                 for (let c = 0; c < derived.length; ++c) {
@@ -399,16 +473,18 @@ Kirigami.ApplicationWindow {
         const primary = root.accountFolderItems()
         for (let i = 0; i < primary.length; ++i) primaryKeys[(primary[i].rawName || "").toString().toLowerCase()] = true
 
+        // More contains only hierarchical (slash-delimited) folders.
+        // Top-level folders with no special-use are label/tags — they appear in the Tags section.
         const byNorm = {}
         for (let i = 0; i < folders.length; ++i) {
             const f = folders[i]
             const rawName = root.normalizedRemoteFolderName((f.name || "").toString())
             if (!rawName.length) continue
             if (root.isCategoryFolder(rawName)) continue
+            if (rawName.indexOf("/") < 0) continue  // top-level → tags, not More
 
             const norm = rawName.toLowerCase()
             if (primaryKeys[norm]) continue
-            if (rawName.indexOf("/") < 0 && !root.isSystemMailboxName(rawName, f.specialUse)) continue
 
             const parts = rawName.split("/")
             let level = Math.max(0, parts.length - 1)
@@ -494,29 +570,60 @@ Kirigami.ApplicationWindow {
     }
 
     function tagFolderItems() {
-        const tags = (root.dataStoreObj && root.dataStoreObj.tagItems) ? root.dataStoreObj.tagItems() : []
-        const out = []
-        for (let i = 0; i < tags.length; ++i) {
-            const t = tags[i]
+        const byKey = {}
+
+        // Items from the message-label tag table (have counts).
+        const tagsFromDb = (root.dataStoreObj && root.dataStoreObj.tagItems) ? root.dataStoreObj.tagItems() : []
+        for (let i = 0; i < tagsFromDb.length; ++i) {
+            const t = tagsFromDb[i]
             const label = (t.label || "").toString()
             if (!label.length) continue
-            out.push({
-                key: "tag:" + label.toLowerCase(),
+            const norm = label.toLowerCase()
+            byKey[norm] = {
+                key: "tag:" + norm,
                 name: root.displayFolderName((t.name || label).toString()),
                 rawName: label,
                 icon: "tag",
                 categories: [],
                 unread: Number(t.unread || 0),
                 total: Number(t.total || 0),
-                accentColor: (t.color || root.tagColorForName(label))
-            })
+                accentColor: root.tagColorForName(norm)
+            }
         }
+
+        // Top-level IMAP folders with no special-use flag are label-folders (tags).
+        // E.g. Work, Personal, FooTest, Newsletter — Gmail user labels that also have IMAP folders.
+        const folders = root.dataStoreObj ? root.dataStoreObj.folders : []
+        for (let i = 0; i < folders.length; ++i) {
+            const f = folders[i]
+            const rawName = root.normalizedRemoteFolderName((f.name || "").toString())
+            if (!rawName.length) continue
+            if (root.isCategoryFolder(rawName)) continue
+            if (root.isNoSelectFolder(f.flags)) continue
+            if ((f.specialUse || "").toString().length) continue  // has special-use → not a tag
+            if (rawName.indexOf("/") >= 0) continue               // hierarchical → More, not Tags
+            const norm = rawName.toLowerCase()
+            if (norm === "inbox") continue                        // INBOX fallback handled separately
+            if (byKey[norm]) continue                             // already present from tagItems
+            byKey[norm] = {
+                key: "tag:" + norm,
+                name: root.displayFolderName(rawName),
+                rawName: rawName,
+                icon: "tag",
+                categories: [],
+                unread: 0,
+                total: 0,
+                accentColor: root.tagColorForName(norm)
+            }
+        }
+
+        const out = Object.values(byKey)
         out.sort(function(a, b) { return a.name.localeCompare(b.name) })
         return out
     }
 
     function folderEntryByKey(key) {
-        const groups = [root.favoriteFolderItems, root.tagFolderItems(), root.accountFolderItems(), root.moreAccountFolderItems(), root.localFolderItems]
+        const groups = [root.visibleFavoriteItems(), root.tagFolderItems(), root.accountFolderItems(), root.moreAccountFolderItems(), root.allLocalFolderItems()]
         for (let g = 0; g < groups.length; ++g) {
             const items = groups[g]
             for (let i = 0; i < items.length; ++i) {
@@ -1724,6 +1831,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     Components.FolderSectionButton {
+                        id: favoritesSectionBtn
                         visible: root.activeWorkspace === "mail"
                         expanded: root.favoritesExpanded
                         sectionIcon: "favorite"
@@ -1733,10 +1841,11 @@ Kirigami.ApplicationWindow {
                         chevronSize: root.sectionChevronSize
                         sectionIconSize: root.folderListSectionIconSize
                         onActivated: root.favoritesExpanded = !root.favoritesExpanded
+                        onContextMenuRequested: (x, y) => favoritesMenu.popup(x, y)
                     }
 
                     Repeater {
-                        model: (root.activeWorkspace === "mail" && root.favoritesExpanded) ? root.favoriteFolderItems : []
+                        model: (root.activeWorkspace === "mail" && root.favoritesExpanded) ? root.visibleFavoriteItems() : []
                         delegate: Components.FolderItemDelegate {
                             property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
@@ -1754,6 +1863,7 @@ Kirigami.ApplicationWindow {
 
                     Components.FolderSectionButton {
                         visible: root.activeWorkspace === "mail"
+                        Layout.topMargin: 6
                         expanded: root.tagsExpanded
                         sectionIcon: "tag"
                         title: i18n("Tags")
@@ -1784,6 +1894,7 @@ Kirigami.ApplicationWindow {
 
                     Components.FolderSectionButton {
                         visible: root.activeWorkspace === "mail"
+                        Layout.topMargin: 6
                         expanded: root.accountExpanded
                         sectionIcon: "internet-mail"
                         title: root.primaryAccountName
@@ -1815,16 +1926,18 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Components.FolderSectionButton {
+                    // "More" is a collapsible row nested under the account (indentLevel 1).
+                    Components.FolderItemDelegate {
                         visible: root.activeWorkspace === "mail" && root.accountExpanded
-                        expanded: root.moreExpanded
-                        sectionIcon: "overflow-menu-horizontal"
-                        title: i18n("More")
-                        titleOpacity: 0.8
                         rowHeight: root.folderRowHeight
-                        chevronSize: root.sectionChevronSize
-                        sectionIconSize: root.folderListSectionIconSize
-                        onActivated: root.moreExpanded = !root.moreExpanded
+                        iconSize: root.folderListIconSize
+                        folderKey: ""
+                        folderName: i18n("More")
+                        folderIcon: "overflow-menu-horizontal"
+                        indentLevel: 1
+                        hasChildren: true
+                        expanded: root.moreExpanded
+                        onToggleRequested: root.moreExpanded = !root.moreExpanded
                     }
 
                     Repeater {
@@ -1837,7 +1950,7 @@ Kirigami.ApplicationWindow {
                             folderKey: modelData.key
                             folderName: modelData.name
                             folderIcon: modelData.icon
-                            indentLevel: 1 + Number(modelData.level || 0)
+                            indentLevel: 2 + Number(modelData.level || 0)
                             hasChildren: !!modelData.hasChildren
                             expanded: !!modelData.expanded
                             unreadCount: modelData.noselect ? 0 : folderStats.unread
@@ -1851,7 +1964,9 @@ Kirigami.ApplicationWindow {
                     }
 
                     Components.FolderSectionButton {
+                        id: localFoldersSectionBtn
                         visible: root.activeWorkspace === "mail"
+                        Layout.topMargin: 6
                         expanded: root.localFoldersExpanded
                         sectionIcon: "folder"
                         title: i18n("Local Folders")
@@ -1860,10 +1975,11 @@ Kirigami.ApplicationWindow {
                         chevronSize: root.sectionChevronSize
                         sectionIconSize: root.folderListSectionIconSize
                         onActivated: root.localFoldersExpanded = !root.localFoldersExpanded
+                        onContextMenuRequested: (x, y) => localFoldersMenu.popup(x, y)
                     }
 
                     Repeater {
-                        model: (root.activeWorkspace === "mail" && root.localFoldersExpanded) ? root.localFolderItems : []
+                        model: (root.activeWorkspace === "mail" && root.localFoldersExpanded) ? root.allLocalFolderItems() : []
                         delegate: Components.FolderItemDelegate {
                             property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
@@ -2409,6 +2525,74 @@ Kirigami.ApplicationWindow {
         // border.color: Qt.darker(systemPalette.highlight, 1.2)
         border.color: Qt.darker(Kirigami.Theme.disabledTextColor, 2)
         z: 9999
+    }
+
+    // --- Favorites context menu (right-click on Favorites section header) ---
+    QQC2.Menu {
+        id: favoritesMenu
+        title: i18n("Favorites")
+        Repeater {
+            model: root.allFavoriteDefinitions
+            delegate: QQC2.MenuItem {
+                text: modelData.name
+                checkable: true
+                checked: {
+                    void root._favoritesConfigRev
+                    if (!root.dataStoreObj) return index < 3
+                    const config = root.dataStoreObj.favoritesConfig()
+                    for (let i = 0; i < config.length; ++i)
+                        if (config[i].key === modelData.key) return !!config[i].enabled
+                    return index < 3
+                }
+                onTriggered: {
+                    if (root.dataStoreObj)
+                        root.dataStoreObj.setFavoriteEnabled(modelData.key, checked)
+                }
+            }
+        }
+    }
+
+    // --- Local Folders context menu (right-click on Local Folders section header) ---
+    QQC2.Menu {
+        id: localFoldersMenu
+        title: i18n("Local Folders")
+        QQC2.MenuItem {
+            text: i18n("New Folder…")
+            icon.name: "folder-new"
+            onTriggered: {
+                newFolderNameField.text = ""
+                newFolderDialog.open()
+            }
+        }
+    }
+
+    // --- New Folder dialog ---
+    QQC2.Dialog {
+        id: newFolderDialog
+        title: i18n("New Local Folder")
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: QQC2.Dialog.Ok | QQC2.Dialog.Cancel
+
+        Column {
+            spacing: Kirigami.Units.smallSpacing
+            QQC2.Label { text: i18n("Folder name:") }
+            QQC2.TextField {
+                id: newFolderNameField
+                implicitWidth: 280
+                placeholderText: i18n("e.g. Work, Receipts…")
+                Keys.onReturnPressed: newFolderDialog.accept()
+            }
+        }
+
+        onOpened: newFolderNameField.forceActiveFocus()
+        onAccepted: {
+            const n = newFolderNameField.text.trim()
+            if (n.length > 0 && root.dataStoreObj)
+                root.dataStoreObj.createUserFolder(n)
+            newFolderNameField.text = ""
+        }
+        onRejected: newFolderNameField.text = ""
     }
 
 }

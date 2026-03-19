@@ -94,9 +94,20 @@ public:
     Q_INVOKABLE QVariantList searchContacts(const QString &prefix, int limit = 10) const;
     void upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments);
 
+    // Favorites sidebar config — which items are visible.
+    Q_INVOKABLE QVariantList favoritesConfig() const;
+    Q_INVOKABLE void setFavoriteEnabled(const QString &key, bool enabled);
+
+    // User-created local folders.
+    Q_INVOKABLE QVariantList userFolders() const;
+    Q_INVOKABLE bool createUserFolder(const QString &name);
+    Q_INVOKABLE bool deleteUserFolder(const QString &name);
+
 signals:
     void inboxChanged();
     void foldersChanged();
+    void favoritesConfigChanged();
+    void userFoldersChanged();
     // Emitted immediately after the DB is updated, before the full inbox reload.
     // Allows the message list to update just the unread dot for a single row instantly.
     void messageMarkedRead(const QString &accountEmail, const QString &uid);

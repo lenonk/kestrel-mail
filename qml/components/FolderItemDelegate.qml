@@ -19,7 +19,7 @@ QQC2.ItemDelegate {
     property string tooltipText: ""
     property int rowHeight: 40
     property int iconSize: 17
-    readonly property int childIndentStep: 20
+    property int baseIndentOffset: Kirigami.Units.gridUnit * 2
 
     signal activated()
     signal toggleRequested()
@@ -48,15 +48,15 @@ QQC2.ItemDelegate {
 
     contentItem: RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: Kirigami.Units.gridUnit + 2 + (root.indentLevel * root.childIndentStep)
+        anchors.leftMargin: root.baseIndentOffset * root.indentLevel
         anchors.rightMargin: Kirigami.Units.smallSpacing
         spacing: Kirigami.Units.smallSpacing
 
         Kirigami.Icon {
             visible: root.hasChildren
             source: root.expanded ? "go-down-symbolic" : "go-next-symbolic"
-            Layout.preferredWidth: visible ? Math.max(12, root.iconSize - 4) : 0
-            Layout.preferredHeight: visible ? Math.max(12, root.iconSize - 4) : 0
+            Layout.preferredWidth: visible ? 13 : 0
+            Layout.preferredHeight: visible ? 13 : 0
             Layout.alignment: Qt.AlignVCenter
         }
 

@@ -62,7 +62,7 @@ QVariantList parseListResponse(const QString &listResp) {
         else if (flags.contains("\\Sent"_L1,   Qt::CaseInsensitive)) specialUse = "sent"_L1;
         else if (flags.contains("\\Trash"_L1,  Qt::CaseInsensitive)) specialUse = "trash"_L1;
         else if (flags.contains("\\Drafts"_L1, Qt::CaseInsensitive)) specialUse = "drafts"_L1;
-        else if (flags.contains("\\Junk"_L1,   Qt::CaseInsensitive)) specialUse = "junk"_L1;
+        else if (flags.contains("\\Spam"_L1,   Qt::CaseInsensitive)) specialUse = "junk"_L1;
         else if (flags.contains("\\All"_L1,    Qt::CaseInsensitive)) specialUse = "all"_L1;
         if (name.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
             specialUse = "inbox"_L1;

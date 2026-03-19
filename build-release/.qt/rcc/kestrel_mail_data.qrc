@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/data">
+    <file alias="providers.json">/home/lenon/dev/kestrel-mail/data/providers.json</file>
+  </qresource>
+</RCC>
+

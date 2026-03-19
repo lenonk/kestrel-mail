@@ -18,6 +18,7 @@ QQC2.Button {
     property bool rightActivitySpinning: false
 
     signal activated()
+    signal contextMenuRequested(real x, real y)
 
     flat: true
     Layout.fillWidth: true
@@ -86,4 +87,12 @@ QQC2.Button {
     }
 
     onClicked: root.activated()
+
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: (eventPoint) => {
+            const mapped = root.mapToItem(null, eventPoint.position.x, eventPoint.position.y)
+            root.contextMenuRequested(mapped.x, mapped.y)
+        }
+    }
 }

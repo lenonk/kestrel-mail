@@ -1,0 +1,47 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="qml/Main.qml">/home/lenon/dev/kestrel-mail/qml/Main.qml</file>
+    <file alias="qml/components/AccountWizardDialog.qml">/home/lenon/dev/kestrel-mail/qml/components/AccountWizardDialog.qml</file>
+    <file alias="qml/components/PaneIconButton.qml">/home/lenon/dev/kestrel-mail/qml/components/PaneIconButton.qml</file>
+    <file alias="qml/components/TextToolTip.qml">/home/lenon/dev/kestrel-mail/qml/components/TextToolTip.qml</file>
+    <file alias="qml/components/MailActionButton.qml">/home/lenon/dev/kestrel-mail/qml/components/MailActionButton.qml</file>
+    <file alias="qml/components/FolderItemDelegate.qml">/home/lenon/dev/kestrel-mail/qml/components/FolderItemDelegate.qml</file>
+    <file alias="qml/components/FolderSectionButton.qml">/home/lenon/dev/kestrel-mail/qml/components/FolderSectionButton.qml</file>
+    <file alias="qml/components/HeaderUtilityButton.qml">/home/lenon/dev/kestrel-mail/qml/components/HeaderUtilityButton.qml</file>
+    <file alias="qml/components/IconOnlyFlatButton.qml">/home/lenon/dev/kestrel-mail/qml/components/IconOnlyFlatButton.qml</file>
+    <file alias="qml/components/PaneDivider.qml">/home/lenon/dev/kestrel-mail/qml/components/PaneDivider.qml</file>
+    <file alias="qml/components/PaneHeaderBar.qml">/home/lenon/dev/kestrel-mail/qml/components/PaneHeaderBar.qml</file>
+    <file alias="qml/components/TitleBarIconButton.qml">/home/lenon/dev/kestrel-mail/qml/components/TitleBarIconButton.qml</file>
+    <file alias="qml/components/PopupMenu.qml">/home/lenon/dev/kestrel-mail/qml/components/PopupMenu.qml</file>
+    <file alias="qml/components/AvatarBadge.qml">/home/lenon/dev/kestrel-mail/qml/components/AvatarBadge.qml</file>
+    <file alias="qml/components/ContactHoverPopup.qml">/home/lenon/dev/kestrel-mail/qml/components/ContactHoverPopup.qml</file>
+    <file alias="qml/components/InviteCard.qml">/home/lenon/dev/kestrel-mail/qml/components/InviteCard.qml</file>
+    <file alias="qml/components/PaneIconStrip.qml">/home/lenon/dev/kestrel-mail/qml/components/PaneIconStrip.qml</file>
+    <file alias="qml/components/CollapsedPaneRail.qml">/home/lenon/dev/kestrel-mail/qml/components/CollapsedPaneRail.qml</file>
+    <file alias="qml/components/MessageList/MessageListPane.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageList/MessageListPane.qml</file>
+    <file alias="qml/components/MessageList/MessageCard.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageList/MessageCard.qml</file>
+    <file alias="qml/components/MessageList/MessageCardAvatar.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageList/MessageCardAvatar.qml</file>
+    <file alias="qml/components/MessageList/MessageCardIndicators.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageList/MessageCardIndicators.qml</file>
+    <file alias="qml/components/MessageList/MessageCardStatusColumn.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageList/MessageCardStatusColumn.qml</file>
+    <file alias="qml/components/MessageList/MessageCategoryButton.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageList/MessageCategoryButton.qml</file>
+    <file alias="qml/components/MessageList/MessageListHeader.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageList/MessageListHeader.qml</file>
+    <file alias="qml/components/MessageContent/MessageContentPane.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageContent/MessageContentPane.qml</file>
+    <file alias="qml/components/MessageContent/MessageInfoBars.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageContent/MessageInfoBars.qml</file>
+    <file alias="qml/components/MessageContent/MessageHtmlView.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageContent/MessageHtmlView.qml</file>
+    <file alias="qml/components/MessageContent/MessageThreadView.qml">/home/lenon/dev/kestrel-mail/qml/components/MessageContent/MessageThreadView.qml</file>
+    <file alias="qml/components/Compose/Compose.qml">/home/lenon/dev/kestrel-mail/qml/components/Compose/Compose.qml</file>
+    <file alias="qml/components/Calendar/CalendarPane.qml">/home/lenon/dev/kestrel-mail/qml/components/Calendar/CalendarPane.qml</file>
+    <file alias="qml/components/Calendar/CalendarTopBar.qml">/home/lenon/dev/kestrel-mail/qml/components/Calendar/CalendarTopBar.qml</file>
+    <file alias="qml/components/Calendar/CalendarWeekHeader.qml">/home/lenon/dev/kestrel-mail/qml/components/Calendar/CalendarWeekHeader.qml</file>
+    <file alias="qml/components/Calendar/CalendarTimeGutter.qml">/home/lenon/dev/kestrel-mail/qml/components/Calendar/CalendarTimeGutter.qml</file>
+    <file alias="qml/components/Calendar/CalendarWeekGrid.qml">/home/lenon/dev/kestrel-mail/qml/components/Calendar/CalendarWeekGrid.qml</file>
+    <file alias="qml/components/Calendar/CalendarEventCard.qml">/home/lenon/dev/kestrel-mail/qml/components/Calendar/CalendarEventCard.qml</file>
+    <file alias="qml/components/Calendar/CalendarSidebarPane.qml">/home/lenon/dev/kestrel-mail/qml/components/Calendar/CalendarSidebarPane.qml</file>
+    <file alias="qml/components/Attachments/AttachmentCard.qml">/home/lenon/dev/kestrel-mail/qml/components/Attachments/AttachmentCard.qml</file>
+    <file alias="qml/components/Attachments/AttachmentHoverPopup.qml">/home/lenon/dev/kestrel-mail/qml/components/Attachments/AttachmentHoverPopup.qml</file>
+    <file alias="qml/important.svg">/home/lenon/dev/kestrel-mail/qml/important.svg</file>
+    <file alias="qml/flag.svg">/home/lenon/dev/kestrel-mail/qml/flag.svg</file>
+    <file alias="qml/trash.svg">/home/lenon/dev/kestrel-mail/qml/trash.svg</file>
+  </qresource>
+</RCC>
+

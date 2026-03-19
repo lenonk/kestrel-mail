@@ -1,0 +1,11 @@
+-rootPath
+/home/lenon/dev/kestrel-mail
+-cmake-output
+-output-file
+/home/lenon/dev/kestrel-mail/build-release/.qt/qml_imports/kestrel-imap-lab_build.cmake
+-importPath
+/home/lenon/dev/kestrel-mail/build-release
+-importPath
+/usr/lib/qt6/qml
+-qrcFiles
+/home/lenon/dev/kestrel-mail/build-release/.qt/rcc/kestrel_imap_lab_qml.qrc
