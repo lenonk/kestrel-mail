@@ -205,6 +205,17 @@ Rectangle {
         const last = parts.length ? parts[parts.length - 1] : "";
         return last.length ? decodeURIComponent(last) : i18n("Attachment");
     }
+    function textColorForAccent(accent) {
+        const c = (accent || "").toString().trim()
+        if (c.length !== 7 || c[0] !== "#")
+            return "#1E3C5A"
+        const r = parseInt(c.slice(1, 3), 16)
+        const g = parseInt(c.slice(3, 5), 16)
+        const b = parseInt(c.slice(5, 7), 16)
+        const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000
+        return yiq >= 150 ? "#1d2433" : "#eef3ff"
+    }
+
     function addTag(tagObj) {
         const exists = activeTags.some(function (t) {
             return t.name === tagObj.name;
@@ -724,101 +735,34 @@ Rectangle {
                 parent: tagMenuButton
                 verticalOffset: 4
 
-                QQC2.MenuItem {
-                    text: i18n("Draft")
+                readonly property var availableTags: (appRoot && appRoot.tagFolderItems) ? appRoot.tagFolderItems() : []
 
-                    onTriggered: root.addTag({
-                        name: i18n("Draft"),
-                        color: "#E0E0E0",
-                        textColor: "#2B2B2B"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("Junk")
+                Instantiator {
+                    model: tagMenu.availableTags
 
-                    onTriggered: root.addTag({
-                        name: i18n("Junk"),
-                        color: "#FFE2D8",
-                        textColor: "#7A2E16"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("Unwanted")
+                    delegate: QQC2.MenuItem {
+                        required property var modelData
 
-                    onTriggered: root.addTag({
-                        name: i18n("Unwanted"),
-                        color: "#F9D7DE",
-                        textColor: "#7A1F34"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("Important")
+                        text: (modelData && modelData.name) ? modelData.name : ""
+                        enabled: text.length > 0
 
-                    onTriggered: root.addTag({
-                        name: i18n("Important"),
-                        color: "#FFEAAE",
-                        textColor: "#6A4A00"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("Home")
+                        onTriggered: {
+                            const accent = (modelData && modelData.accentColor) ? modelData.accentColor : "#D6E8FF"
+                            root.addTag({
+                                name: text,
+                                color: accent,
+                                textColor: root.textColorForAccent(accent)
+                            })
+                        }
+                    }
 
-                    onTriggered: root.addTag({
-                        name: i18n("Home"),
-                        color: "#D9F0FF",
-                        textColor: "#114D73"
-                    })
+                    onObjectAdded: function(index, object) { tagMenu.insertItem(index, object) }
+                    onObjectRemoved: function(index, object) { tagMenu.removeItem(object) }
                 }
-                QQC2.MenuItem {
-                    text: i18n("Newsletter")
 
-                    onTriggered: root.addTag({
-                        name: i18n("Newsletter"),
-                        color: "#E8E2FF",
-                        textColor: "#473088"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("Personal")
-
-                    onTriggered: root.addTag({
-                        name: i18n("Personal"),
-                        color: "#E3FBD9",
-                        textColor: "#2D6A23"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("Promotion")
-
-                    onTriggered: root.addTag({
-                        name: i18n("Promotion"),
-                        color: "#D6E8FF",
-                        textColor: "#1D4E89"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("School")
-
-                    onTriggered: root.addTag({
-                        name: i18n("School"),
-                        color: "#DCE8FF",
-                        textColor: "#1B3A73"
-                    })
-                }
-                QQC2.MenuItem {
-                    text: i18n("Work")
-
-                    onTriggered: root.addTag({
-                        name: i18n("Work"),
-                        color: "#FFE9C9",
-                        textColor: "#7A4B08"
-                    })
-                }
-                QQC2.MenuSeparator {
-                }
+                QQC2.MenuSeparator {}
                 QQC2.MenuItem {
                     text: i18n("New tag…")
-
                     onTriggered: customTagDialog.open()
                 }
             }

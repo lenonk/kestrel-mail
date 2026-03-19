@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
 
         const QPixmap baseSplash(QStringLiteral(":/data/assets/splash.png"));
         int frame = 0;
-        static constexpr qint64 kSpinnerFrameMs = 300;
+        static constexpr qint64 kSpinnerFrameMs = 75;
         qint64 lastFrameMs = -kSpinnerFrameMs;
 
         static const QStringList statusLines = {

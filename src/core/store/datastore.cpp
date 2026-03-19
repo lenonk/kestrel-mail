@@ -3053,33 +3053,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                              bool *hasMore) const
 {
     const QSqlDatabase database = db();
-    QVariantList rows = m_inbox;
     const QString key = folderKey.trimmed();
     if (hasMore) *hasMore = false;
-
-    QSet<QString> trashedMessageIds;
-    for (const QVariant &v : rows) {
-        const QVariantMap r = v.toMap();
-        if (isTrashFolderName(r.value(QStringLiteral("folder")).toString())) {
-            trashedMessageIds.insert(r.value(QStringLiteral("messageId")).toString());
-        }
-    }
-
-    auto dedupeByMessageKey = [](const QVariantList &in) {
-        QVariantList out;
-        QSet<QString> seen;
-        for (const QVariant &v : in) {
-            const QVariantMap r = v.toMap();
-            const QString k = r.value(QStringLiteral("accountEmail")).toString() + "|"
-                              + r.value(QStringLiteral("sender")).toString() + "|"
-                              + r.value(QStringLiteral("subject")).toString() + "|"
-                              + r.value(QStringLiteral("receivedAt")).toString();
-            if (seen.contains(k)) continue;
-            seen.insert(k);
-            out.push_back(v);
-        }
-        return out;
-    };
 
     auto annotateMessageFlags = [&](QVariantList &list) {
         if (list.isEmpty())
@@ -3175,24 +3150,134 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         return {};
     }
 
-    if (key.compare(QStringLiteral("favorites:all-inboxes"), Qt::CaseInsensitive) == 0) {
-        QVariantList visible;
-        for (const QVariant &v : rows) {
-            const QVariantMap r = v.toMap();
-            if (trashedMessageIds.contains(r.value(QStringLiteral("messageId")).toString())) continue;
-            visible.push_back(v);
-        }
-        return pageRows(dedupeByMessageKey(visible));
-    }
+    if (key.compare(QStringLiteral("favorites:all-inboxes"), Qt::CaseInsensitive) == 0
+        || key.compare(QStringLiteral("favorites:unread"), Qt::CaseInsensitive) == 0) {
+        QVariantList out;
+        if (database.isValid() && database.isOpen()) {
+            const bool unreadOnly = key.compare(QStringLiteral("favorites:unread"), Qt::CaseInsensitive) == 0;
+            const int safeOffset = qMax(0, offset);
+            const int chunkSize = (limit > 0) ? qMax(200, limit * 4) : 5000;
+            const int targetCount = (limit > 0) ? (safeOffset + limit + 1) : -1;
 
-    if (key.compare(QStringLiteral("favorites:unread"), Qt::CaseInsensitive) == 0) {
-        QVariantList unread;
-        for (const QVariant &v : rows) {
-            const QVariantMap r = v.toMap();
-            if (trashedMessageIds.contains(r.value(QStringLiteral("messageId")).toString())) continue;
-            if (r.value(QStringLiteral("unread")).toBool()) unread.push_back(v);
+            QSet<QString> seenKeys;
+            int rawOffset = 0;
+            bool exhausted = false;
+            while (!exhausted) {
+                QSqlQuery q(database);
+                q.prepare(QStringLiteral(R"(
+                    SELECT mfm.account_email,
+                           mfm.folder,
+                           mfm.uid,
+                           cm.id,
+                           cm.sender,
+                           cm.subject,
+                           cm.recipient,
+                           '' as recipient_avatar_url,
+                           cm.received_at,
+                           cm.snippet,
+                           COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
+                           '' as avatar_domain,
+                           '' as avatar_url,
+                           '' as avatar_source,
+                           mfm.unread,
+                           COALESCE(cm.thread_id, '') as thread_id,
+                           COALESCE((SELECT COUNT(DISTINCT m2.id) FROM messages m2
+                                     WHERE m2.account_email = cm.account_email
+                                       AND m2.thread_id = cm.thread_id
+                                       AND cm.thread_id IS NOT NULL
+                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                           COALESCE(cm.gm_thr_id, '') as gm_thr_id
+                    FROM message_folder_map mfm
+                    JOIN messages cm ON cm.id = mfm.message_id
+                    WHERE (
+                        lower(mfm.folder)='inbox'
+                        OR lower(mfm.folder)='[gmail]/inbox'
+                        OR lower(mfm.folder)='[google mail]/inbox'
+                        OR lower(mfm.folder) LIKE '%/inbox'
+                    )
+                      AND (:unread_only=0 OR mfm.unread=1)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM message_folder_map t
+                          WHERE t.account_email=mfm.account_email
+                            AND t.message_id=mfm.message_id
+                            AND (lower(t.folder)='trash' OR lower(t.folder)='[gmail]/trash' OR lower(t.folder)='[google mail]/trash' OR lower(t.folder) LIKE '%/trash')
+                      )
+                    ORDER BY cm.received_at DESC
+                    LIMIT :limit OFFSET :offset
+                )"));
+                q.bindValue(QStringLiteral(":unread_only"), unreadOnly ? 1 : 0);
+                q.bindValue(QStringLiteral(":limit"), chunkSize);
+                q.bindValue(QStringLiteral(":offset"), rawOffset);
+
+                int fetchedRaw = 0;
+                if (q.exec()) {
+                    while (q.next()) {
+                        ++fetchedRaw;
+
+                        const QString tid   = q.value(15).toString().trimmed();
+                        QString gtid        = q.value(17).toString().trimmed();
+                        const QString acct  = q.value(0).toString();
+                        const QString mid   = q.value(3).toString();
+                        if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
+                            gtid = tid.mid(3).trimmed();
+                        const QString tkey  = !gtid.isEmpty()
+                            ? acct + QStringLiteral("|gtid:") + gtid
+                            : (tid.isEmpty()
+                                ? acct + QStringLiteral("|msg:") + mid
+                                : acct + QStringLiteral("|tid:") + tid);
+                        if (seenKeys.contains(tkey)) continue;
+                        seenKeys.insert(tkey);
+
+                        QVariantMap row;
+                        row.insert(QStringLiteral("accountEmail"), q.value(0));
+                        row.insert(QStringLiteral("folder"), q.value(1));
+                        row.insert(QStringLiteral("uid"), q.value(2));
+                        row.insert(QStringLiteral("messageId"), mid);
+                        row.insert(QStringLiteral("sender"), q.value(4));
+                        row.insert(QStringLiteral("subject"), q.value(5));
+                        row.insert(QStringLiteral("recipient"), q.value(6));
+                        row.insert(QStringLiteral("recipientAvatarUrl"), q.value(7));
+                        row.insert(QStringLiteral("receivedAt"), q.value(8));
+                        row.insert(QStringLiteral("snippet"),          q.value(9));
+                        row.insert(QStringLiteral("hasTrackingPixel"), q.value(10).toInt() == 1);
+                        row.insert(QStringLiteral("avatarDomain"),     q.value(11));
+                        row.insert(QStringLiteral("avatarUrl"), q.value(12));
+                        row.insert(QStringLiteral("avatarSource"), q.value(13));
+                        row.insert(QStringLiteral("unread"), q.value(14).toInt() == 1);
+                        row.insert(QStringLiteral("threadId"),    tid);
+                        row.insert(QStringLiteral("threadCount"), q.value(16).toInt());
+                        row.insert(QStringLiteral("gmThrId"),     gtid);
+                        out.push_back(row);
+
+                        if (targetCount > 0 && out.size() >= targetCount)
+                            break;
+                    }
+                }
+
+                if (targetCount > 0 && out.size() >= targetCount)
+                    break;
+                if (fetchedRaw < chunkSize)
+                    exhausted = true;
+                rawOffset += fetchedRaw;
+                if (fetchedRaw == 0)
+                    exhausted = true;
+            }
+
+            if (limit > 0) {
+                if (safeOffset >= out.size()) {
+                    if (hasMore) *hasMore = false;
+                    return {};
+                }
+                const int end = qMin(out.size(), safeOffset + limit);
+                if (hasMore) *hasMore = (out.size() > safeOffset + limit);
+                out = out.mid(safeOffset, end - safeOffset);
+            } else {
+                if (hasMore) *hasMore = false;
+            }
         }
-        return pageRows(dedupeByMessageKey(unread));
+
+        annotateMessageFlags(out);
+        return out;
     }
 
     QString selectedFolder;
@@ -3203,52 +3288,21 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         selectedTag = key.mid(QStringLiteral("tag:").size()).toLower();
     }
 
+    // Tag selections should resolve to folder-backed queries (DB source of truth),
+    // not in-memory inbox snapshots.
+    if (!selectedTag.isEmpty()) {
+        selectedFolder = selectedTag;
+        selectedTag.clear();
+    }
+
     const bool categoryView = (selectedFolder == QStringLiteral("inbox")
                                && !selectedCategories.isEmpty()
                                && selectedCategoryIndex >= 0
                                && selectedCategoryIndex < selectedCategories.size());
 
-    if (!selectedTag.isEmpty()) {
-        QSet<QString> taggedMessageIds;
-        
-        if (selectedTag == QStringLiteral("important")) {
-            // Server-synced important (e.g. [Gmail]/Important folder edge)
-            QSqlQuery qTag(database);
-            qTag.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_folder_map WHERE lower(folder) LIKE '%/important'"));
-            if (qTag.exec()) {
-                while (qTag.next()) taggedMessageIds.insert(qTag.value(0).toString());
-            }
-            // Also include locally-toggled important flag
-            QSqlQuery qLocal(database);
-            qLocal.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_labels WHERE lower(label)='important'"));
-            if (qLocal.exec()) {
-                while (qLocal.next()) taggedMessageIds.insert(qLocal.value(0).toString());
-            }
-        } else {
-            QSqlQuery qTag(database);
-            qTag.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_labels WHERE lower(label)=:label"));
-            qTag.bindValue(QStringLiteral(":label"), selectedTag);
-            if (qTag.exec()) {
-                while (qTag.next()) taggedMessageIds.insert(qTag.value(0).toString());
-            }
-        }
-
-        QVariantList filtered;
-        QSet<QString> seen;
-        for (const QVariant &v : rows) {
-            const QVariantMap r = v.toMap();
-            const QString mid = r.value(QStringLiteral("messageId")).toString();
-            if (mid.isEmpty() || !taggedMessageIds.contains(mid)) continue;
-            if (trashedMessageIds.contains(mid)) continue;
-            if (seen.contains(mid)) continue;
-            seen.insert(mid);
-            filtered.push_back(v);
-        }
-        return pageRows(filtered);
-    }
-
     if (!selectedFolder.isEmpty() && !categoryView) {
         const bool selectedIsTrash = isTrashFolderName(selectedFolder);
+        const bool selectedIsImportantPseudo = (selectedFolder == QStringLiteral("important"));
 
         // Folder views must come from DB (not m_inbox window), otherwise large folders
         // like Trash/All Mail show only a handful of rows.
@@ -3290,7 +3344,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                COALESCE(cm.gm_thr_id, '') as gm_thr_id
                         FROM message_folder_map mfm
                         JOIN messages cm ON cm.id = mfm.message_id
-                        WHERE lower(mfm.folder)=:folder
+                        WHERE ((:is_important=1 AND lower(mfm.folder) LIKE '%/important')
+                               OR (:is_important=0 AND lower(mfm.folder)=:folder))
                         ORDER BY cm.received_at DESC
                         LIMIT :limit OFFSET :offset
                     )"));
@@ -3320,7 +3375,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                COALESCE(cm.gm_thr_id, '') as gm_thr_id
                         FROM message_folder_map mfm
                         JOIN messages cm ON cm.id = mfm.message_id
-                        WHERE lower(mfm.folder)=:folder
+                        WHERE ((:is_important=1 AND lower(mfm.folder) LIKE '%/important')
+                               OR (:is_important=0 AND lower(mfm.folder)=:folder))
                           AND NOT EXISTS (
                               SELECT 1 FROM message_folder_map t
                               WHERE t.account_email=mfm.account_email
@@ -3332,6 +3388,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                     )"));
                 }
                 qFolder.bindValue(QStringLiteral(":folder"), selectedFolder);
+                qFolder.bindValue(QStringLiteral(":is_important"), selectedIsImportantPseudo ? 1 : 0);
                 qFolder.bindValue(QStringLiteral(":limit"), chunkSize);
                 qFolder.bindValue(QStringLiteral(":offset"), rawOffset);
 
@@ -3570,7 +3627,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         return out;
     }
 
-    return pageRows(rows);
+    return pageRows({});
 }
 
 QVariantList DataStore::groupedMessagesForSelection(const QString &folderKey,
@@ -4008,65 +4065,119 @@ bool DataStore::hasCachedHeadersForFolder(const QString &rawFolderName, int minC
     const QString folder = rawFolderName.trimmed().toLower();
     if (folder.isEmpty()) return false;
 
-    int count = 0;
-    for (const QVariant &v : m_inbox) {
-        if (v.toMap().value(QStringLiteral("folder")).toString().toLower() == folder) {
-            ++count;
-            if (count >= minCount) return true;
-        }
-    }
-    return false;
+    const auto database = db();
+    if (!database.isValid() || !database.isOpen()) return false;
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        SELECT COUNT(DISTINCT mfm.message_id)
+        FROM message_folder_map mfm
+        WHERE lower(mfm.folder)=:folder
+    )"));
+    q.bindValue(QStringLiteral(":folder"), folder);
+    if (!q.exec() || !q.next()) return false;
+
+    return q.value(0).toInt() >= qMax(1, minCount);
 }
 
 QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &rawFolderName) const
 {
     QVariantMap out;
-    const QVariantList rows = m_inbox;
     int total = 0;
     int unread = 0;
 
+    const auto database = db();
+    if (!database.isValid() || !database.isOpen()) {
+        out.insert(QStringLiteral("total"), 0);
+        out.insert(QStringLiteral("unread"), 0);
+        return out;
+    }
+
+    auto readCountPair = [&](QSqlQuery &q) {
+        if (q.exec() && q.next()) {
+            total = q.value(0).toInt();
+            unread = q.value(1).toInt();
+        }
+    };
+
     const QString key = folderKey.trimmed().toLower();
-    if (key == QStringLiteral("favorites:all-inboxes")) {
-        total = rows.size();
-        for (const QVariant &v : rows) if (v.toMap().value(QStringLiteral("unread")).toBool()) ++unread;
-    } else if (key == QStringLiteral("favorites:unread")) {
-        for (const QVariant &v : rows) if (v.toMap().value(QStringLiteral("unread")).toBool()) ++unread;
-        total = unread;
+    if (key == QStringLiteral("favorites:all-inboxes") || key == QStringLiteral("favorites:unread")) {
+        const bool unreadOnly = (key == QStringLiteral("favorites:unread"));
+        QSqlQuery q(database);
+        q.prepare(QStringLiteral(R"(
+            SELECT COUNT(DISTINCT mfm.message_id),
+                   SUM(CASE WHEN EXISTS (
+                        SELECT 1 FROM message_folder_map x
+                        WHERE x.account_email=mfm.account_email
+                          AND x.message_id=mfm.message_id
+                          AND x.unread=1
+                   ) THEN 1 ELSE 0 END)
+            FROM message_folder_map mfm
+            WHERE (
+                lower(mfm.folder)='inbox'
+                OR lower(mfm.folder)='[gmail]/inbox'
+                OR lower(mfm.folder)='[google mail]/inbox'
+                OR lower(mfm.folder) LIKE '%/inbox'
+            )
+              AND (:unread_only=0 OR EXISTS (
+                  SELECT 1 FROM message_folder_map u
+                  WHERE u.account_email=mfm.account_email
+                    AND u.message_id=mfm.message_id
+                    AND u.unread=1
+              ))
+              AND NOT EXISTS (
+                  SELECT 1 FROM message_folder_map t
+                  WHERE t.account_email=mfm.account_email
+                    AND t.message_id=mfm.message_id
+                    AND (lower(t.folder)='trash' OR lower(t.folder)='[gmail]/trash' OR lower(t.folder)='[google mail]/trash' OR lower(t.folder) LIKE '%/trash')
+              )
+        )"));
+        q.bindValue(QStringLiteral(":unread_only"), unreadOnly ? 1 : 0);
+        readCountPair(q);
+        if (unreadOnly)
+            total = unread;
     } else if (key == QStringLiteral("favorites:flagged") || key.startsWith(QStringLiteral("local:"))) {
         total = 0;
         unread = 0;
     } else if (key.startsWith(QStringLiteral("tag:"))) {
-        const QString tag = key.mid(QStringLiteral("tag:").size());
-        auto database = db();
-        if (database.isValid() && database.isOpen() && !tag.isEmpty()) {
+        const QString tag = key.mid(QStringLiteral("tag:").size()).trimmed().toLower();
+        if (!tag.isEmpty()) {
             QSqlQuery q(database);
-            q.prepare(QStringLiteral(R"(
-                SELECT COUNT(DISTINCT ml.message_id),
-                       SUM(CASE WHEN EXISTS (
-                            SELECT 1 FROM message_folder_map mfm
-                            WHERE mfm.account_email=ml.account_email
-                              AND mfm.message_id=ml.message_id
-                              AND mfm.unread=1
-                       ) THEN 1 ELSE 0 END)
-                FROM message_labels ml
-                WHERE lower(ml.label)=:label
-            )"));
-            q.bindValue(QStringLiteral(":label"), tag);
-            if (q.exec() && q.next()) {
-                total = q.value(0).toInt();
-                unread = q.value(1).toInt();
+            if (tag == QStringLiteral("important")) {
+                q.prepare(QStringLiteral(R"(
+                    SELECT COUNT(DISTINCT mfm.message_id),
+                           SUM(CASE WHEN EXISTS (
+                                SELECT 1 FROM message_folder_map x
+                                WHERE x.account_email=mfm.account_email
+                                  AND x.message_id=mfm.message_id
+                                  AND x.unread=1
+                           ) THEN 1 ELSE 0 END)
+                    FROM message_folder_map mfm
+                    WHERE lower(mfm.folder) LIKE '%/important'
+                )"));
+            } else {
+                q.prepare(QStringLiteral(R"(
+                    SELECT COUNT(DISTINCT mfm.message_id),
+                           SUM(CASE WHEN EXISTS (
+                                SELECT 1 FROM message_folder_map x
+                                WHERE x.account_email=mfm.account_email
+                                  AND x.message_id=mfm.message_id
+                                  AND x.unread=1
+                           ) THEN 1 ELSE 0 END)
+                    FROM message_folder_map mfm
+                    WHERE lower(mfm.folder)=:folder
+                )"));
+                q.bindValue(QStringLiteral(":folder"), tag);
             }
+            readCountPair(q);
         }
     } else {
         QString folder = rawFolderName.trimmed().toLower();
-        if (folder.isEmpty() && key.startsWith(QStringLiteral("account:"))) {
+        if (folder.isEmpty() && key.startsWith(QStringLiteral("account:")))
             folder = key.mid(QStringLiteral("account:").size());
-        }
 
-        auto database = db();
-        if (database.isValid() && database.isOpen() && !folder.isEmpty()) {
+        if (!folder.isEmpty()) {
             if (folder == QStringLiteral("inbox")) {
-                // Accurate Inbox count = category folders + messages only in INBOX.
                 QSqlQuery q(database);
                 q.prepare(QStringLiteral(R"(
                     SELECT COUNT(DISTINCT mfm.message_id),
@@ -4093,10 +4204,7 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
                         '[google mail]/categories/purchases'
                     )
                 )"));
-                if (q.exec() && q.next()) {
-                    total = q.value(0).toInt();
-                    unread = q.value(1).toInt();
-                }
+                readCountPair(q);
             } else {
                 QSqlQuery q(database);
                 q.prepare(QStringLiteral(R"(
@@ -4106,17 +4214,7 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
                     WHERE lower(mfm.folder)=:folder
                 )"));
                 q.bindValue(QStringLiteral(":folder"), folder);
-                if (q.exec() && q.next()) {
-                    total = q.value(0).toInt();
-                    unread = q.value(1).toInt();
-                }
-            }
-        } else {
-            for (const QVariant &v : rows) {
-                const QVariantMap r = v.toMap();
-                if (r.value(QStringLiteral("folder")).toString().toLower() != folder) continue;
-                ++total;
-                if (r.value(QStringLiteral("unread")).toBool()) ++unread;
+                readCountPair(q);
             }
         }
     }
