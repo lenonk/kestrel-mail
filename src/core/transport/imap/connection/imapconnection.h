@@ -83,9 +83,18 @@ public:
     // Returns QVariantList of rows: { name, flags, specialUse }.
     [[nodiscard]] QVariantList list();
 
-    // Send SELECT for mailbox; updates selectedFolder() on success.
+    // Send SELECT for mailbox (read-write); updates selectedFolder() on success.
     // Returns {success, raw server response}.
     [[nodiscard]] std::tuple<bool, QString> select(const QString &mailbox);
+
+    // Send EXAMINE for mailbox (read-only); updates selectedFolder() on success.
+    // Use for all sync/fetch paths that never write flags. Avoids clearing \Recent.
+    // Returns {success, raw server response}.
+    [[nodiscard]] std::tuple<bool, QString> examine(const QString &mailbox);
+
+    // True when the currently selected mailbox was opened via EXAMINE (read-only).
+    // Write operations (STORE, MOVE, COPY) must re-SELECT if this returns true.
+    [[nodiscard]] bool isSelectedReadOnly() const { return m_selectedReadOnly; }
 
     // Enter IMAP IDLE mode for the currently selected mailbox.
     // Returns server continuation line (typically starts with '+').
@@ -104,6 +113,7 @@ public:
     }
 
     static void setThrottleObserver(ThrottleObserver observer);
+    void setLogOwner(const QString &owner) { m_logOwner = owner; }
 
 private:
     std::unique_ptr<QSslSocket> m_socket;
@@ -118,12 +128,15 @@ private:
     QString m_accessToken;
     QString m_selectedFolder;
     QString m_idleTag;
+    bool    m_selectedReadOnly = false;
 
     QString nextTag();
     void observeThrottleState(const QString &response);
 
     static ThrottleObserver s_throttleObserver;
     bool m_throttled = false;
+    qint64 m_logConnId = -1;
+    QString m_logOwner;
 };
 
 } // namespace Imap

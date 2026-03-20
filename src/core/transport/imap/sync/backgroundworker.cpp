@@ -45,22 +45,15 @@ BackgroundWorker::resolveAccount() {
     return {true, {}};
 }
 
-BackgroundWorker::FolderStatus
-BackgroundWorker::fetchFolderStatus(const QString &folder) const {
-    FolderStatus out;
+QHash<QString, BackgroundWorker::FolderStatus>
+BackgroundWorker::fetchAllFolderStatuses() const {
+    QHash<QString, FolderStatus> out;
 
     std::shared_ptr<Connection> cxn;
     while (m_running.load() && !cxn)
         cxn = ImapService::getPooledConnection(m_activeEmail, "bg-folder-status");
     if (!cxn)
         return out;
-
-    QString mailbox = folder;
-    mailbox.replace("\\"_L1, "\\\\"_L1);
-    mailbox.replace("\""_L1, "\\\""_L1);
-
-    const auto resp = cxn->execute(
-        QStringLiteral("STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)").arg(mailbox));
 
     static const QRegularExpression uidNextRe(QStringLiteral("\\bUIDNEXT\\s+(\\d+)"),
                                                QRegularExpression::CaseInsensitiveOption);
@@ -69,12 +62,64 @@ BackgroundWorker::fetchFolderStatus(const QString &folder) const {
     static const QRegularExpression messagesRe(QStringLiteral("\\bMESSAGES\\s+(\\d+)"),
                                                 QRegularExpression::CaseInsensitiveOption);
 
-    if (const auto m = uidNextRe.match(resp); m.hasMatch())
-        out.uidNext = m.captured(1).toLongLong();
-    if (const auto m = modSeqRe.match(resp); m.hasMatch())
-        out.highestModSeq = m.captured(1).toLongLong();
-    if (const auto m = messagesRe.match(resp); m.hasMatch())
-        out.messages = m.captured(1).toLongLong();
+    // Prefer LIST-STATUS (RFC 5819) — fetches all folder statuses in one round trip.
+    // Fall back to per-folder STATUS when the server doesn't advertise LIST-STATUS.
+    if (cxn->capabilities().contains("LIST-STATUS"_L1, Qt::CaseInsensitive)) {
+        const QString resp = cxn->execute(
+            R"(LIST "" "*" RETURN (STATUS (MESSAGES UIDNEXT HIGHESTMODSEQ)))"_L1);
+
+        // Server sends interleaved * LIST and * STATUS untagged responses.
+        // Parse each * STATUS line to extract per-folder values.
+        static const QRegularExpression statusLineRe(
+            QStringLiteral(R"~(\* STATUS "([^"]+)"\s*\(([^)]+)\))~"),
+            QRegularExpression::CaseInsensitiveOption);
+
+        auto it = statusLineRe.globalMatch(resp);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            const QString folderKey = m.captured(1).trimmed().toLower();
+            const QString statusData = m.captured(2);
+
+            FolderStatus fs;
+            if (const auto m2 = uidNextRe.match(statusData);  m2.hasMatch())
+                fs.uidNext      = m2.captured(1).toLongLong();
+            if (const auto m2 = modSeqRe.match(statusData);   m2.hasMatch())
+                fs.highestModSeq = m2.captured(1).toLongLong();
+            if (const auto m2 = messagesRe.match(statusData);  m2.hasMatch())
+                fs.messages     = m2.captured(1).toLongLong();
+            out.insert(folderKey, fs);
+        }
+    } else {
+        // Fallback: per-folder STATUS (one round trip per folder).
+        // Collect all known folder names from a fresh LIST.
+        const QString listResp = cxn->execute(R"(LIST "" "*")"_L1);
+        static const QRegularExpression folderNameRe(
+            QStringLiteral(R"~(\* LIST[^\r\n]+"([^"]+)"\s*$)~"),
+            QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+
+        auto fit = folderNameRe.globalMatch(listResp);
+        while (fit.hasNext() && m_running.load()) {
+            const QString folder = fit.next().captured(1).trimmed();
+            if (folder.isEmpty())
+                continue;
+
+            QString mailbox = folder;
+            mailbox.replace("\\"_L1, "\\\\"_L1);
+            mailbox.replace("\""_L1, "\\\""_L1);
+
+            const QString resp = cxn->execute(
+                QStringLiteral("STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)").arg(mailbox));
+
+            FolderStatus fs;
+            if (const auto m = uidNextRe.match(resp);   m.hasMatch())
+                fs.uidNext       = m.captured(1).toLongLong();
+            if (const auto m = modSeqRe.match(resp);    m.hasMatch())
+                fs.highestModSeq = m.captured(1).toLongLong();
+            if (const auto m = messagesRe.match(resp);  m.hasMatch())
+                fs.messages      = m.captured(1).toLongLong();
+            out.insert(folder.trimmed().toLower(), fs);
+        }
+    }
 
     return out;
 }
@@ -135,12 +180,15 @@ BackgroundWorker::start() {
             folders.push_back(name);
         }
 
+        // Fetch all folder statuses in one LIST-STATUS round trip (or per-folder fallback).
+        const auto allStatuses = fetchAllFolderStatuses();
+
         for (const auto &folder : folders) {
             if (!m_running.load())
                 break;
 
-            const auto status = fetchFolderStatus(folder);
             const auto key = folder.trimmed().toLower();
+            const auto status = allStatuses.value(key);
             const bool firstStatusSeen = !m_lastFolderStatus.contains(key);
 
             FolderStatus previousStatus = m_lastFolderStatus.value(key);
@@ -187,7 +235,14 @@ BackgroundWorker::start() {
                                          m_lastRealtimeStatusMs, true, "Realtime sync recovered."_L1, 0);
         }
 
-        SyncUtils::sleepInterruptible(m_running, m_intervalSeconds);
+        bool throttled = false;
+        emit requestAccountThrottled(m_activeEmail, &throttled);
+
+        const int sleepSeconds = throttled ? 300 : m_intervalSeconds;
+        if (throttled)
+            qInfo().noquote() << "[bg-worker] throttled -> extending sleep to" << sleepSeconds << "seconds for" << m_activeEmail;
+
+        SyncUtils::sleepInterruptible(m_running, sleepSeconds);
     }
 
     m_running = false;

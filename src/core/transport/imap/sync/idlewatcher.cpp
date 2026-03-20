@@ -178,9 +178,10 @@ IdleWatcher::start() {
             lastAccessToken = accessToken;
         }
 
-        // SELECT is only needed after a (re)connect or if we lost the selected state.
+        // EXAMINE (read-only) is sufficient — IDLE only monitors for push notifications,
+        // it never writes flags. Using EXAMINE avoids clearing \Recent on reconnect.
         if (!inboxSelected) {
-            if (const auto [ok, resp] = cxn->select("INBOX"_L1); !ok) {
+            if (const auto [ok, resp] = cxn->examine("INBOX"_L1); !ok) {
                 cxn.reset();
                 SyncUtils::handleFailure([this](bool ok2, const QString &msg) { emit realtimeStatus(ok2, msg); },
                                          m_lastRealtimeStatusMs, m_realtimeDegradedNotified,

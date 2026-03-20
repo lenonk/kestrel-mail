@@ -27,6 +27,7 @@ public slots:
 signals:
     void requestAccounts(QVariantList *out);
     void requestRefreshAccessToken(const QVariantMap &account, const QString &email, QString *out);
+    void requestAccountThrottled(const QString &accountEmail, bool *out);
 
     void upsertFoldersRequested(const QVariantList &folders);
     void loadFolderStatusSnapshotRequested(const QString &accountEmail, const QString &folder,
@@ -60,7 +61,10 @@ private:
 
     void doBootstrap();
     std::pair<bool, QString> resolveAccount();
-    FolderStatus fetchFolderStatus(const QString &folder) const;
+    // Fetches status for all folders in one LIST-STATUS command (falls back to
+    // per-folder STATUS when LIST-STATUS is not advertised in server capabilities).
+    // Returns a map keyed by lowercased folder name.
+    QHash<QString, FolderStatus> fetchAllFolderStatuses() const;
 
     QHash<QString, FolderStatus> m_lastFolderStatus;
 };

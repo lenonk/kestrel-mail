@@ -34,6 +34,7 @@ Window {
     property bool showCcBcc: false
     property bool composeDarkView: false
     property bool _updatingBodyForViewToggle: false
+    property string _rawBody: ""
     property var smtpServiceObj: null
     property var imapServiceObj: null
     property bool pendingSendRequested: false
@@ -102,7 +103,17 @@ Window {
     }
 
     function _bodyForSending() {
-        return (bodyArea.text || "").toString();
+        return root._rawBody.length ? root._rawBody : (bodyArea.text || "").toString();
+    }
+
+    function _renderedDarkHtml() {
+        if (!root._rawBody.length)
+            return "";
+        htmlProcessor.darkBg      = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
+        htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
+        htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
+        htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
+        return htmlProcessor.prepare(htmlProcessor.sanitize(root._rawBody), true);
     }
 
     function _resolveAttachmentPaths(startFetch) {
@@ -138,7 +149,7 @@ Window {
             ccList: _chipListToStrings(ccChipModel),
             bccList: _chipListToStrings(bccChipModel),
             subject: subjectField.text,
-            body: bodyArea.text,
+            body: _bodyForSending(),
             attachments: attachPaths
         });
     }
@@ -202,7 +213,7 @@ Window {
         ccChipModel.clear();
         bccChipModel.clear();
         subjectField.text = subject || "";
-        bodyArea.text = body || "";
+        _rawBody = body || "";
         showCcBcc = false;
         sendError = "";
         sending = false;
@@ -214,6 +225,9 @@ Window {
         fmtStrike = false;
         _applyAttachments(attachments);
         composeDarkView = !!initialDarkMode;
+        _updatingBodyForViewToggle = true;
+        bodyArea.text = _rawBody;
+        _updatingBodyForViewToggle = false;
         if (to && to.trim().length > 0)
             _addChipToModel(toChipModel, to.trim());
         root.show();
@@ -229,7 +243,7 @@ Window {
         ccChipModel.clear();
         bccChipModel.clear();
         subjectField.text = params.subject || "";
-        bodyArea.text = params.body || "";
+        _rawBody = params.body || "";
         showCcBcc = !!(params.ccList && params.ccList.length > 0);
         sendError = "";
         sending = false;
@@ -241,6 +255,9 @@ Window {
         fmtStrike = false;
         _applyAttachments(params.attachments || []);
         composeDarkView = !!params.darkMode;
+        _updatingBodyForViewToggle = true;
+        bodyArea.text = composeDarkView ? _applyDarkViewStyle(_rawBody) : _rawBody;
+        _updatingBodyForViewToggle = false;
         const toList = params.toList || [];
         for (let i = 0; i < toList.length; i++)
             _addChipToModel(toChipModel, toList[i]);
@@ -873,20 +890,11 @@ Window {
                         Layout.rightMargin: 7
                         darkMode: root.composeDarkView
 
-                        onModeToggled: {
-                            const raw = bodyArea.text.toString()
-                            root.composeDarkView = !root.composeDarkView
-                            // Sync theme colors to C++ processor (reading these creates reactive deps).
-                            htmlProcessor.darkBg      = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
-                            htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
-                            htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
-                            htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
-
-                            let html = htmlProcessor.sanitize(raw);
-                                html = htmlProcessor.neutralizeExternalImages(raw);
-
-                            bodyArea.text = htmlProcessor.prepare(raw, darkMode);
-
+                        onModeToggled: darkMode => {
+                            root.composeDarkView = darkMode;
+                            root._updatingBodyForViewToggle = true;
+                            bodyArea.text = darkMode ? root._applyDarkViewStyle(root._rawBody) : root._rawBody;
+                            root._updatingBodyForViewToggle = false;
                         }
                     }
 
@@ -1003,6 +1011,14 @@ Window {
                     wrapMode: TextEdit.Wrap
 
                     background: Item {
+                    }
+
+                    onTextChanged: {
+                        // Keep _rawBody in sync when the user types, but not during programmatic dark-mode toggles.
+                        // While composeDarkView is on with HTML content, _rawBody stays as the original
+                        // untransformed HTML so _bodyForSending() returns the correct send payload.
+                        if (!root._updatingBodyForViewToggle && !root.composeDarkView)
+                            root._rawBody = bodyArea.text;
                     }
 
                     Keys.onPressed: event => {

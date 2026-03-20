@@ -662,7 +662,7 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(folderName);
+            const auto [ok, _] = cxn->examine(folderName);
             if (!ok) {
                     return;
             }
@@ -764,7 +764,7 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(folderName);
+            const auto [ok, _] = cxn->examine(folderName);
             if (!ok) {
                     return;
             }
@@ -1448,14 +1448,6 @@ ImapService::fetchFolderHeaders(const QString &email,
         return {};
     }
 
-    if (!folderName.isEmpty() && pooled->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-        const auto [ok, _] = pooled->select(folderName);
-        if (!ok) {
-            if (statusOut) *statusOut = "IMAP select failed."_L1;
-            return {};
-        }
-    }
-
     Imap::SyncContext ctx;
     ctx.cxn                     = pooled;
     ctx.folderName              = folderName;
@@ -1507,6 +1499,22 @@ ImapService::fetchFolderHeaders(const QString &email,
                                     const QStringList &readUids) {
         QMetaObject::invokeMethod(this, [this, acctEmail, folder, readUids]() {
             if (m_store) m_store->reconcileReadFlags(acctEmail, folder, readUids);
+        }, Qt::QueuedConnection);
+    };
+
+    // CONDSTORE: load the modseq we recorded at the end of the previous sync for this
+    // folder.  SyncEngine compares it with the fresh EXAMINE HIGHESTMODSEQ to decide
+    // whether any server-side changes occurred since our last sync.
+    {
+        qint64 lastModSeq = 0;
+        QMetaObject::invokeMethod(this, [this, &lastModSeq, email, folderName]() {
+            if (m_store) lastModSeq = m_store->folderLastSyncModSeq(email, folderName);
+        }, Qt::BlockingQueuedConnection);
+        ctx.lastHighestModSeq = lastModSeq;
+    }
+    ctx.onSyncStateUpdated = [this, email, folderName](qint64 modseq) {
+        QMetaObject::invokeMethod(this, [this, email, folderName, modseq]() {
+            if (m_store) m_store->updateFolderLastSyncModSeq(email, folderName, modseq);
         }, Qt::QueuedConnection);
     };
 
@@ -2151,7 +2159,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         auto cxn = getPooledConnection(accountEmail, "move-message");
         if (!cxn) return;
 
-        if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
             const auto [ok, _] = cxn->select(folder);
             if (!ok) return;
         }
@@ -2197,7 +2205,7 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
         auto cxn = getPooledConnection(accountEmail, "mark-read");
         if (!cxn) return;
 
-        if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
             const auto [ok, _] = cxn->select(folder);
             if (!ok) return;
         }
@@ -2261,7 +2269,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
         auto cxn = getPooledConnection(accountEmail, "add-folder-membership");
         if (!cxn) return;
 
-        if (cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
             const auto [ok, _] = cxn->select(folder);
             if (!ok) return;
         }

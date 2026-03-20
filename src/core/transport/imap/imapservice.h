@@ -114,11 +114,15 @@ private:
     QMutex                    m_inFlightBodyHydrationsMutex;
     QSet<QString>             m_activeFolderSyncTargets;
     QMutex                    m_activeFolderSyncTargetsMutex;
+    QHash<QString, qint64>    m_lastFolderSyncStartMs;
+    QMutex                    m_lastFolderSyncStartMsMutex;
     QSet<QString>             m_backfilledFolders;
     QMutex                    m_backfilledFoldersMutex;
     QSet<QString>             m_activeBgHydrateFolders;
     QSet<QString>             m_pendingBgHydrateFolders;
     QMutex                    m_bgHydrateMutex;
+
+    QHash<QString, bool>      m_accountThrottleState;
 
     struct AttachmentCacheEntry { QString localPath; qint64 expiresAt = 0; };
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;

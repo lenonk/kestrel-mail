@@ -17,14 +17,30 @@ struct SyncContext {
     QString folderName;
 
     qint64 minUidExclusive = 0;
+    qint64 remoteExists = -1;
+    bool hasSearchAllSnapshot = false;
+    QStringList searchAllUids;
     bool reconcileDeletes = false;
     int fetchBudget = -1;
 
+    // CONDSTORE: modseq stored at the end of the previous sync (0 = unknown / first sync).
+    // When the EXAMINE response returns the same modseq, nothing has changed and expensive
+    // UID SEARCH ALL operations can be skipped.
+    qint64 lastHighestModSeq = 0;
+    // Set by SyncEngine::execute() after computing the CONDSTORE skip decision.
+    // True when examineModSeq > 0 and matches lastHighestModSeq (no server-side changes).
+    bool condstoreUnchanged = false;
+
     std::atomic_bool *cancelRequested = nullptr;
     std::function<void(const QVariantMap&)> onHeader;
+    // Called after a successful sync with the HIGHESTMODSEQ from EXAMINE so the caller
+    // can persist it for the next cycle's CONDSTORE check.
+    std::function<void(qint64 highestModSeq)> onSyncStateUpdated;
 
     std::function<bool(const QString &email, int ttlSecs, int maxFailures)> avatarShouldRefresh;
     std::function<QStringList(const QString &email, const QString &folder)> getFolderUids;
+    // Optional: exact raw message-edge count for folder (no thread collapsing).
+    std::function<qint64(const QString &email, const QString &folder)> getFolderMessageCount;
     // Optional: returns UIDs of locally-known messages that need snippet regeneration.
     // executeFull will include these in its fetch pass even if they are already in getFolderUids.
     std::function<QStringList(const QString &email, const QString &folder)> getUidsNeedingSnippetRefresh;

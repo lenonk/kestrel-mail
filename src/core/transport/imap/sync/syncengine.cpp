@@ -138,6 +138,41 @@ categoryToFolder(const QString &c) {
     return {};
 }
 
+qint64
+parseHighestModSeq(const QString &resp) {
+    static const QRegularExpression re(QStringLiteral("\\[HIGHESTMODSEQ\\s+(\\d+)\\]"),
+                                       QRegularExpression::CaseInsensitiveOption);
+    const auto m = re.match(resp);
+    if (!m.hasMatch()) return 0;
+    bool ok = false;
+    const qint64 v = m.captured(1).toLongLong(&ok);
+    return ok ? v : 0;
+}
+
+qint64
+parseExistsFromSelectResponse(const QString &resp) {
+    static const QRegularExpression existsRe(QStringLiteral("\\*\\s+(\\d+)\\s+EXISTS"),
+                                             QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch m = existsRe.match(resp);
+    if (!m.hasMatch())
+        return -1;
+    bool ok = false;
+    const qint64 v = m.captured(1).toLongLong(&ok);
+    return ok ? v : -1;
+}
+
+qint64
+parseMessagesFromStatusResponse(const QString &resp) {
+    static const QRegularExpression messagesRe(QStringLiteral("\\bMESSAGES\\s+(\\d+)\\b"),
+                                               QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch m = messagesRe.match(resp);
+    if (!m.hasMatch())
+        return -1;
+    bool ok = false;
+    const qint64 v = m.captured(1).toLongLong(&ok);
+    return ok ? v : -1;
+}
+
 // ── Per-sync state (accumulated across all batch fetches in one sync pass) ───
 
 struct IngestState {
@@ -663,32 +698,12 @@ executeIncremental(SyncContext &ctx) {
     KestrelTimer folderSearchTimer;
 
     // Search for new UIDs above minUidExclusive.
+    // One round trip regardless of Gmail/non-Gmail — category routing uses X-GM-LABELS
+    // from the FETCH response (already requested in fetchUidBatch) via extractGmailCategoryFolder
+    // in ingestMessage.  The old 6x per-category searches are no longer needed.
+    // CONDSTORE: if modseq is unchanged no new messages can exist, skip the search entirely.
     QStringList newUids;
-    if (ctx.isGmailInbox()) {
-        // Gmail INBOX: search per-category to collect category hints up front.
-        static const QStringList inboxCategories = {
-            "primary"_L1, "promotions"_L1, "social"_L1,
-            "updates"_L1, "forums"_L1, "purchases"_L1
-        };
-        QSet<QString> merged;
-        for (const auto &cat : inboxCategories) {
-            const auto sCmd = QStringLiteral("UID SEARCH UID %1:* X-GM-RAW \"category:%2\"").arg(ctx.minUidExclusive + 1).arg(cat);
-            const auto sResp = ctx.cxn->execute(sCmd);
-            const auto mappedFolder = categoryToFolder(cat);
-            for (const auto &u : parseSearchIds(sResp)) {
-                merged.insert(u);
-                // Build per-UID category hints — mirrors the full-sync path so that
-                // messages whose X-GM-LABELS don't include the category label yet
-                // (race between delivery and Gmail's label application) still get routed.
-                if (!mappedFolder.isEmpty()) {
-                    bool ok = false;
-                    const qint32 v = u.toInt(&ok);
-                    if (ok && v > 0) state.categoryHints[v].insert(mappedFolder);
-                }
-            }
-        }
-        newUids = merged.values();
-    } else {
+    if (!ctx.condstoreUnchanged) {
         const auto sCmd = QStringLiteral("UID SEARCH UID %1:*").arg(ctx.minUidExclusive + 1);
         const auto sResp = ctx.cxn->execute(sCmd);
         newUids = parseSearchIds(sResp);
@@ -747,8 +762,35 @@ executeIncremental(SyncContext &ctx) {
         const QSet localSet(localUids.begin(), localUids.end());
         const QSet newSet(newUids.begin(), newUids.end());
 
-        const auto allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
-        QStringList allUids = parseUidSearchAll(allResp);
+        bool skipSearchAll = false;
+        if (ctx.remoteExists >= 0) {
+            Q_ASSERT_X(static_cast<bool>(ctx.getFolderMessageCount),
+                       "SyncEngine::executeIncremental",
+                       "getFolderMessageCount callback must be set");
+            const qint64 localCount = ctx.getFolderMessageCount(ctx.cxn->email(), ctx.folderName);
+            if (localCount == ctx.remoteExists)
+                skipSearchAll = true;
+        }
+        if (skipSearchAll) {
+            enrichSnippets(ctx, state);
+            result.success                     = true;
+            result.headers                     = state.out;
+            result.fetchedCount                = state.fetchedCount;
+            result.categoryMissCount           = state.categoryMissCount;
+            result.missingAddressHeadersCount  = state.missingAddressHeadersCount;
+            result.statusMessage               = QStringLiteral("Fetched %1 headers.").arg(state.out.size());
+            return result;
+        }
+
+        QStringList allUids;
+        if (ctx.hasSearchAllSnapshot) {
+            allUids = ctx.searchAllUids;
+        } else {
+            const auto allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
+            allUids = parseUidSearchAll(allResp);
+            ctx.hasSearchAllSnapshot = true;
+            ctx.searchAllUids = allUids;
+        }
 
         std::ranges::sort(allUids, [](const QString &a, const QString &b) {
             return a.toLongLong() < b.toLongLong();
@@ -826,9 +868,22 @@ executeFull(SyncContext &ctx) {
     int fetchedTotal      = 0;
     int throttleBackoffMs = 0;
 
-    // UID SEARCH ALL to collect all remote UIDs.
-    const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
-    const QStringList allIds = parseSearchIds(allResp);
+    QStringList allIds;
+    bool skipSearchAll = false;
+    if (ctx.remoteExists >= 0) {
+        Q_ASSERT_X(static_cast<bool>(ctx.getFolderMessageCount),
+                   "SyncEngine::executeFull",
+                   "getFolderMessageCount callback must be set");
+        const qint64 localCount = ctx.getFolderMessageCount(ctx.cxn->email(), ctx.folderName);
+        if (localCount == ctx.remoteExists)
+            skipSearchAll = true;
+    }
+
+    // UID SEARCH ALL to collect all remote UIDs (unless local count already matches EXISTS).
+    if (!skipSearchAll) {
+        const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
+        allIds = parseSearchIds(allResp);
+    }
 
     searchAllTimer.restart();
     for (const QString &id : allIds) {
@@ -837,26 +892,8 @@ executeFull(SyncContext &ctx) {
         if (ok && v > 0 && !knownFolderUids.contains(v)) pendingUidSet.insert(v);
     }
 
-    // Gmail INBOX: per-category searches to build category hints.
-    if (ctx.isGmailInbox()) {
-        static const QStringList inboxCategories = {
-            "primary"_L1, "promotions"_L1, "social"_L1,
-            "updates"_L1, "forums"_L1, "purchases"_L1
-        };
-        for (const QString &cat : inboxCategories) {
-            const QString cmd = QStringLiteral("UID SEARCH X-GM-RAW \"category:%1\"").arg(cat);
-            const QString resp = ctx.cxn->execute(cmd);
-            const QStringList ids = parseSearchIds(resp);
-            searchAllTimer.restart();
-            const QString mappedFolder = categoryToFolder(cat);
-            for (const QString &id : ids) {
-                bool ok = false;
-                const qint32 v = id.toInt(&ok);
-                if (ok && v > 0 && !mappedFolder.isEmpty())
-                    state.categoryHints[v].insert(mappedFolder);
-            }
-        }
-    }
+    // Category routing uses X-GM-LABELS from the FETCH response via extractGmailCategoryFolder
+    // in ingestMessage — no separate per-category searches needed.
 
     searchAllTimer.restart();
 
@@ -958,51 +995,124 @@ SyncEngine::execute(SyncContext &ctx) {
         return r;
     }
 
-    // SELECT the target folder, with [Gmail]/[Google Mail] alias fallback.
-    auto [selected, selResp] = ctx.cxn->select(ctx.folderName);
-    if (!selected) {
-        QStringList aliases;
-        const QString folderLower = ctx.folderName.toLower();
-        if (folderLower.startsWith("[gmail]"_L1)) {
-            QString alt = ctx.folderName;
-            alt.replace("[Gmail]"_L1, "[Google Mail]"_L1, Qt::CaseInsensitive);
-            aliases << alt;
-        } else if (folderLower.startsWith("[google mail]"_L1)) {
-            QString alt = ctx.folderName;
-            alt.replace("[Google Mail]"_L1, "[Gmail]"_L1, Qt::CaseInsensitive);
-            aliases << alt;
-        }
+    // ── Step 1: Select/examine the folder and capture HIGHESTMODSEQ ──────────
+    //
+    // If the connection already has this folder selected, issue STATUS instead
+    // of a redundant EXAMINE.  Both responses include HIGHESTMODSEQ (when
+    // CONDSTORE is enabled) and MESSAGES, so modseq tracking works in either path.
+    qint64 remoteMessages = -1;
+    qint64 examineModSeq  = 0;   // HIGHESTMODSEQ from EXAMINE or STATUS response
 
-        bool selected = false;
-        for (const QString &alt : aliases) {
-            std::tie(selected, selResp) = ctx.cxn->select(alt);
-            if (selected) {
-                break;
+    const bool alreadySelected = (ctx.cxn->selectedFolder().compare(ctx.folderName, Qt::CaseInsensitive) == 0);
+    if (alreadySelected) {
+        const QString statusResp = ctx.cxn->execute(
+            QStringLiteral("STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)").arg(ctx.folderName));
+        remoteMessages = parseMessagesFromStatusResponse(statusResp);
+        examineModSeq  = parseHighestModSeq(statusResp);
+    }
+
+    if (remoteMessages < 0) {
+        // EXAMINE (read-only) the target folder — sync never writes flags, so READ-WRITE
+        // access is unnecessary and would incorrectly clear \Recent flags.
+        // Falls back through [Gmail]/[Google Mail] alias if the first attempt fails.
+        auto [selected, selResp] = ctx.cxn->examine(ctx.folderName);
+        if (!selected) {
+            QStringList aliases;
+            const QString folderLower = ctx.folderName.toLower();
+            if (folderLower.startsWith("[gmail]"_L1)) {
+                QString alt = ctx.folderName;
+                alt.replace("[Gmail]"_L1, "[Google Mail]"_L1, Qt::CaseInsensitive);
+                aliases << alt;
+            } else if (folderLower.startsWith("[google mail]"_L1)) {
+                QString alt = ctx.folderName;
+                alt.replace("[Google Mail]"_L1, "[Gmail]"_L1, Qt::CaseInsensitive);
+                aliases << alt;
+            }
+
+            bool selectedAlias = false;
+            for (const QString &alt : aliases) {
+                std::tie(selectedAlias, selResp) = ctx.cxn->examine(alt);
+                if (selectedAlias) {
+                    break;
+                }
+            }
+            if (!selectedAlias) {
+                SyncResult r;
+                r.success = false;
+                r.statusMessage = QStringLiteral("SELECT failed for folder: %1").arg(ctx.folderName);
+                return r;
             }
         }
-        if (!selected) {
-            SyncResult r;
-            r.success = false;
-            r.statusMessage = QStringLiteral("SELECT failed for folder: %1").arg(ctx.folderName);
-            return r;
+
+        remoteMessages = parseExistsFromSelectResponse(selResp);
+        examineModSeq  = parseHighestModSeq(selResp);
+    }
+
+    // ── Step 2: CONDSTORE — compare server modseq with our last-sync modseq ──
+    //
+    // If HIGHESTMODSEQ is unchanged since our last successful sync, the server
+    // has seen no additions, deletions, or flag changes in this folder.
+    // We can safely skip UID SEARCH ALL (deletion reconcile) and the new-message
+    // search in executeIncremental.  The result is surfaced via ctx.condstoreUnchanged
+    // so sub-functions can consult it without needing an extra parameter.
+    ctx.condstoreUnchanged = (examineModSeq > 0
+                               && ctx.lastHighestModSeq > 0
+                               && examineModSeq == ctx.lastHighestModSeq);
+    if (ctx.condstoreUnchanged) {
+        qInfo().noquote() << "[condstore] skip" << ctx.folderName
+                          << "modseq=" << examineModSeq << "(unchanged since last sync)";
+    }
+
+    ctx.remoteExists = remoteMessages;
+    if (remoteMessages == 0) {
+        // Zero-message folder: skip SEARCH-based operations entirely.
+        if (ctx.reconcileDeletes && ctx.pruneFolder) {
+            ctx.pruneFolder(ctx.cxn->email(), ctx.folderName, {});
+        }
+        SyncResult r;
+        r.success = true;
+        r.statusMessage = QStringLiteral("Fetched 0 headers.");
+        if (examineModSeq > 0 && ctx.onSyncStateUpdated)
+            ctx.onSyncStateUpdated(examineModSeq);
+        return r;
+    }
+
+    // ── Step 3: Delete reconciliation ────────────────────────────────────────
+    //
+    // Compare remote UID set to local and purge deleted UIDs.
+    // Runs only when explicitly requested (non-announce incremental folder syncs).
+    // CONDSTORE: skip UID SEARCH ALL entirely when modseq says nothing changed —
+    // an unchanged modseq guarantees no messages were expunged.
+    if (ctx.reconcileDeletes && ctx.pruneFolder) {
+        bool skipSearchAll = ctx.condstoreUnchanged;  // CONDSTORE skip
+        if (!skipSearchAll && ctx.remoteExists >= 0) {
+            Q_ASSERT_X(static_cast<bool>(ctx.getFolderMessageCount),
+                       "SyncEngine::execute(reconcileDeletes)",
+                       "getFolderMessageCount callback must be set");
+            const qint64 localCount = ctx.getFolderMessageCount(ctx.cxn->email(), ctx.folderName);
+            if (localCount == ctx.remoteExists)
+                skipSearchAll = true;
+        }
+
+        if (!skipSearchAll) {
+            const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
+            const QStringList remoteUids = parseUidSearchAll(allResp);
+            ctx.hasSearchAllSnapshot = true;
+            ctx.searchAllUids = remoteUids;
+            // Folder-scoped prune: only removes edges from THIS folder (not cross-folder),
+            // preventing e.g. a Trash prune from wiping All Mail edges for messages that
+            // are still present in All Mail on the server.
+            ctx.pruneFolder(ctx.cxn->email(), ctx.folderName, remoteUids);
         }
     }
 
-    // Delete reconciliation: compare remote UID set to local and purge deleted UIDs.
-    // Runs only when explicitly requested (non-announce incremental folder syncs).
-    if (ctx.reconcileDeletes && ctx.pruneFolder) {
-        const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
-        const QStringList remoteUids = parseUidSearchAll(allResp);
-        // Folder-scoped prune: only removes edges from THIS folder (not cross-folder),
-        // preventing e.g. a Trash prune from wiping All Mail edges for messages that
-        // are still present in All Mail on the server.
-        ctx.pruneFolder(ctx.cxn->email(), ctx.folderName, remoteUids);
-    }
-
-    // FLAGS reconciliation: for incremental syncs, search for SEEN UIDs in a recent window
-    // to pick up \Seen changes from other clients (e.g. phone or webmail).
+    // ── Step 4: FLAGS reconciliation ─────────────────────────────────────────
+    //
+    // For incremental syncs, search for SEEN UIDs in a recent window to pick up
+    // \Seen changes from other clients (e.g. phone or webmail).
     // We only mark messages read — never unread — so this never overrides local state.
-    if (ctx.minUidExclusive > 0 && ctx.onFlagsReconciled) {
+    // CONDSTORE: skip when modseq is unchanged (no flag changes can have occurred).
+    if (!ctx.condstoreUnchanged && ctx.minUidExclusive > 0 && ctx.onFlagsReconciled) {
         bool envOk = false;
         const int configuredWindow = qEnvironmentVariableIntValue("KESTREL_FLAG_RECON_WINDOW", &envOk);
         const qint64 reconWindow = envOk && configuredWindow > 0 ? configuredWindow : 2000;
@@ -1017,10 +1127,18 @@ SyncEngine::execute(SyncContext &ctx) {
         }
     }
 
+    // ── Step 5: Fetch new/missing messages ───────────────────────────────────
+    SyncResult result;
     if (ctx.minUidExclusive > 0)
-        return executeIncremental(ctx);
+        result = executeIncremental(ctx);
     else
-        return executeFull(ctx);
+        result = executeFull(ctx);
+
+    // Persist the modseq we synced against so the next sync can use CONDSTORE.
+    if (result.success && examineModSeq > 0 && ctx.onSyncStateUpdated)
+        ctx.onSyncStateUpdated(examineModSeq);
+
+    return result;
 }
 
 } // namespace Imap

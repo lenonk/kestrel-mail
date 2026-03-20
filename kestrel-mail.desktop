@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Kestrel Mail
+GenericName=Email Client
+Comment=KDE-native email client (pre-alpha)
+Exec=kestrel-mail
+Icon=kestrel-mail
+Terminal=false
+Categories=Network;Email;
+Keywords=email;mail;imap;smtp;
+StartupNotify=true
+StartupWMClass=kestrel-mail

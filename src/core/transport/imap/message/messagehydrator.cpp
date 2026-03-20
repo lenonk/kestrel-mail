@@ -48,7 +48,7 @@ QString MessageHydrator::execute(const Request &req) {
         bool selectOk = true;
         QString msg;
         if (req.cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-            const auto sel = req.cxn->select(folder);
+            const auto sel = req.cxn->examine(folder);
             selectOk = std::get<0>(sel);
             msg = std::get<1>(sel);
         }
@@ -56,9 +56,9 @@ QString MessageHydrator::execute(const Request &req) {
 
         if (!selectOk) {
             // Empty response means the socket died (server idle-timeout, etc.).
-            // Try reconnecting in-place with stored credentials and retry SELECT.
+            // Try reconnecting in-place with stored credentials and retry EXAMINE.
             if (msg.isEmpty() && req.cxn->tryReconnect()) {
-                const auto sel2 = req.cxn->select(folder);
+                const auto sel2 = req.cxn->examine(folder);
                 selectOk = std::get<0>(sel2);
                 msg      = std::get<1>(sel2);
             }

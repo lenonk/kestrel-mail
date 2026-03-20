@@ -722,6 +722,7 @@ bool DataStore::init()
     q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN gm_thr_id TEXT"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_gm_thr ON messages(account_email, gm_thr_id)"));
     q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN has_tracking_pixel INTEGER DEFAULT 0"));
+    q.exec(QStringLiteral("ALTER TABLE folder_sync_status ADD COLUMN last_sync_modseq INTEGER NOT NULL DEFAULT 0"));
 
     // Backfill thread_id for existing messages (new ones get it in upsertHeader).
     {
@@ -2474,6 +2475,46 @@ void DataStore::upsertFolderSyncStatus(const QString &accountEmail, const QStrin
     q.bindValue(QStringLiteral(":uid_next"), uidNext);
     q.bindValue(QStringLiteral(":highest_modseq"), highestModSeq);
     q.bindValue(QStringLiteral(":messages"), messages);
+    q.exec();
+}
+
+qint64 DataStore::folderLastSyncModSeq(const QString &accountEmail, const QString &folder) const
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return 0;
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(
+        "SELECT last_sync_modseq FROM folder_sync_status "
+        "WHERE account_email=:account_email AND lower(folder)=lower(:folder) LIMIT 1"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"), folder.trimmed());
+    if (!q.exec() || !q.next())
+        return 0;
+    bool ok = false;
+    const qint64 v = q.value(0).toLongLong(&ok);
+    return ok ? v : 0;
+}
+
+void DataStore::updateFolderLastSyncModSeq(const QString &accountEmail, const QString &folder,
+                                           const qint64 modseq)
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return;
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(R"(
+        INSERT INTO folder_sync_status(account_email, folder, last_sync_modseq, updated_at)
+        VALUES(:account_email, :folder, :modseq, datetime('now'))
+        ON CONFLICT(account_email, folder) DO UPDATE SET
+          last_sync_modseq=excluded.last_sync_modseq,
+          updated_at=datetime('now')
+    )"));
+    q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
+    q.bindValue(QStringLiteral(":folder"), folder.trimmed());
+    q.bindValue(QStringLiteral(":modseq"), modseq);
     q.exec();
 }
 
