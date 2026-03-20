@@ -827,7 +827,8 @@ Kirigami.ApplicationWindow {
         function onSyncFinished(ok, message) {
             root.refreshInProgress = false
             root.accountRefreshing = false
-            root.accountConnected = !!ok
+            if (ok)
+                root.accountConnected = true
             root.showInlineStatus(message, !ok)
             if (ok && root.hasFetchedFolders() && root.bootstrapFolderSyncRequested) {
                 root.bootstrapFolderSyncRequested = false
@@ -843,7 +844,12 @@ Kirigami.ApplicationWindow {
         }
 
         function onRealtimeStatus(ok, message) {
-            root.accountConnected = !!ok
+            const t = (message || "").toString().toLowerCase()
+            if (ok || t.indexOf("reconnected") >= 0 || t.indexOf("restarted") >= 0) {
+                root.accountConnected = true
+            } else if (t.indexOf("degraded") >= 0 || t.indexOf("disconnected") >= 0 || t.indexOf("failed") >= 0) {
+                root.accountConnected = false
+            }
             root.showInlineStatus(message, !ok)
         }
 
@@ -1618,16 +1624,6 @@ Kirigami.ApplicationWindow {
         return displayName + " - " + s.total + " items (" + s.unread + " unread)"
     }
 
-    Timer {
-        id: backgroundRefreshTimer
-        interval: 120000
-        running: true
-        repeat: true
-        onTriggered: {
-            if (!root.visible || !root.imapServiceObj) return
-            root.syncSelectedFolder(false, true)
-        }
-    }
 
     // Resize handles for frameless window
     MouseArea { anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 3; cursorShape: Qt.SizeHorCursor; onPressed: root.startSystemResize(Qt.LeftEdge) }
@@ -2037,7 +2033,6 @@ Kirigami.ApplicationWindow {
                         rightThrottleIcon: root.accountThrottled ? "dialog-warning" : ""
                         rightThrottleTooltip: root.accountThrottled
                             ? i18n("Account is being throttled. Sync and body hydration are slowed by provider/pool limits. Wait a few minutes, reduce concurrent refreshes, or pause heavy background tasks.")
-                                + (root.accountThrottleMessage.length ? "\n\n" + root.accountThrottleMessage : "")
                             : ""
                         onActivated: root.accountExpanded = !root.accountExpanded
                     }
