@@ -13,11 +13,7 @@ Item {
     property var systemPalette
 
     // { dayIndex, startHour, durationHours, title, subtitle }
-    property var events: [
-        { dayIndex: 0, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "10:00am - 11:00am" },
-        { dayIndex: 2, startHour: 10, durationHours: 1.0, title: "Lenon's Workout", subtitle: "Occurs every 1 week" },
-        { dayIndex: 4, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "Private" }
-    ]
+    property var events: []
 
     readonly property int hours: endHour - startHour
     readonly property int quarterHourLines: hours * 4
@@ -50,11 +46,11 @@ Item {
         model: root.dayCount + 1
         delegate: Rectangle {
             required property int index
-            x: Math.round(index * (root.width / root.dayCount))
+            x: Math.round(index * (root.width / root.dayCount)) - 1
             y: 0
             width: 1
             height: root.height
-            color: Qt.rgba(1, 1, 1, 0.34)
+            color: Qt.rgba(1, 1, 1, 0.50)
         }
     }
 
@@ -65,11 +61,11 @@ Item {
             x: 0
             y: Math.round(index * (root.hourHeight / 4))
             width: root.width
-            height: 1
+            height: index % 4 === 0 ? 2 : 1
             color: {
-                if (index % 4 === 0) return Qt.rgba(1, 1, 1, 0.34)   // :00
-                if (index % 2 === 0) return Qt.rgba(1, 1, 1, 0.24)   // :30
-                return Qt.rgba(1, 1, 1, 0.16)                        // :15/:45
+                if (index % 4 === 0) return Qt.rgba(1, 1, 1, 0.56)   // :00 (bolder)
+                if (index % 2 === 0) return Qt.rgba(1, 1, 1, 0.16)   // :30 (fainter)
+                return Qt.rgba(1, 1, 1, 0.09)                        // :15/:45 (faintest)
             }
         }
     }

@@ -27,6 +27,8 @@ struct ConnectResult {
  */
 class Connection {
 public:
+    using ThrottleObserver = std::function<void(const QString &accountEmail, bool throttled, const QString &response)>;
+
     Connection();
     ~Connection();
 
@@ -101,6 +103,8 @@ public:
         return !m_host.isEmpty() && m_host.contains("gmail"_L1, Qt::CaseInsensitive);
     }
 
+    static void setThrottleObserver(ThrottleObserver observer);
+
 private:
     std::unique_ptr<QSslSocket> m_socket;
 
@@ -116,6 +120,10 @@ private:
     QString m_idleTag;
 
     QString nextTag();
+    void observeThrottleState(const QString &response);
+
+    static ThrottleObserver s_throttleObserver;
+    bool m_throttled = false;
 };
 
 } // namespace Imap

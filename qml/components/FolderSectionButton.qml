@@ -14,6 +14,8 @@ QQC2.Button {
     property int chevronSize: 16
     property int sectionIconSize: 16
     property string rightStatusIcon: ""
+    property string rightThrottleIcon: ""
+    property string rightThrottleTooltip: ""
     property string rightActivityIcon: ""
     property bool rightActivitySpinning: false
 
@@ -74,11 +76,32 @@ QQC2.Button {
         }
 
         Kirigami.Icon {
+            id: statusIcon
             visible: !!root.rightStatusIcon
             source: root.rightStatusIcon
             Layout.preferredWidth: 14
             Layout.preferredHeight: 14
             opacity: 0.85
+        }
+
+        Item {
+            visible: !!root.rightThrottleIcon
+            Layout.preferredWidth: 14
+            Layout.preferredHeight: 14
+
+            Kirigami.Icon {
+                anchors.fill: parent
+                source: root.rightThrottleIcon
+                opacity: 0.95
+            }
+
+            HoverHandler {
+                id: throttleHover
+            }
+
+            QQC2.ToolTip.visible: throttleHover.hovered && !!root.rightThrottleTooltip
+            QQC2.ToolTip.delay: 250
+            QQC2.ToolTip.text: root.rightThrottleTooltip
         }
     }
 

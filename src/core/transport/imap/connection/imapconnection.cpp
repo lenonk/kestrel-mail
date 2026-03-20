@@ -3,11 +3,50 @@
 
 #include <QRegularExpression>
 #include <QStringDecoder>
+#include <QFile>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QDateTime>
 
 using namespace Qt::Literals::StringLiterals;
 
 namespace Imap {
+Connection::ThrottleObserver Connection::s_throttleObserver = {};
+
 namespace {
+
+bool responseIsThrottled(const QString &resp) {
+    return resp.contains("THROTTLED"_L1, Qt::CaseInsensitive)
+        || resp.contains("RATE"_L1 + " "_L1 + "LIMIT"_L1, Qt::CaseInsensitive)
+        || resp.contains("TOO MANY REQUESTS"_L1, Qt::CaseInsensitive);
+}
+
+QMutex &imapLogMutex() {
+    static QMutex m;
+    return m;
+}
+
+QString elideMiddle(const QString &s, const int maxChars = 2400) {
+    if (s.size() <= maxChars)
+        return s;
+    const int keep = maxChars / 2;
+    return s.left(keep) + "\n...<ELIDED>...\n" + s.right(keep);
+}
+
+void appendImapLog(const QString &email, const QString &command, const QString &response) {
+    QMutexLocker lock(&imapLogMutex());
+    QFile f("imap-traffic.log");
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        return;
+
+    const QString ts = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    const QString cmd = elideMiddle(command.trimmed());
+    const QString resp = elideMiddle(response.trimmed());
+    const QByteArray block = QStringLiteral(
+        "[%1] account=%2\nC: %3\nS: %4\n----\n")
+        .arg(ts, email, cmd, resp).toUtf8();
+    f.write(block);
+}
 
 QByteArray buildXOAuth2Command(const QString &tag, const QString &email, const QString &accessToken) {
     const QByteArray authRaw = QStringLiteral("user=%1\u0001auth=Bearer %2\u0001\u0001").arg(email, accessToken).toUtf8();
@@ -125,17 +164,22 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
 
     // Authenticate with XOAUTH2
     const auto authTag = nextTag();
+    const QString authCommand = QStringLiteral("AUTHENTICATE XOAUTH2 <base64>");
     m_socket->write(buildXOAuth2Command(authTag, email, accessToken));
     m_socket->flush();
 
     auto imapResp = IO::readUntilTagged(*m_socket, authTag, IO::kTaggedReadTimeoutMs);
+    observeThrottleState(imapResp);
 
     // Handle SASL continuation if present
     if (imapResp.contains("\r\n+ "_L1) || imapResp.startsWith("+ "_L1)) {
         m_socket->write("\r\n");
         m_socket->flush();
         imapResp += IO::readUntilTagged(*m_socket, authTag, IO::kTaggedReadTimeoutMs);
+        observeThrottleState(imapResp);
     }
+
+    appendImapLog(email, authCommand, imapResp);
 
     if (!imapResp.contains(authTag + " OK"_L1, Qt::CaseInsensitive)) {
         result.message = "Authentication failed: %1"_L1.arg(imapResp.simplified().left(200));
@@ -149,6 +193,8 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     m_socket->write(buildSimpleCommand(capTag, "CAPABILITY"));
     m_socket->flush();
     imapResp = IO::readUntilTagged(*m_socket, capTag, IO::kFetchReadTimeoutMs);
+    observeThrottleState(imapResp);
+    appendImapLog(email, QStringLiteral("CAPABILITY"), imapResp);
     if (!imapResp.contains(capTag + " OK"_L1, Qt::CaseInsensitive)) {
         result.message = "CAPABILITY failed: %1"_L1.arg(imapResp.simplified().left(200));
         return result;
@@ -160,6 +206,8 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     m_socket->write(buildSimpleCommand(enableTag, "ENABLE UTF8=ACCEPT"));
     m_socket->flush();
     imapResp = IO::readUntilTagged(*m_socket, enableTag, IO::kFetchReadTimeoutMs);
+    observeThrottleState(imapResp);
+    appendImapLog(email, QStringLiteral("ENABLE UTF8=ACCEPT"), imapResp);
     if (!imapResp.contains(enableTag + " OK"_L1, Qt::CaseInsensitive)) {
         result.message = "ENABLE UTF8=ACCEPT failed: %1"_L1.arg(imapResp.simplified().left(200));
         return result;
@@ -175,7 +223,9 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
             : "ENABLE CONDSTORE"_L1;
         m_socket->write(buildSimpleCommand(featureTag, featureCmd));
         m_socket->flush();
-        (void)IO::readUntilTagged(*m_socket, featureTag, IO::kFetchReadTimeoutMs);
+        const QString featureResp = IO::readUntilTagged(*m_socket, featureTag, IO::kFetchReadTimeoutMs);
+        observeThrottleState(featureResp);
+        appendImapLog(email, featureCmd, featureResp);
     }
 
     // 2) NAMESPACE negotiation (or LIST "" "" delimiter fallback)
@@ -183,12 +233,16 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
         const QString nsTag = nextTag();
         m_socket->write(buildSimpleCommand(nsTag, "NAMESPACE"_L1));
         m_socket->flush();
-        (void)IO::readUntilTagged(*m_socket, nsTag, IO::kFetchReadTimeoutMs);
+        const QString nsResp = IO::readUntilTagged(*m_socket, nsTag, IO::kFetchReadTimeoutMs);
+        observeThrottleState(nsResp);
+        appendImapLog(email, QStringLiteral("NAMESPACE"), nsResp);
     } else {
         const QString listTag = nextTag();
         m_socket->write(buildSimpleCommand(listTag, R"(LIST "" "")"_L1));
         m_socket->flush();
-        (void)IO::readUntilTagged(*m_socket, listTag, IO::kFetchReadTimeoutMs);
+        const QString listResp = IO::readUntilTagged(*m_socket, listTag, IO::kFetchReadTimeoutMs);
+        observeThrottleState(listResp);
+        appendImapLog(email, QStringLiteral("LIST \"\" \"\""), listResp);
     }
 
     result.success      = true;
@@ -203,6 +257,22 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     return result;
 }
 
+void
+Connection::setThrottleObserver(Connection::ThrottleObserver observer) {
+    s_throttleObserver = std::move(observer);
+}
+
+void
+Connection::observeThrottleState(const QString &response) {
+    const bool seenThrottled = responseIsThrottled(response);
+    if (seenThrottled == m_throttled)
+        return;
+
+    m_throttled = seenThrottled;
+    if (s_throttleObserver)
+        s_throttleObserver(m_email, m_throttled, response);
+}
+
 QString
 Connection::execute(const QString &command) {
     const QString tag = nextTag();
@@ -210,6 +280,8 @@ Connection::execute(const QString &command) {
     m_socket->flush();
 
     QString imapResp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    observeThrottleState(imapResp);
+    appendImapLog(m_email, command, imapResp);
     if (!imapResp.contains(tag + " OK"_L1, Qt::CaseInsensitive)) {
         return "%1 failed: %2"_L1.arg(command).arg(imapResp.simplified().left(200));
     }
@@ -222,7 +294,11 @@ Connection::executeRaw(const QString &command) {
     const QString tag = nextTag();
     m_socket->write(buildSimpleCommand(tag, command));
     m_socket->flush();
-    return IO::readUntilTaggedRaw(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    const QByteArray raw = IO::readUntilTaggedRaw(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    const QString respText = QString::fromUtf8(raw);
+    observeThrottleState(respText);
+    appendImapLog(m_email, command, respText);
+    return raw;
 }
 
 QByteArray
@@ -293,10 +369,14 @@ Connection::fetchMimePartWithProgress(const QString &uid,
         }
     }
 
+    const QString finalResp = QString::fromUtf8(acc);
+    observeThrottleState(finalResp);
+    appendImapLog(m_email, command, finalResp);
+
     if (haveLiteral)
         return literal;
 
-    if (statusOut) *statusOut = QString::fromUtf8(acc);
+    if (statusOut) *statusOut = finalResp;
     return {};
 }
 
@@ -311,11 +391,15 @@ Connection::list() {
     m_socket->flush();
 
     auto resp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    observeThrottleState(resp);
+    appendImapLog(m_email, command, resp);
     if (!resp.contains(tag + " OK"_L1, Qt::CaseInsensitive) && isGmail()) {
         const QString fallbackTag = nextTag();
         m_socket->write(buildSimpleCommand(fallbackTag, R"(LIST "" "*")"_L1));
         m_socket->flush();
         resp = IO::readUntilTagged(*m_socket, fallbackTag, IO::kFetchReadTimeoutMs);
+        observeThrottleState(resp);
+        appendImapLog(m_email, QStringLiteral("LIST \"\" \"*\""), resp);
         if (!resp.contains(fallbackTag + " OK"_L1, Qt::CaseInsensitive))
             return {};
     } else if (!resp.contains(tag + " OK"_L1, Qt::CaseInsensitive)) {
@@ -332,6 +416,8 @@ Connection::select(const QString &mailbox) {
     m_socket->flush();
 
     const QString resp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    observeThrottleState(resp);
+    appendImapLog(m_email, QStringLiteral("SELECT \"%1\"").arg(mailbox), resp);
     if (const bool ok = resp.contains(tag + " OK"_L1, Qt::CaseInsensitive); !ok) {
         return {false, resp};
     }
@@ -353,6 +439,7 @@ Connection::enterIdle() {
         return {false, "IDLE failed: timeout waiting for continuation"_L1};
 
     const QString resp = QString::fromUtf8(m_socket->readAll());
+    appendImapLog(m_email, QStringLiteral("IDLE"), resp);
     if (!resp.contains('+'))
         return {false, "IDLE failed: server rejected IDLE: %1"_L1.arg(resp.simplified().left(200))};
 
@@ -382,6 +469,8 @@ Connection::exitIdle() {
     const QString doneTag = m_idleTag;
     m_idleTag.clear();
     const QString resp = IO::readUntilTagged(*m_socket, doneTag, IO::kTaggedReadTimeoutMs);
+    observeThrottleState(resp);
+    appendImapLog(m_email, QStringLiteral("DONE"), resp);
     const bool ok = resp.contains(doneTag + " OK"_L1, Qt::CaseInsensitive);
     return {ok, resp};
 }

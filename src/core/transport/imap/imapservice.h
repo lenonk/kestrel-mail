@@ -72,6 +72,8 @@ signals:
     void syncActivityChanged(bool active);
     void hydrateStatus(bool ok, const QString &message);
     void realtimeStatus(bool ok, const QString &message);
+    void accountThrottled(const QString &accountEmail, const QString &message);
+    void accountUnthrottled(const QString &accountEmail);
     void attachmentReady(const QString &accountEmail, const QString &uid, const QString &partId, const QString &localPath);
     void attachmentDownloadProgress(const QString &accountEmail, const QString &uid, const QString &partId, int progressPercent);
     void googleCalendarListChanged();

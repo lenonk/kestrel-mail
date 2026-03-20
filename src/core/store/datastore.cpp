@@ -1883,13 +1883,34 @@ QVariantList DataStore::tagItems() const
     q.prepare(QStringLiteral(R"(
         SELECT t.normalized_name AS label,
                COALESCE(NULLIF(trim(t.name), ''), t.normalized_name) AS display_name,
-               COUNT(DISTINCT mtm.message_id) AS total,
-               SUM(CASE WHEN EXISTS (
-                    SELECT 1 FROM message_folder_map mfm
-                    WHERE mfm.account_email=mtm.account_email
-                      AND mfm.message_id=mtm.message_id
-                      AND mfm.unread=1
-               ) THEN 1 ELSE 0 END) AS unread,
+               (
+                 SELECT COUNT(*)
+                 FROM (
+                   SELECT mtm2.account_email,
+                          COALESCE(NULLIF(trim(cm2.gm_thr_id),''), NULLIF(trim(cm2.thread_id),''), CAST(cm2.id AS TEXT)) AS thread_key
+                   FROM message_tag_map mtm2
+                   JOIN messages cm2 ON cm2.id=mtm2.message_id AND cm2.account_email=mtm2.account_email
+                   WHERE mtm2.tag_id=t.id
+                   GROUP BY mtm2.account_email, thread_key
+                 )
+               ) AS total,
+               (
+                 SELECT COUNT(*)
+                 FROM (
+                   SELECT mtm2.account_email,
+                          COALESCE(NULLIF(trim(cm2.gm_thr_id),''), NULLIF(trim(cm2.thread_id),''), CAST(cm2.id AS TEXT)) AS thread_key
+                   FROM message_tag_map mtm2
+                   JOIN messages cm2 ON cm2.id=mtm2.message_id AND cm2.account_email=mtm2.account_email
+                   WHERE mtm2.tag_id=t.id
+                     AND EXISTS (
+                       SELECT 1 FROM message_folder_map mfu
+                       WHERE mfu.account_email=mtm2.account_email
+                         AND mfu.message_id=mtm2.message_id
+                         AND mfu.unread=1
+                     )
+                   GROUP BY mtm2.account_email, thread_key
+                 )
+               ) AS unread,
                COALESCE(t.color, '') AS color
         FROM tags t
         LEFT JOIN message_tag_map mtm ON mtm.tag_id=t.id
@@ -1914,10 +1935,34 @@ QVariantList DataStore::tagItems() const
     // Add Important as a tag (folder-backed, not label-backed)
     QSqlQuery qImportant(database);
     qImportant.prepare(QStringLiteral(R"(
-        SELECT COUNT(DISTINCT message_id) AS total,
-               SUM(CASE WHEN unread=1 THEN 1 ELSE 0 END) AS unread
-        FROM message_folder_map
-        WHERE lower(folder) LIKE '%/important'
+        SELECT (
+                 SELECT COUNT(*)
+                 FROM (
+                   SELECT m2.account_email,
+                          COALESCE(NULLIF(trim(cm2.gm_thr_id),''), NULLIF(trim(cm2.thread_id),''), CAST(cm2.id AS TEXT)) AS thread_key
+                   FROM message_folder_map m2
+                   JOIN messages cm2 ON cm2.id=m2.message_id AND cm2.account_email=m2.account_email
+                   WHERE lower(m2.folder) LIKE '%/important'
+                   GROUP BY m2.account_email, thread_key
+                 )
+               ) AS total,
+               (
+                 SELECT COUNT(*)
+                 FROM (
+                   SELECT m2.account_email,
+                          COALESCE(NULLIF(trim(cm2.gm_thr_id),''), NULLIF(trim(cm2.thread_id),''), CAST(cm2.id AS TEXT)) AS thread_key
+                   FROM message_folder_map m2
+                   JOIN messages cm2 ON cm2.id=m2.message_id AND cm2.account_email=m2.account_email
+                   WHERE lower(m2.folder) LIKE '%/important'
+                     AND EXISTS (
+                       SELECT 1 FROM message_folder_map u
+                       WHERE u.account_email=m2.account_email
+                         AND u.message_id=m2.message_id
+                         AND u.unread=1
+                     )
+                   GROUP BY m2.account_email, thread_key
+                 )
+               ) AS unread
     )"));
     if (qImportant.exec() && qImportant.next()) {
         const int total = qImportant.value(0).toInt();
@@ -4057,6 +4102,79 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
         )"));
         q.bindValue(QStringLiteral(":unread_only"), unreadOnly ? 1 : 0);
         readCountPair(q);
+
+        QSqlQuery qUnread(database);
+        qUnread.prepare(QStringLiteral(R"(
+            SELECT COUNT(*)
+            FROM (
+                SELECT mfm.account_email,
+                       COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                FROM message_folder_map mfm
+                JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                WHERE (
+                    lower(mfm.folder)='inbox'
+                    OR lower(mfm.folder)='[gmail]/inbox'
+                    OR lower(mfm.folder)='[google mail]/inbox'
+                    OR lower(mfm.folder) LIKE '%/inbox'
+                )
+                  AND (:unread_only=0 OR EXISTS (
+                      SELECT 1 FROM message_folder_map u
+                      WHERE u.account_email=mfm.account_email
+                        AND u.message_id=mfm.message_id
+                        AND u.unread=1
+                  ))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM message_folder_map t
+                      WHERE t.account_email=mfm.account_email
+                        AND t.message_id=mfm.message_id
+                        AND (lower(t.folder)='trash' OR lower(t.folder)='[gmail]/trash' OR lower(t.folder)='[google mail]/trash' OR lower(t.folder) LIKE '%/trash')
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM message_folder_map x
+                      WHERE x.account_email=mfm.account_email
+                        AND x.message_id=mfm.message_id
+                        AND x.unread=1
+                  )
+                GROUP BY mfm.account_email, thread_key
+            )
+        )"));
+        qUnread.bindValue(QStringLiteral(":unread_only"), unreadOnly ? 1 : 0);
+        if (qUnread.exec() && qUnread.next())
+            unread = qUnread.value(0).toInt();
+
+        QSqlQuery qTotal(database);
+        qTotal.prepare(QStringLiteral(R"(
+            SELECT COUNT(*)
+            FROM (
+                SELECT mfm.account_email,
+                       COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                FROM message_folder_map mfm
+                JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                WHERE (
+                    lower(mfm.folder)='inbox'
+                    OR lower(mfm.folder)='[gmail]/inbox'
+                    OR lower(mfm.folder)='[google mail]/inbox'
+                    OR lower(mfm.folder) LIKE '%/inbox'
+                )
+                  AND (:unread_only=0 OR EXISTS (
+                      SELECT 1 FROM message_folder_map u
+                      WHERE u.account_email=mfm.account_email
+                        AND u.message_id=mfm.message_id
+                        AND u.unread=1
+                  ))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM message_folder_map t
+                      WHERE t.account_email=mfm.account_email
+                        AND t.message_id=mfm.message_id
+                        AND (lower(t.folder)='trash' OR lower(t.folder)='[gmail]/trash' OR lower(t.folder)='[google mail]/trash' OR lower(t.folder) LIKE '%/trash')
+                  )
+                GROUP BY mfm.account_email, thread_key
+            )
+        )"));
+        qTotal.bindValue(QStringLiteral(":unread_only"), unreadOnly ? 1 : 0);
+        if (qTotal.exec() && qTotal.next())
+            total = qTotal.value(0).toInt();
+
         if (unreadOnly)
             total = unread;
     } else if (key == QStringLiteral("favorites:flagged") || key.startsWith(QStringLiteral("local:"))) {
@@ -4093,6 +4211,78 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
                 q.bindValue(QStringLiteral(":folder"), tag);
             }
             readCountPair(q);
+
+            QSqlQuery qUnread(database);
+            if (tag == QStringLiteral("important")) {
+                qUnread.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder) LIKE '%/important'
+                          AND EXISTS (
+                              SELECT 1 FROM message_folder_map x
+                              WHERE x.account_email=mfm.account_email
+                                AND x.message_id=mfm.message_id
+                                AND x.unread=1
+                          )
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+            } else {
+                qUnread.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder)=:folder
+                          AND EXISTS (
+                              SELECT 1 FROM message_folder_map x
+                              WHERE x.account_email=mfm.account_email
+                                AND x.message_id=mfm.message_id
+                                AND x.unread=1
+                          )
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+                qUnread.bindValue(QStringLiteral(":folder"), tag);
+            }
+            if (qUnread.exec() && qUnread.next())
+                unread = qUnread.value(0).toInt();
+
+            QSqlQuery qTotal(database);
+            if (tag == QStringLiteral("important")) {
+                qTotal.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder) LIKE '%/important'
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+            } else {
+                qTotal.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder)=:folder
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+                qTotal.bindValue(QStringLiteral(":folder"), tag);
+            }
+            if (qTotal.exec() && qTotal.next())
+                total = qTotal.value(0).toInt();
         }
     } else {
         QString folder = rawFolderName.trimmed().toLower();
@@ -4128,6 +4318,70 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
                     )
                 )"));
                 readCountPair(q);
+
+                QSqlQuery qUnread(database);
+                qUnread.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder) IN (
+                            'inbox',
+                            '[gmail]/categories/primary',
+                            '[gmail]/categories/promotions',
+                            '[gmail]/categories/social',
+                            '[gmail]/categories/updates',
+                            '[gmail]/categories/forums',
+                            '[gmail]/categories/purchases',
+                            '[google mail]/categories/primary',
+                            '[google mail]/categories/promotions',
+                            '[google mail]/categories/social',
+                            '[google mail]/categories/updates',
+                            '[google mail]/categories/forums',
+                            '[google mail]/categories/purchases'
+                        )
+                          AND EXISTS (
+                              SELECT 1 FROM message_folder_map x
+                              WHERE x.account_email=mfm.account_email
+                                AND x.message_id=mfm.message_id
+                                AND x.unread=1
+                          )
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+                if (qUnread.exec() && qUnread.next())
+                    unread = qUnread.value(0).toInt();
+
+                QSqlQuery qTotal(database);
+                qTotal.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder) IN (
+                            'inbox',
+                            '[gmail]/categories/primary',
+                            '[gmail]/categories/promotions',
+                            '[gmail]/categories/social',
+                            '[gmail]/categories/updates',
+                            '[gmail]/categories/forums',
+                            '[gmail]/categories/purchases',
+                            '[google mail]/categories/primary',
+                            '[google mail]/categories/promotions',
+                            '[google mail]/categories/social',
+                            '[google mail]/categories/updates',
+                            '[google mail]/categories/forums',
+                            '[google mail]/categories/purchases'
+                        )
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+                if (qTotal.exec() && qTotal.next())
+                    total = qTotal.value(0).toInt();
             } else {
                 QSqlQuery q(database);
                 q.prepare(QStringLiteral(R"(
@@ -4138,6 +4392,44 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
                 )"));
                 q.bindValue(QStringLiteral(":folder"), folder);
                 readCountPair(q);
+
+                QSqlQuery qUnread(database);
+                qUnread.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder)=:folder
+                          AND EXISTS (
+                              SELECT 1 FROM message_folder_map x
+                              WHERE x.account_email=mfm.account_email
+                                AND x.message_id=mfm.message_id
+                                AND x.unread=1
+                          )
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+                qUnread.bindValue(QStringLiteral(":folder"), folder);
+                if (qUnread.exec() && qUnread.next())
+                    unread = qUnread.value(0).toInt();
+
+                QSqlQuery qTotal(database);
+                qTotal.prepare(QStringLiteral(R"(
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT mfm.account_email,
+                               COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key
+                        FROM message_folder_map mfm
+                        JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email
+                        WHERE lower(mfm.folder)=:folder
+                        GROUP BY mfm.account_email, thread_key
+                    )
+                )"));
+                qTotal.bindValue(QStringLiteral(":folder"), folder);
+                if (qTotal.exec() && qTotal.next())
+                    total = qTotal.value(0).toInt();
             }
         }
     }

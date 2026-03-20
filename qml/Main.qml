@@ -54,8 +54,12 @@ Kirigami.ApplicationWindow {
     property string syncStatus: ""
     property bool syncStatusIsError: false
     property bool refreshInProgress: false
+    property string _lastToastMessage: ""
+    property double _lastToastAtMs: 0
     property bool accountRefreshing: false
     property bool accountConnected: true
+    property bool accountThrottled: false
+    property string accountThrottleMessage: ""
     property var inlineStatusQueue: []
     property int inlineStatusSeq: 0
     property bool folderPaneVisible: true
@@ -843,6 +847,16 @@ Kirigami.ApplicationWindow {
             root.showInlineStatus(message, !ok)
         }
 
+        function onAccountThrottled(accountEmail, message) {
+            root.accountThrottled = true
+            root.accountThrottleMessage = (message || "").toString()
+        }
+
+        function onAccountUnthrottled(accountEmail) {
+            root.accountThrottled = false
+            root.accountThrottleMessage = ""
+        }
+
         function onSyncActivityChanged(active) {
             root.accountRefreshing = !!active
             root.refreshInProgress = !!active
@@ -1294,6 +1308,13 @@ Kirigami.ApplicationWindow {
     function showInlineStatus(message, isError) {
         const text = (message || "").toString().trim()
         if (!text.length) return
+
+        const now = Date.now()
+        const sig = (isError ? "E:" : "I:") + text
+        if (sig === root._lastToastMessage && (now - root._lastToastAtMs) < 2500)
+            return
+        root._lastToastMessage = sig
+        root._lastToastAtMs = now
 
         root.syncStatus = text
         root.syncStatusIsError = !!isError
@@ -2013,6 +2034,11 @@ Kirigami.ApplicationWindow {
                         rightActivityIcon: root.accountRefreshing ? "view-refresh" : ""
                         rightActivitySpinning: root.accountRefreshing
                         rightStatusIcon: root.accountConnected ? "network-connect" : "network-disconnect"
+                        rightThrottleIcon: root.accountThrottled ? "dialog-warning" : ""
+                        rightThrottleTooltip: root.accountThrottled
+                            ? i18n("Account is being throttled. Sync and body hydration are slowed by provider/pool limits. Wait a few minutes, reduce concurrent refreshes, or pause heavy background tasks.")
+                                + (root.accountThrottleMessage.length ? "\n\n" + root.accountThrottleMessage : "")
+                            : ""
                         onActivated: root.accountExpanded = !root.accountExpanded
                     }
 

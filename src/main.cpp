@@ -144,7 +144,8 @@ int main(int argc, char *argv[])
             app.processEvents();
         }
 
-        static constexpr qint64 kSplashMinMs = 10000;
+        // static constexpr qint64 kSplashMinMs = 10000;
+        static constexpr qint64 kSplashMinMs = 1000;
 
         const QPixmap baseSplash(QStringLiteral(":/data/assets/splash.png"));
         int frame = 0;
@@ -223,7 +224,6 @@ int main(int argc, char *argv[])
                 const int cx = framePix.width() / 2;
                 const int cy = 418;
                 const int radius = 24;
-                const int dotR = 6;
                 const int dotCount = 10;
 
                 for (int i = 0; i < dotCount; ++i) {
@@ -235,11 +235,22 @@ int main(int argc, char *argv[])
                     const int frameIdx = frame % dotCount;
                     const int age = (i - frameIdx + dotCount) % dotCount;
                     const int alpha = qBound(40, 255 - age * 20, 255);
-                    QColor c(QStringLiteral("#c58bff"));
-                    c.setAlpha(alpha);
-                    p.setBrush(c);
+
+                    // Egg spinner: tiny eggs orbiting
+                    QColor shell(QStringLiteral("#c58bff"));
+                    shell.setAlpha(alpha);
+                    QColor yolk(QStringLiteral("#ffd54a"));
+                    yolk.setAlpha(qBound(120, alpha, 255));
+
+                    p.save();
+                    p.translate(x, y);
+                    p.rotate((a * 180.0 / 3.14159265358979323846) + 90.0);
                     p.setPen(Qt::NoPen);
-                    p.drawEllipse(QPoint(x, y), dotR, dotR);
+                    p.setBrush(shell);
+                    p.drawEllipse(QRectF(-4.0, -6.0, 8.0, 12.0));
+                    p.setBrush(yolk);
+                    p.drawEllipse(QRectF(-2.0, 0.0, 4.0, 4.0));
+                    p.restore();
                 }
 
                 QFont f = p.font();

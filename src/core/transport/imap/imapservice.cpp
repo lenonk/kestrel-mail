@@ -211,7 +211,19 @@ ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVau
     : QObject(parent)
     , m_accounts(accounts)
     , m_store(store)
-    , m_vault(vault) { }
+    , m_vault(vault) {
+    Imap::Connection::setThrottleObserver([this](const QString &accountEmail, bool throttled, const QString &response) {
+        const QString msg = QStringLiteral("Account throttled by server: %1")
+                                .arg(response.simplified().left(240));
+        QMetaObject::invokeMethod(this, [this, accountEmail, throttled, msg]() {
+            if (m_destroying.load()) return;
+            if (throttled)
+                emit accountThrottled(accountEmail, msg);
+            else
+                emit accountUnthrottled(accountEmail);
+        }, Qt::QueuedConnection);
+    });
+}
 
 ImapService::~ImapService() { shutdown(); }
 
@@ -1195,6 +1207,15 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
 
     const QString folderNorm = folder.trimmed();
     if (folderNorm.isEmpty())
+        return;
+
+    const QString folderLower = folderNorm.toLower();
+    const bool isInboxish = (folderLower == QStringLiteral("inbox")
+                             || folderLower == QStringLiteral("[gmail]/inbox")
+                             || folderLower == QStringLiteral("[google mail]/inbox")
+                             || folderLower.endsWith(QStringLiteral("/inbox")));
+    // Product policy: background body hydration only for Inbox-class folders.
+    if (!isInboxish)
         return;
 
     const QString key = email.trimmed().toLower() + "|" + folderNorm.toLower();

@@ -206,3 +206,11 @@ target_link_libraries(kestrel-imap-lab
 )
 
 install(TARGETS kestrel-mail kestrel-imap-lab ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+
+install(FILES kestrel-mail.desktop
+    DESTINATION ${KDE_INSTALL_APPDIR}
+)
+
+install(FILES assets/kestrel-mail.png
+    DESTINATION ${KDE_INSTALL_DATADIR}/icons/hicolor/512x512/apps
+)
