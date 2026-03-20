@@ -127,6 +127,7 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
     }
 
     Imap::Connection *raw = g_poolSlots[slotIndex].conn.get();
+    raw->setLogOwner(owner);
     const QString slotEmail = g_poolSlots[slotIndex].email;
     const QString slotHost  = g_poolSlots[slotIndex].host;
     const int     slotPort  = g_poolSlots[slotIndex].port;
@@ -177,6 +178,7 @@ ImapService::getDedicatedHydrateConnection(const QString &email) {
         return {};
 
     Imap::Connection *raw = g_hydrateSlots[slotIndex].conn.get();
+    raw->setLogOwner(QStringLiteral("hydrate-dedicated"));
     const QString slotEmail = g_hydrateSlots[slotIndex].email;
     const QString slotHost  = g_hydrateSlots[slotIndex].host;
     const int     slotPort  = g_hydrateSlots[slotIndex].port;
@@ -217,10 +219,22 @@ ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVau
                                 .arg(response.simplified().left(240));
         QMetaObject::invokeMethod(this, [this, accountEmail, throttled, msg]() {
             if (m_destroying.load()) return;
-            if (throttled)
+
+            const QString key = accountEmail.trimmed().toLower();
+            const bool prev = m_accountThrottleState.value(key, false);
+            m_accountThrottleState.insert(key, throttled);
+
+            if (throttled) {
+                if (!prev)
+                    qInfo().noquote() << "[throttle]" << "account=" << accountEmail << "state=THROTTLED";
+                // Drop queued background folder sync work while throttled.
+                m_pendingFolderSync.clear();
                 emit accountThrottled(accountEmail, msg);
-            else
+            } else {
+                if (prev)
+                    qInfo().noquote() << "[throttle]" << "account=" << accountEmail << "state=UNTHROTTLED";
                 emit accountUnthrottled(accountEmail);
+            }
         }, Qt::QueuedConnection);
     });
 }
@@ -1039,6 +1053,12 @@ ImapService::startBackgroundWorker() {
                 if (out) *out = workerRefreshAccessToken(account, email);
             }, Qt::BlockingQueuedConnection);
 
+    connect(m_backgroundWorker, &Imap::BackgroundWorker::requestAccountThrottled,
+            this, [this](const QString &accountEmail, bool *out) {
+                if (!out) return;
+                *out = m_accountThrottleState.value(accountEmail.trimmed().toLower(), false);
+            }, Qt::BlockingQueuedConnection);
+
     connect(m_backgroundWorker, &Imap::BackgroundWorker::upsertFoldersRequested,
             this, [this](const QVariantList &folders) {
                 for (const QVariant &fv : folders) {
@@ -1217,6 +1237,17 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     // Product policy: background body hydration only for Inbox-class folders.
     if (!isInboxish)
         return;
+
+    if (m_accountThrottleState.value(email.trimmed().toLower(), false)) {
+        static QHash<QString, qint64> s_lastThrottleSkipLogMs;
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        const QString k = email.trimmed().toLower();
+        if (!s_lastThrottleSkipLogMs.contains(k) || (nowMs - s_lastThrottleSkipLogMs.value(k)) > 60000) {
+            s_lastThrottleSkipLogMs.insert(k, nowMs);
+            qInfo().noquote() << "[bg-hydrate]" << "account=" << email << "paused=true reason=throttled";
+        }
+        return;
+    }
 
     const QString key = email.trimmed().toLower() + "|" + folderNorm.toLower();
     {
@@ -1446,6 +1477,14 @@ ImapService::fetchFolderHeaders(const QString &email,
         QStringList result;
         QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
             if (m_store) result = m_store->folderUids(acctEmail, folder);
+        }, Qt::BlockingQueuedConnection);
+        return result;
+    };
+
+    ctx.getFolderMessageCount = [this](const QString &acctEmail, const QString &folder) -> qint64 {
+        qint64 result = -1;
+        QMetaObject::invokeMethod(this, [this, &result, acctEmail, folder]() {
+            if (m_store) result = m_store->folderMessageCount(acctEmail, folder);
         }, Qt::BlockingQueuedConnection);
         return result;
     };
@@ -2267,6 +2306,16 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
     const auto target = folderName.trimmed().isEmpty() ? "INBOX"_L1 : folderName.trimmed();
     const QString syncTargetKey = target.trimmed().toLower();
+
+    if (!announce) {
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        QMutexLocker lock(&m_lastFolderSyncStartMsMutex);
+        const qint64 lastMs = m_lastFolderSyncStartMs.value(syncTargetKey, 0);
+        static constexpr qint64 kMinIntervalMs = 30000; // coalesce noisy background re-syncs
+        if (lastMs > 0 && (nowMs - lastMs) < kMinIntervalMs)
+            return;
+        m_lastFolderSyncStartMs.insert(syncTargetKey, nowMs);
+    }
 
     {
         QMutexLocker lock(&m_activeFolderSyncTargetsMutex);
