@@ -259,6 +259,48 @@ Rectangle {
             applyOne(root.messageData);
         }
     }
+
+    function unapplyTagFromSelection(tagName) {
+        if (!appRoot || !appRoot.imapServiceObj || !appRoot.imapServiceObj.removeMessageFromFolder)
+            return;
+
+        const normalized = (tagName || "").toString().trim().toLowerCase();
+        if (!normalized.length)
+            return;
+
+        const available = (appRoot && appRoot.tagFolderItems) ? appRoot.tagFolderItems() : [];
+        let targetRaw = "";
+        for (let i = 0; i < available.length; ++i) {
+            const t = available[i] || {};
+            const n = (t.name || "").toString().trim().toLowerCase();
+            if (n === normalized) {
+                targetRaw = ((t.rawName || t.name || "").toString()).trim();
+                break;
+            }
+        }
+        if (!targetRaw.length)
+            targetRaw = tagName;
+
+        const seen = {};
+        function removeOne(row) {
+            if (!row) return;
+            const account = (row.accountEmail || "").toString();
+            const folder = (row.folder || "").toString();
+            const uid = (row.uid || "").toString();
+            if (!account.length || !folder.length || !uid.length) return;
+            const k = account + "|" + folder.toLowerCase() + "|" + uid;
+            if (seen[k]) return;
+            seen[k] = true;
+            appRoot.imapServiceObj.removeMessageFromFolder(account, folder, uid, targetRaw);
+        }
+
+        if (root.isThreadView && root.threadMessages && root.threadMessages.length > 0) {
+            for (let i = 0; i < root.threadMessages.length; ++i)
+                removeOne(root.threadMessages[i]);
+        } else {
+            removeOne(root.messageData);
+        }
+    }
     function bodyDataImageHashes(baseHtml) {
         const html = (baseHtml || "").toString();
         const out = [];
@@ -515,8 +557,14 @@ Rectangle {
         }
     }
     function removeTagByName(name) {
+        const tagName = (name || "").toString().trim();
+        if (!tagName.length)
+            return;
+
+        unapplyTagFromSelection(tagName);
+
         const tags = activeTags.filter(function (t) {
-            return t.name !== name;
+            return t.name !== tagName;
         });
         setCurrentTags(tags);
     }

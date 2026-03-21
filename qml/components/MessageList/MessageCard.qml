@@ -53,8 +53,10 @@ Rectangle {
     readonly property string selectedFolderNorm: (appRoot && appRoot.normalizedFolderFromKey) ? appRoot.normalizedFolderFromKey(appRoot.selectedFolderKey).toString().toLowerCase() : "" || ""
     readonly property bool showRecipient: selectedFolderNorm === "sent" || selectedFolderNorm === "draft" || selectedFolderNorm === "drafts" || selectedFolderNorm.indexOf("/sent") >= 0 || selectedFolderNorm.indexOf("/sent ") >= 0 || selectedFolderNorm.indexOf("/draft") >= 0
     property var systemPalette
+    property int tagsEpoch: 0
 
     function snippetTagItems() {
+        void tagsEpoch;
         if (!appRoot || !appRoot.dataStoreObj || !appRoot.dataStoreObj.fetchCandidatesForMessageKey)
             return [];
         const account = (modelAccountEmail || "").toString();
@@ -124,6 +126,13 @@ Rectangle {
     HoverHandler {
         id: rowHover
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+    }
+
+    Connections {
+        target: appRoot && appRoot.dataStoreObj ? appRoot.dataStoreObj : null
+        function onDataChanged() {
+            messageCard.tagsEpoch = messageCard.tagsEpoch + 1
+        }
     }
 
     MouseArea {

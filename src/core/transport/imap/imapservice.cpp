@@ -2260,6 +2260,75 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
 }
 
 void
+ImapService::removeMessageFromFolder(const QString &accountEmail, const QString &folder,
+                                     const QString &uid, const QString &targetFolder) {
+    if (m_destroying || accountEmail.isEmpty() || folder.isEmpty() || uid.isEmpty() || targetFolder.isEmpty())
+        return;
+
+    QString resolvedTarget = targetFolder.trimmed();
+    QString gmailLabelToRemove;
+    if (m_store) {
+        const QVariantList allFolders = m_store->folders();
+        const QString desired = resolvedTarget.toLower();
+
+        for (const QVariant &fv : allFolders) {
+            const QVariantMap f = fv.toMap();
+            const QString acc = f.value("accountEmail"_L1).toString().trimmed();
+            if (acc.compare(accountEmail, Qt::CaseInsensitive) != 0)
+                continue;
+
+            const QString name = f.value("name"_L1).toString().trimmed();
+            const QString special = f.value("specialUse"_L1).toString().trimmed().toLower();
+            const QString lname = name.toLower();
+
+            if (desired == QStringLiteral("important")) {
+                if (special == QStringLiteral("important") || lname.endsWith(QStringLiteral("/important"))) {
+                    resolvedTarget = name;
+                    gmailLabelToRemove = QStringLiteral("\\Important");
+                    break;
+                }
+            } else if (lname == desired) {
+                resolvedTarget = name;
+                break;
+            }
+        }
+    }
+
+    if (m_store)
+        m_store->deleteSingleFolderEdge(accountEmail, resolvedTarget, uid);
+
+    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, gmailLabelToRemove]() {
+        if (m_destroying.load())
+            return;
+
+        auto cxn = getPooledConnection(accountEmail, "remove-folder-membership");
+        if (!cxn)
+            return;
+
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(folder);
+            if (!ok)
+                return;
+        }
+
+        QString resp;
+        if (!gmailLabelToRemove.isEmpty()) {
+            resp = cxn->execute(QStringLiteral("UID STORE %1 -X-GM-LABELS (%2)").arg(uid, gmailLabelToRemove));
+        } else {
+            resp = cxn->execute(QStringLiteral("UID STORE %1 -FLAGS (\\Flagged)").arg(uid));
+            Q_UNUSED(resp);
+            // Generic IMAP has no portable "remove from arbitrary folder" outside MOVE/COPY semantics.
+            // For non-Gmail custom folders we keep local edge removal optimistic and refresh target view.
+        }
+
+        QMetaObject::invokeMethod(this, [this, resolvedTarget]() {
+            if (!m_destroying.load())
+                syncFolder(resolvedTarget, false);
+        }, Qt::QueuedConnection);
+    });
+}
+
+void
 ImapService::syncFolder(const QString &folderName, bool announce) {
     if (m_destroying)
         return;

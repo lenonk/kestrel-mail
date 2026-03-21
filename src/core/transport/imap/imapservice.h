@@ -42,6 +42,8 @@ public:
                                      const QString &uid);
     Q_INVOKABLE void addMessageToFolder(const QString &accountEmail, const QString &folder,
                                         const QString &uid, const QString &targetFolder);
+    Q_INVOKABLE void removeMessageFromFolder(const QString &accountEmail, const QString &folder,
+                                             const QString &uid, const QString &targetFolder);
 
     Q_INVOKABLE void initialize();
     Q_INVOKABLE void shutdown();
