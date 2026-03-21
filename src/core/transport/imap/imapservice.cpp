@@ -1220,8 +1220,13 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
 
     runBackgroundTask([this, email, folderNorm, key, limit]() {
         int noProgressPasses = 0;
+        int processedThisRun = 0;
 
-        while (!m_destroying.load()) {
+        bool chunkOk = false;
+        const int configuredChunk = qEnvironmentVariableIntValue("KESTREL_BG_HYDRATE_PER_LOOP", &chunkOk);
+        const int maxPerLoop = chunkOk ? qBound(25, configuredChunk, 50) : 40;
+
+        while (!m_destroying.load() && processedThisRun < maxPerLoop) {
             QStringList candidates;
             if (m_store)
                 candidates = m_store->bodyFetchCandidates(email, folderNorm, limit);
@@ -1231,7 +1236,7 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
 
             int hydratedThisPass = 0;
             for (const QString &uid : candidates) {
-                if (m_destroying.load())
+                if (m_destroying.load() || processedThisRun >= maxPerLoop)
                     break;
 
                 const QString inFlightKey = email.trimmed() + "|"_L1 + folderNorm.toLower() + "|"_L1 + uid.trimmed();
@@ -1257,6 +1262,8 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
                         break;
                     QThread::msleep(120);
                 }
+
+                ++processedThisRun;
 
                 if (m_store) {
                     const QVariantMap row = m_store->messageByKey(email, folderNorm, uid);
@@ -1284,6 +1291,13 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
                 noProgressPasses = 0;
                 QThread::msleep(1200);
             }
+        }
+
+        if (processedThisRun >= maxPerLoop) {
+            qInfo().noquote() << "[bg-hydrate]" << "account=" << email
+                              << "folder=" << folderNorm
+                              << "processed=" << processedThisRun
+                              << "maxPerLoop=" << maxPerLoop;
         }
 
         QMutexLocker lock(&m_bgHydrateMutex);
