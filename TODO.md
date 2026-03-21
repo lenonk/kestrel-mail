@@ -26,10 +26,10 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] Expand sync/state tables for operational durability.
 - [ ] Add richer parity suite by folder class and message age bands.
 - [ ] Continue UX feature migration only after sync correctness is consistently green.
-- [ ] Implement full CONDSTORE/QRESYNC incremental sync (not just ENABLE + STATUS snapshots):
-  - use `CHANGEDSINCE`/modseq-aware fetch paths,
-  - process QRESYNC/VANISHED-style deletions where supported,
-  - avoid full `UID SEARCH ALL` passes when no authoritative change is detected.
+- [x] Implement full CONDSTORE/QRESYNC incremental sync:
+  - `CHANGEDSINCE`/modseq-aware fetch paths implemented,
+  - QRESYNC/VANISHED-style deletion handling implemented where supported,
+  - full `UID SEARCH ALL` avoided when authoritative no-change is detected.
 - [ ] Reduce no-op sync churn when nothing changed:
   - if `UIDNEXT/HIGHESTMODSEQ/MESSAGES` unchanged, short-circuit folder sync early,
   - avoid repeated per-category searches in no-change windows,
