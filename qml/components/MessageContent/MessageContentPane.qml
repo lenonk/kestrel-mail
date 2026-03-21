@@ -715,6 +715,21 @@ Rectangle {
         return first ? first.charAt(0).toUpperCase() + first.slice(1) : "";
     }
 
+    function textColorForBackground(bg) {
+        // WCAG luminance formula (more accurate than naive RGB average)
+        function channel(c) {
+            return (c <= 0.03928) ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+        }
+
+        var r = channel(bg.r)
+        var g = channel(bg.g)
+        var b = channel(bg.b)
+
+        var luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        return luminance > 0.5 ? "black" : "white"
+    }
+
     color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
 
     onHasUsableBodyHtmlChanged: {
@@ -878,20 +893,23 @@ Rectangle {
 
                 flat: true
                 implicitHeight: 28
-                implicitWidth: Math.min(150, Math.max(64, contentItem.implicitWidth + leftPadding + rightPadding + 10))
+                implicitWidth: Math.min(Math.max(52, contentItem.implicitWidth + leftPadding + rightPadding + 8), 150)
                 leftPadding: 10
                 rightPadding: 10
                 text: root.folderName + "  ✕"
 
                 background: Rectangle {
-                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.35)
+                    border.color: Qt.darker(Kirigami.Theme.disabledTextColor, 1.08)
                     border.width: 1
-                    color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.1)
+                    color: Kirigami.Theme.disabledTextColor
                     radius: height / 2
                 }
+
                 contentItem: QQC2.Label {
+                    color: Kirigami.Theme.textColor
                     elide: Text.ElideRight
                     horizontalAlignment: Text.AlignHCenter
+                    maximumLineCount: 1
                     text: parent.text
                     verticalAlignment: Text.AlignVCenter
                 }
