@@ -616,9 +616,6 @@ Rectangle {
             out.push({ name: n, color: c, textColor: tc });
         }
 
-        // Show current folder as a regular chip (instead of a special deleteButton chip).
-        pushTag(root.folderName, Kirigami.Theme.disabledTextColor, Kirigami.Theme.textColor);
-
         const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
         for (let i = 0; i < candidates.length; ++i) {
             const c = candidates[i] || {};
@@ -637,6 +634,9 @@ Rectangle {
             if (!t) continue;
             pushTag(t.name || f, t.accentColor || "#D6E8FF");
         }
+
+        // Current folder chip should always render last.
+        pushTag(root.folderName, Kirigami.Theme.disabledTextColor, Kirigami.Theme.textColor);
 
         setCurrentTags(out);
     }
