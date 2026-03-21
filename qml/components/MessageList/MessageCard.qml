@@ -54,6 +54,65 @@ Rectangle {
     readonly property bool showRecipient: selectedFolderNorm === "sent" || selectedFolderNorm === "draft" || selectedFolderNorm === "drafts" || selectedFolderNorm.indexOf("/sent") >= 0 || selectedFolderNorm.indexOf("/sent ") >= 0 || selectedFolderNorm.indexOf("/draft") >= 0
     property var systemPalette
 
+    function snippetTagItems() {
+        if (!appRoot || !appRoot.dataStoreObj || !appRoot.dataStoreObj.fetchCandidatesForMessageKey)
+            return [];
+        const account = (modelAccountEmail || "").toString();
+        const folder = (modelFolder || "").toString();
+        const uid = (modelUid || "").toString();
+        if (!account.length || !folder.length || !uid.length)
+            return [];
+
+        const available = (appRoot.tagFolderItems) ? appRoot.tagFolderItems() : [];
+        const byRaw = {};
+        for (let i = 0; i < available.length; ++i) {
+            const t = available[i] || {};
+            const raw = ((t.rawName || t.name || "").toString()).trim().toLowerCase();
+            if (!raw.length)
+                continue;
+            byRaw[raw] = t;
+        }
+
+        const folderLower = folder.trim().toLowerCase();
+        const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
+        const out = [];
+        const seen = {};
+
+        for (let i = 0; i < candidates.length; ++i) {
+            const c = candidates[i] || {};
+            const f = (c.folder || "").toString().trim();
+            if (!f.length)
+                continue;
+
+            const lf = f.toLowerCase();
+            if (lf === folderLower)
+                continue;
+            if (lf === "important" || lf.endsWith("/important"))
+                continue;
+
+            const t = byRaw[lf];
+            if (!t)
+                continue;
+
+            const name = (t.name || f || "").toString().trim();
+            if (!name.length)
+                continue;
+            const key = name.toLowerCase();
+            if (seen[key])
+                continue;
+            seen[key] = true;
+
+            const accent = (t.accentColor || "#D6E8FF").toString();
+            out.push({
+                name: name,
+                color: accent,
+                textColor: "#1E3C5A"
+            });
+        }
+
+        return out;
+    }
+
     border.color: "transparent"
     clip: true
     color: isChecked ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.35) : "transparent") : (appRoot && appRoot.selectedMessageKey === messageKeyValue) ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.18) : "transparent") : "transparent"
@@ -220,6 +279,31 @@ Rectangle {
                     source: "qrc:/qml/important.svg"
                     sourceSize: Qt.size(20, 20)
                     visible: !!modelIsImportant
+                }
+
+                Repeater {
+                    model: messageCard.snippetTagItems()
+                    delegate: Rectangle {
+                        required property var modelData
+                        Layout.alignment: Qt.AlignVCenter
+                        implicitHeight: 18
+                        implicitWidth: Math.min(140, tagText.implicitWidth + 12)
+                        radius: Math.round(implicitHeight / 2)
+                        color: (modelData && modelData.color) ? modelData.color : "#D6E8FF"
+                        opacity: 0.92
+
+                        QQC2.Label {
+                            id: tagText
+                            anchors.centerIn: parent
+                            color: (modelData && modelData.textColor) ? modelData.textColor : "#1E3C5A"
+                            elide: Text.ElideRight
+                            font.pixelSize: 10
+                            maximumLineCount: 1
+                            text: (modelData && modelData.name) ? modelData.name : ""
+                            wrapMode: Text.NoWrap
+                            width: parent.width - 10
+                        }
+                    }
                 }
 
                 QQC2.Label {
