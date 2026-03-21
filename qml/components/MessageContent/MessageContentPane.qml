@@ -59,12 +59,16 @@ Rectangle {
                 vendor
             });
     }
+
     readonly property var activeTags: {
         const key = appRoot.selectedMessageKey || "";
+
         if (!key.length)
             return [];
+
         return tagMap[key] ? tagMap[key] : [];
     }
+
     required property var appRoot
     property var attachmentDownloading: ({})
     property var attachmentItems: []
@@ -568,6 +572,7 @@ Rectangle {
         });
         setCurrentTags(tags);
     }
+
     function setCurrentTags(tags) {
         const key = appRoot.selectedMessageKey || "";
         if (!key.length)
@@ -600,15 +605,19 @@ Rectangle {
 
         const out = [];
         const seen = {};
-        function pushTag(name, accent) {
+        function pushTag(name, accent, textColorOverride) {
             const n = (name || "").toString().trim();
             if (!n.length) return;
             const key = n.toLowerCase();
             if (seen[key]) return;
             seen[key] = true;
             const c = (accent || "#D6E8FF").toString();
-            out.push({ name: n, color: c, textColor: root.textColorForAccent(c) });
+            const tc = (textColorOverride && textColorOverride.toString().length > 0) ? textColorOverride.toString() : root.textColorForAccent(c);
+            out.push({ name: n, color: c, textColor: tc });
         }
+
+        // Show current folder as a regular chip (instead of a special deleteButton chip).
+        pushTag(root.folderName, Kirigami.Theme.disabledTextColor, Kirigami.Theme.textColor);
 
         const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
         for (let i = 0; i < candidates.length; ++i) {
@@ -857,6 +866,7 @@ Rectangle {
                 font.pixelSize: 16
                 text: root.messageSubject
             }
+
             Repeater {
                 model: root.activeTags
 
@@ -876,6 +886,7 @@ Rectangle {
                         color: modelData.color
                         radius: height / 2
                     }
+
                     contentItem: QQC2.Label {
                         color: modelData.textColor
                         elide: Text.ElideRight
@@ -888,42 +899,7 @@ Rectangle {
                     onClicked: root.removeTagByName(modelData.name)
                 }
             }
-            QQC2.Button {
-                id: deleteButton
 
-                flat: true
-                implicitHeight: 28
-                implicitWidth: Math.min(Math.max(52, contentItem.implicitWidth + leftPadding + rightPadding + 8), 150)
-                leftPadding: 10
-                rightPadding: 10
-                text: root.folderName + "  ✕"
-
-                background: Rectangle {
-                    border.color: Qt.darker(Kirigami.Theme.disabledTextColor, 1.08)
-                    border.width: 1
-                    color: Kirigami.Theme.disabledTextColor
-                    radius: height / 2
-                }
-
-                contentItem: QQC2.Label {
-                    color: Kirigami.Theme.textColor
-                    elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignHCenter
-                    maximumLineCount: 1
-                    text: parent.text
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: appRoot.deleteSelectedMessages()
-
-                TextToolTip {
-                    parent: QQC2.Overlay.overlay
-                    preferredX: deleteButton.mapToItem(QQC2.Overlay.overlay, Math.round((deleteButton.width - implicitWidth) / 2), 0).x
-                    preferredY: deleteButton.mapToItem(QQC2.Overlay.overlay, Math.round((deleteButton.height - implicitHeight) / 2), 0).y - implicitHeight - 6
-                    toolTipText: i18n("Delete this message")
-                    visible: deleteButton.hovered
-                }
-            }
             QQC2.ToolButton {
                 id: tagMenuButton
 
@@ -1437,6 +1413,7 @@ Rectangle {
 
         target: appRoot ? appRoot.imapServiceObj : null
     }
+
     QQC2.Dialog {
         id: customTagDialog
 
