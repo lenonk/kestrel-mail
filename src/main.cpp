@@ -223,8 +223,8 @@ QSplashScreen *splash = nullptr;
 
                 const int cx = framePix.width() / 2;
                 const int cy = 418;
-                const int radius = 24;
-                const int dotCount = 10;
+                const int radius = 23;
+                const int dotCount = 9;
 
                 for (int i = 0; i < dotCount; ++i) {
                     constexpr double kTwoPi = 6.28318530717958647692;
@@ -247,9 +247,9 @@ QSplashScreen *splash = nullptr;
                     p.rotate((a * 180.0 / 3.14159265358979323846) + 90.0);
                     p.setPen(Qt::NoPen);
                     p.setBrush(shell);
-                    p.drawEllipse(QRectF(-4.0, -6.0, 8.0, 12.0));
+                    p.drawEllipse(QRectF(-5.0, -7.5, 10.0, 15.0));
                     p.setBrush(yolk);
-                    p.drawEllipse(QRectF(-2.0, 0.0, 4.0, 4.0));
+                    p.drawEllipse(QRectF(-2.5, 0.0, 5.0, 5.0));
                     p.restore();
                 }
 
