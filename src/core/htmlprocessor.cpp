@@ -357,6 +357,16 @@ QString HtmlProcessor::neutralizeTrackingPixels(const QString &html,
     });
 }
 
+static const QLatin1StringView kScrollbarCss(
+    "<style data-kestrel-scrollbar='1'>"
+    "html,body{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.35) transparent;}"
+    "::-webkit-scrollbar{width:5px;height:5px;}"
+    "::-webkit-scrollbar-track{background:transparent;}"
+    "::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.35);border-radius:999px;}"
+    "::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.5);}"
+    "::-webkit-scrollbar-corner{background:transparent;}"
+    "</style>");
+
 QString HtmlProcessor::prepare(const QString &html, bool darkMode) const
 {
     static const QLatin1StringView baselineHead(
@@ -370,7 +380,7 @@ QString HtmlProcessor::prepare(const QString &html, bool darkMode) const
     // Inject baseline head (must come before dark mode injection so dark !important wins).
     const qsizetype hp = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);
     if (hp >= 0)
-        result.insert(hp + 6, baselineHead);
+        result.insert(hp + 6, QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss));
 
     if (!darkMode)
         return result;
@@ -411,7 +421,7 @@ QString HtmlProcessor::prepareThread(const QString &html, bool darkMode) const
         "html,body{background-color:white;margin:8px 12px 0 12px;}"
         "</style>");
 
-    const QString headInsert = QLatin1StringView(baselineHead) + QLatin1StringView(quoteCss);
+    const QString headInsert = QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss) + QLatin1StringView(quoteCss);
 
     QString result = html;
     const qsizetype hp = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);

@@ -2266,7 +2266,6 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
         return;
 
     QString resolvedTarget = targetFolder.trimmed();
-    QString gmailLabelToRemove;
     if (m_store) {
         const QVariantList allFolders = m_store->folders();
         const QString desired = resolvedTarget.toLower();
@@ -2284,7 +2283,6 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
             if (desired == QStringLiteral("important")) {
                 if (special == QStringLiteral("important") || lname.endsWith(QStringLiteral("/important"))) {
                     resolvedTarget = name;
-                    gmailLabelToRemove = QStringLiteral("\\Important");
                     break;
                 }
             } else if (lname == desired) {
@@ -2294,10 +2292,28 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
         }
     }
 
-    if (m_store)
-        m_store->deleteSingleFolderEdge(accountEmail, resolvedTarget, uid);
+    // Look up message_id and the message's UID in the target folder before the local deletion.
+    // Gmail labels are IMAP folders — removing the label means selecting the label folder,
+    // marking that UID \Deleted, and expunging. This mirrors what addMessageToFolder does
+    // with UID COPY and requires no Gmail-specific extensions.
+    qint64 messageId = -1;
+    QString targetUid;
+    if (m_store) {
+        const QVariantMap srcEdge = m_store->folderMapRowForEdge(accountEmail, folder, uid);
+        messageId = srcEdge.value("messageId"_L1, -1LL).toLongLong();
+        if (messageId > 0)
+            targetUid = m_store->folderUidForMessageId(accountEmail, resolvedTarget, messageId);
+    }
 
-    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, gmailLabelToRemove]() {
+    // Optimistic local removal.
+    if (m_store) {
+        if (messageId > 0)
+            m_store->deleteFolderEdgesForMessage(accountEmail, resolvedTarget, messageId);
+        else
+            m_store->deleteSingleFolderEdge(accountEmail, resolvedTarget, uid);
+    }
+
+    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, targetUid]() {
         if (m_destroying.load())
             return;
 
@@ -2305,21 +2321,18 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
         if (!cxn)
             return;
 
-        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(folder);
-            if (!ok)
-                return;
+        if (!targetUid.isEmpty()) {
+            // Standard IMAP folder removal: select the label folder, mark deleted, expunge.
+            // On Gmail this removes the label without permanently deleting the message
+            // (it remains in [Gmail]/All Mail and any other labeled folders).
+            const auto [ok, _] = cxn->select(resolvedTarget);
+            if (ok) {
+                (void)cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Deleted)").arg(targetUid));
+                (void)cxn->execute(QStringLiteral("UID EXPUNGE %1").arg(targetUid));
+            }
         }
-
-        QString resp;
-        if (!gmailLabelToRemove.isEmpty()) {
-            resp = cxn->execute(QStringLiteral("UID STORE %1 -X-GM-LABELS (%2)").arg(uid, gmailLabelToRemove));
-        } else {
-            resp = cxn->execute(QStringLiteral("UID STORE %1 -FLAGS (\\Flagged)").arg(uid));
-            Q_UNUSED(resp);
-            // Generic IMAP has no portable "remove from arbitrary folder" outside MOVE/COPY semantics.
-            // For non-Gmail custom folders we keep local edge removal optimistic and refresh target view.
-        }
+        // If we have no targetUid the label folder hasn't been synced yet; the optimistic
+        // local deletion stands and the next folder sync will reconcile server state.
 
         QMetaObject::invokeMethod(this, [this, resolvedTarget]() {
             if (!m_destroying.load())

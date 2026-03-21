@@ -195,6 +195,31 @@ struct IngestState {
     int missingAddressHeadersCount = 0;
 };
 
+// Populate categoryHints via X-GM-RAW "category:..." searches for UIDs in [minUid, maxUid].
+// Used by both executeFull and executeIncremental as a reliable fallback when X-GM-LABELS
+// in the FETCH response does not include the category (common on initial bulk fetches).
+void
+buildCategoryHints(SyncContext &ctx, IngestState &state, qint64 minUid, qint64 maxUid) {
+    if (!ctx.isGmailInbox()) return;
+    static const QStringList kCategories = {
+        "primary"_L1, "promotions"_L1, "social"_L1,
+        "updates"_L1, "forums"_L1, "purchases"_L1
+    };
+    const QString uidRange = QStringLiteral("%1:%2").arg(minUid).arg(maxUid);
+    for (const auto &cat : kCategories) {
+        const auto hCmd = QStringLiteral("UID SEARCH UID %1 X-GM-RAW \"category:%2\"")
+                              .arg(uidRange).arg(cat);
+        const auto hResp = ctx.cxn->execute(hCmd);
+        const auto mappedFolder = categoryToFolder(cat);
+        if (mappedFolder.isEmpty()) continue;
+        for (const auto &u : parseSearchIds(hResp)) {
+            bool ok = false;
+            const qint32 v = u.toInt(&ok);
+            if (ok && v > 0) state.categoryHints[v].insert(mappedFolder);
+        }
+    }
+}
+
 // ── Message ingestion ─────────────────────────────────────────────────────────
 
 void
@@ -705,29 +730,11 @@ executeIncremental(SyncContext &ctx) {
         const auto sResp = ctx.cxn->execute(sCmd);
         newUids = parseSearchIds(sResp);
 
-        // For Gmail INBOX: also build per-category hints via X-GM-RAW searches.
-        // There is a race between message delivery and Gmail applying the category label
-        // to X-GM-LABELS, so a freshly delivered message's FETCH response may not yet
-        // include the category.  The X-GM-RAW "category:..." query is more reliable for
-        // newly arrived messages and fills the hints map used as a fallback in fetchUidBatch.
-        if (ctx.isGmailInbox() && !newUids.isEmpty()) {
-            static const QStringList inboxCategories = {
-                "primary"_L1, "promotions"_L1, "social"_L1,
-                "updates"_L1, "forums"_L1, "purchases"_L1
-            };
-            for (const auto &cat : inboxCategories) {
-                const auto hCmd = QStringLiteral("UID SEARCH UID %1:* X-GM-RAW \"category:%2\"")
-                                      .arg(ctx.minUidExclusive + 1).arg(cat);
-                const auto hResp = ctx.cxn->execute(hCmd);
-                const auto mappedFolder = categoryToFolder(cat);
-                if (mappedFolder.isEmpty()) continue;
-                for (const auto &u : parseSearchIds(hResp)) {
-                    bool ok = false;
-                    const qint32 v = u.toInt(&ok);
-                    if (ok && v > 0) state.categoryHints[v].insert(mappedFolder);
-                }
-            }
-        }
+        // For Gmail INBOX: build per-category hints via X-GM-RAW searches as a reliable
+        // fallback for when X-GM-LABELS in the FETCH response doesn't include the category
+        // (common race condition with newly delivered messages).
+        if (!newUids.isEmpty())
+            buildCategoryHints(ctx, state, ctx.minUidExclusive + 1, INT_MAX);
     }
 
     // Filter: only UIDs strictly greater than minUidExclusive.
@@ -913,8 +920,12 @@ executeFull(SyncContext &ctx) {
         if (ok && v > 0 && !knownFolderUids.contains(v)) pendingUidSet.insert(v);
     }
 
-    // Category routing uses X-GM-LABELS from the FETCH response via extractGmailCategoryFolder
-    // in ingestMessage — no separate per-category searches needed.
+    // Build per-category hints via X-GM-RAW searches before fetching messages.
+    // X-GM-LABELS in the FETCH response is unreliable for bulk/initial fetches —
+    // the X-GM-RAW "category:..." search is authoritative and fills the fallback
+    // hint map used in fetchUidBatch when extractGmailCategoryFolder returns empty.
+    if (!pendingUidSet.isEmpty())
+        buildCategoryHints(ctx, state, 1, INT_MAX);
 
     searchAllTimer.restart();
 

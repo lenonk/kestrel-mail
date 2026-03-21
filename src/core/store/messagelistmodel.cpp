@@ -280,9 +280,6 @@ void MessageListModel::refresh()
         if (oldHasMore != m_hasMore) emit pagingChanged();
 
         refreshView();
-        qInfo("[timing] t=%lld refresh apply (buildRows+applyRows) in %lldms rows=%d",
-              (long long)QDateTime::currentMSecsSinceEpoch(),
-              (long long)t.elapsed(), (int)m_loadedSourceRows.size());
         m_isLoadingPage = false;
 
         if (m_pendingRefresh) {
@@ -297,9 +294,6 @@ void MessageListModel::refresh()
             bool hasMore = false;
             auto rows = store->messagesForSelection(
                 folderKey, selectedCategories, selectedCategoryIndex, preserveLimit, 0, &hasMore);
-            qInfo("[timing] t=%lld messagesForSelection in %lldms key=%s rows=%d",
-                  (long long)QDateTime::currentMSecsSinceEpoch(),
-                  (long long)t.elapsed(), qPrintable(folderKey), (int)rows.size());
             return {std::move(rows), hasMore};
         }));
 }
@@ -671,7 +665,15 @@ QList<int> MessageListModel::changedRoles(const Row &oldRow, const Row &newRow) 
     if (o.value(QStringLiteral("subject")) != n.value(QStringLiteral("subject"))) roleSet.insert(SubjectRole);
     if (o.value(QStringLiteral("receivedAt")) != n.value(QStringLiteral("receivedAt"))) roleSet.insert(ReceivedAtRole);
     if (o.value(QStringLiteral("snippet")) != n.value(QStringLiteral("snippet"))) roleSet.insert(SnippetRole);
-    if (o.value(QStringLiteral("unread")) != n.value(QStringLiteral("unread"))) roleSet.insert(UnreadRole);
+    if (o.value(QStringLiteral("unread"))        != n.value(QStringLiteral("unread")))        roleSet.insert(UnreadRole);
+    if (o.value(QStringLiteral("recipient"))     != n.value(QStringLiteral("recipient")))     roleSet.insert(RecipientRole);
+    if (o.value(QStringLiteral("avatarDomain"))  != n.value(QStringLiteral("avatarDomain")))  roleSet.insert(AvatarDomainRole);
+    if (o.value(QStringLiteral("avatarUrl"))     != n.value(QStringLiteral("avatarUrl")))     roleSet.insert(AvatarUrlRole);
+    if (o.value(QStringLiteral("avatarSource"))  != n.value(QStringLiteral("avatarSource")))  roleSet.insert(AvatarSourceRole);
+    if (o.value(QStringLiteral("hasAttachments"))   != n.value(QStringLiteral("hasAttachments")))   roleSet.insert(HasAttachmentsRole);
+    if (o.value(QStringLiteral("hasTrackingPixel")) != n.value(QStringLiteral("hasTrackingPixel"))) roleSet.insert(HasTrackingPixelRole);
+    if (o.value(QStringLiteral("threadCount"))   != n.value(QStringLiteral("threadCount")))   roleSet.insert(ThreadCountRole);
+    if (o.value(QStringLiteral("isImportant"))   != n.value(QStringLiteral("isImportant")))   roleSet.insert(IsImportantRole);
 
     QList<int> roles = roleSet.values();
     std::sort(roles.begin(), roles.end());

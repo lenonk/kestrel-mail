@@ -54,16 +54,17 @@ Rectangle {
     readonly property bool showRecipient: selectedFolderNorm === "sent" || selectedFolderNorm === "draft" || selectedFolderNorm === "drafts" || selectedFolderNorm.indexOf("/sent") >= 0 || selectedFolderNorm.indexOf("/sent ") >= 0 || selectedFolderNorm.indexOf("/draft") >= 0
     property var systemPalette
     property int tagsEpoch: 0
+    readonly property var snippetInfo: snippetTagItems()
 
     function snippetTagItems() {
         void tagsEpoch;
         if (!appRoot || !appRoot.dataStoreObj || !appRoot.dataStoreObj.fetchCandidatesForMessageKey)
-            return [];
+            return { tags: [], isImportant: false };
         const account = (modelAccountEmail || "").toString();
         const folder = (modelFolder || "").toString();
         const uid = (modelUid || "").toString();
         if (!account.length || !folder.length || !uid.length)
-            return [];
+            return { tags: [], isImportant: false };
 
         const available = (appRoot.tagFolderItems) ? appRoot.tagFolderItems() : [];
         const byRaw = {};
@@ -79,6 +80,7 @@ Rectangle {
         const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
         const out = [];
         const seen = {};
+        let liveImportant = false;
 
         for (let i = 0; i < candidates.length; ++i) {
             const c = candidates[i] || {};
@@ -89,8 +91,10 @@ Rectangle {
             const lf = f.toLowerCase();
             if (lf === folderLower)
                 continue;
-            if (lf === "important" || lf.endsWith("/important"))
+            if (lf === "important" || lf.endsWith("/important")) {
+                liveImportant = true;
                 continue;
+            }
 
             const t = byRaw[lf];
             if (!t)
@@ -112,7 +116,7 @@ Rectangle {
             });
         }
 
-        return out;
+        return { tags: out, isImportant: liveImportant };
     }
 
     border.color: "transparent"
@@ -287,11 +291,11 @@ Rectangle {
                     fillMode: Image.PreserveAspectFit
                     source: "qrc:/qml/important.svg"
                     sourceSize: Qt.size(20, 20)
-                    visible: !!modelIsImportant
+                    visible: !!snippetInfo.isImportant
                 }
 
                 Repeater {
-                    model: messageCard.snippetTagItems()
+                    model: messageCard.snippetInfo.tags
                     delegate: Rectangle {
                         required property var modelData
                         Layout.alignment: Qt.AlignVCenter
@@ -322,7 +326,7 @@ Rectangle {
                     font.pixelSize: 12
                     opacity: 0.72
                     text: modelSnippet || ""
-                    visible: text.length > 0 || !!modelIsImportant
+                    visible: text.length > 0 || !!snippetInfo.isImportant
                     wrapMode: Text.NoWrap
                 }
             }

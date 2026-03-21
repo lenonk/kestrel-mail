@@ -491,12 +491,19 @@ static QString flattenHtmlToText(const QString &html)
     s.replace(kTagRe, " "_L1);
 
     // Decode common HTML entities
-    s.replace("&nbsp;"_L1,  " "_L1,  Qt::CaseInsensitive);
-    s.replace("&amp;"_L1,   "&"_L1,  Qt::CaseInsensitive);
-    s.replace("&lt;"_L1,    "<"_L1,  Qt::CaseInsensitive);
-    s.replace("&gt;"_L1,    ">"_L1,  Qt::CaseInsensitive);
-    s.replace("&#39;"_L1,   "'"_L1,  Qt::CaseInsensitive);
-    s.replace("&quot;"_L1,  "\""_L1, Qt::CaseInsensitive);
+    s.replace("&nbsp;"_L1,  " "_L1,        Qt::CaseInsensitive);
+    s.replace("&amp;"_L1,   "&"_L1,        Qt::CaseInsensitive);
+    s.replace("&lt;"_L1,    "<"_L1,        Qt::CaseInsensitive);
+    s.replace("&gt;"_L1,    ">"_L1,        Qt::CaseInsensitive);
+    s.replace("&#39;"_L1,   "'"_L1,        Qt::CaseInsensitive);
+    s.replace("&quot;"_L1,  "\""_L1,       Qt::CaseInsensitive);
+    s.replace("&ndash;"_L1, u"\u2013"_s,   Qt::CaseInsensitive);
+    s.replace("&mdash;"_L1, u"\u2014"_s,   Qt::CaseInsensitive);
+    s.replace("&hellip;"_L1,u"\u2026"_s,   Qt::CaseInsensitive);
+    s.replace("&rsquo;"_L1, u"\u2019"_s,   Qt::CaseInsensitive);
+    s.replace("&lsquo;"_L1, u"\u2018"_s,   Qt::CaseInsensitive);
+    s.replace("&rdquo;"_L1, u"\u201D"_s,   Qt::CaseInsensitive);
+    s.replace("&ldquo;"_L1, u"\u201C"_s,   Qt::CaseInsensitive);
 
     static const QRegularExpression kWsRe(QStringLiteral("\\s+"));
     s.replace(kWsRe, " "_L1);

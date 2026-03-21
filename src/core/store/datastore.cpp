@@ -46,7 +46,18 @@ static const QRegularExpression kReHtmlish(QStringLiteral("<html|<body|<div|<tab
                                            QRegularExpression::CaseInsensitiveOption);
 static const QRegularExpression kReMarkdownLinks(QStringLiteral("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"),
                                                  QRegularExpression::CaseInsensitiveOption);
-}
+// Strip markdown link syntax [text](url) → replacement captures just the link text.
+// Handles [text](url), [text]( ) and [text]( (partial — closing paren is optional).
+static const QRegularExpression kReSnippetMarkdownLink(
+    QStringLiteral(R"(\[([^\[\]\n]{1,160})\]\([^\)\n]{0,300}\)?)"));
+// Runs of 4+ repeated separator characters, or space-separated patterns like - - - - -.
+static const QRegularExpression kReSnippetSeparatorRun(
+    QStringLiteral(R"([-=_*|#~<>]{4,}|(?:[-=_*|#~<>] ){3,}[-=_*|#~<>]?)"));
+// Leftover empty or whitespace-only parentheses after URL/link stripping.
+static const QRegularExpression kReSnippetEmptyParens(
+    QStringLiteral(R"(\(\s*\))")
+);
+} // namespace
 
 // Extract the first RFC 5322 Message-ID from a header value (e.g. References, In-Reply-To).
 // Returns a normalized (lowercase, no angle-brackets) form.
@@ -865,6 +876,19 @@ bool DataStore::init()
         "  snippet LIKE '<style%' OR snippet LIKE '<script%'"
         ")"
     ));
+    // Clear snippets that contain residual markdown link artifacts, HTML entities,
+    // or long separator runs — all signs that the extraction pipeline produced garbage.
+    // These will be re-fetched and re-sanitized with the improved pipeline.
+    // Note: GLOB is used for underscore/equals runs because LIKE treats '_' as a wildcard.
+    q.exec(QStringLiteral(
+        "UPDATE messages SET snippet = NULL "
+        "WHERE snippet IS NOT NULL AND ("
+        "  snippet LIKE '%[%](%' OR "
+        "  snippet LIKE '%&ndash;%' OR snippet LIKE '%&mdash;%' OR "
+        "  snippet LIKE '%&hellip;%' OR snippet LIKE '%&rsquo;%' OR "
+        "  snippet GLOB '*=====*' OR snippet GLOB '*_____*'"
+        ")"
+    ));
 
     if (!q.exec(QStringLiteral(R"(
         CREATE TABLE IF NOT EXISTS message_folder_map (
@@ -1283,9 +1307,30 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
         QString s = normalizeSnippetWhitespace(snippetRaw);
         const QString originalNormalized = s;
+
+        // Decode common HTML entities that survive plain-text extraction.
+        s.replace("&ndash;"_L1,  u"\u2013"_s, Qt::CaseInsensitive);
+        s.replace("&mdash;"_L1,  u"\u2014"_s, Qt::CaseInsensitive);
+        s.replace("&hellip;"_L1, u"\u2026"_s, Qt::CaseInsensitive);
+        s.replace("&rsquo;"_L1,  u"\u2019"_s, Qt::CaseInsensitive);
+        s.replace("&lsquo;"_L1,  u"\u2018"_s, Qt::CaseInsensitive);
+        s.replace("&rdquo;"_L1,  u"\u201D"_s, Qt::CaseInsensitive);
+        s.replace("&ldquo;"_L1,  u"\u201C"_s, Qt::CaseInsensitive);
+
+        // Strip markdown link syntax [text](url) → keep just the link text.
+        // Run before URL stripping so the full [text](url) form is matched.
+        s.replace(kReSnippetMarkdownLink, "\\1"_L1);
+
         const bool hadUrl = kReSnippetUrl.match(s).hasMatch();
         s.replace(kReSnippetUrl, QString());
         s.replace(kReSnippetCharsetBoundary, QString());
+        // Clean up any remaining [text]( fragments and empty parens left after URL stripping.
+        s.replace(kReSnippetMarkdownLink, "\\1"_L1);
+        s.replace(kReSnippetEmptyParens, " "_L1);
+        s = normalizeSnippetWhitespace(s);
+
+        // Strip runs of repeated separator characters (====, ----, ____, - - - -).
+        s.replace(kReSnippetSeparatorRun, " "_L1);
         s = normalizeSnippetWhitespace(s);
 
         // Strip common web-view boilerplate (at start or embedded), including optional URLs.
@@ -2398,6 +2443,41 @@ void DataStore::deleteSingleFolderEdge(const QString &accountEmail,
     QSqlQuery q(database);
     q.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
     if (removed > 0 || q.numRowsAffected() > 0)
+        scheduleDataChangedSignal();
+}
+
+QString DataStore::folderUidForMessageId(const QString &accountEmail, const QString &folder, qint64 messageId) const
+{
+    if (messageId <= 0) return {};
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return {};
+    QSqlQuery q(database);
+    q.prepare("SELECT uid FROM message_folder_map "
+              "WHERE account_email=:acc AND lower(folder)=lower(:folder) AND message_id=:mid "
+              "LIMIT 1"_L1);
+    q.bindValue(":acc"_L1,    accountEmail);
+    q.bindValue(":folder"_L1, folder);
+    q.bindValue(":mid"_L1,    messageId);
+    if (!q.exec() || !q.next()) return {};
+    return q.value(0).toString();
+}
+
+void DataStore::deleteFolderEdgesForMessage(const QString &accountEmail, const QString &folder, qint64 messageId)
+{
+    if (messageId <= 0) return;
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return;
+    QSqlQuery q(database);
+    q.prepare("DELETE FROM message_folder_map "
+              "WHERE account_email=:acc AND lower(folder)=lower(:folder) AND message_id=:mid"_L1);
+    q.bindValue(":acc"_L1,    accountEmail);
+    q.bindValue(":folder"_L1, folder);
+    q.bindValue(":mid"_L1,    messageId);
+    q.exec();
+    const int removed = q.numRowsAffected();
+    QSqlQuery qOrphan(database);
+    qOrphan.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
+    if (removed > 0 || qOrphan.numRowsAffected() > 0)
         scheduleDataChangedSignal();
 }
 

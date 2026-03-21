@@ -38,6 +38,10 @@ public:
     QVariantMap folderMapRowForEdge(const QString &accountEmail, const QString &folder, const QString &uid) const;
     // Deletes the specific (folder, uid) edge, cleans orphaned messages, reloads inbox.
     void deleteSingleFolderEdge(const QString &accountEmail, const QString &folder, const QString &uid);
+    // Deletes all (folder, message_id) edges (cross-folder safe — no uid needed).
+    void deleteFolderEdgesForMessage(const QString &accountEmail, const QString &folder, qint64 messageId);
+    // Returns the UID for a message_id in a specific folder (empty string if not found).
+    QString folderUidForMessageId(const QString &accountEmail, const QString &folder, qint64 messageId) const;
     // Inserts a new (folder, uid) edge for an already-known message_id (used after UID MOVE COPYUID).
     void insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread);
     // Removes ALL folder edges for a message_id (fallback when server gives no COPYUID).
