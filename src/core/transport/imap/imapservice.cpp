@@ -1294,8 +1294,8 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
 
 
 void
-ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &) {
-    auto fn = [this]() {
+ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &email) {
+    auto fn = [this, email]() {
         if (m_destroying)
             return;
 
@@ -1303,6 +1303,12 @@ ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &) {
             startIdleWatcher();
             emit realtimeStatus(true, QStringLiteral("Idle/live watcher (re)started."));
         }
+
+        // Keep background hydration progressing even when folder STATUS values are stable
+        // and no header sync is dispatched in this loop. Inbox-only policy is enforced
+        // inside backgroundFetchBodies().
+        if (!email.trimmed().isEmpty())
+            backgroundFetchBodies({}, email, QStringLiteral("INBOX"), {});
     };
 
     if (QThread::currentThread() == thread())
