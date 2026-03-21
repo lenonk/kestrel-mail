@@ -323,8 +323,9 @@ void logTagProjectionInvariants(QSqlDatabase &database)
             WHERE t.normalized_name = lower(ml.label)
         )
     )"));
-    int labelsMissingTag = -1;
-    if (q1.exec() && q1.next()) labelsMissingTag = q1.value(0).toInt();
+    if (q1.exec() && q1.next()) {
+        (void)q1.value(0).toInt();
+    }
 
     QSqlQuery q2(database);
     q2.prepare(QStringLiteral(R"(
@@ -339,8 +340,9 @@ void logTagProjectionInvariants(QSqlDatabase &database)
               AND mtm.message_id = ml.message_id
         )
     )"));
-    int labelsMissingTagMap = -1;
-    if (q2.exec() && q2.next()) labelsMissingTagMap = q2.value(0).toInt();
+    if (q2.exec() && q2.next()) {
+        (void)q2.value(0).toInt();
+    }
 
 }
 
@@ -412,8 +414,9 @@ void logLabelEdgeInvariants(QSqlDatabase &database)
               AND lower(mfm.folder) = lower(ml.label)
           )
     )"));
-    int labelsMissingEdge = -1;
-    if (q1.exec() && q1.next()) labelsMissingEdge = q1.value(0).toInt();
+    if (q1.exec() && q1.next()) {
+        (void)q1.value(0).toInt();
+    }
 
     QSqlQuery q2(database);
     q2.prepare(QStringLiteral(R"(
@@ -427,8 +430,9 @@ void logLabelEdgeInvariants(QSqlDatabase &database)
               AND lower(ml.label) = lower(mfm.folder)
           )
     )"));
-    int edgesMissingLabel = -1;
-    if (q2.exec() && q2.next()) edgesMissingLabel = q2.value(0).toInt();
+    if (q2.exec() && q2.next()) {
+        (void)q2.value(0).toInt();
+    }
 
 }
 
@@ -1195,19 +1199,12 @@ void DataStore::upsertHeaders(const QVariantList &headers)
         database = db();
     }
 
-    QElapsedTimer t; t.start();
     database.transaction();
     for (const QVariant &v : headers) {
         if (const QVariantMap h = v.toMap(); !h.isEmpty())
             upsertHeader(h);
     }
     database.commit();
-    if (t.elapsed() >= 50)
-        qInfo("[timing] t=%lld upsertHeaders slow: %lldms for %d headers thread=%s",
-              (long long)QDateTime::currentMSecsSinceEpoch(),
-              (long long)t.elapsed(), (int)headers.size(),
-              QThread::currentThread()->objectName().isEmpty()
-                  ? "worker" : qPrintable(QThread::currentThread()->objectName()));
 
     static int invariantTick = 0;
     ++invariantTick;
@@ -2163,7 +2160,6 @@ void DataStore::upsertFolder(const QVariantMap &folder)
 
 void DataStore::pruneFolderToUids(const QString &accountEmail, const QString &folder, const QStringList &uids)
 {
-    QElapsedTimer t; t.start();
     auto database = db();
     if (!database.isValid() || !database.isOpen()) {
         if (!init()) return;
@@ -2210,10 +2206,6 @@ void DataStore::pruneFolderToUids(const QString &accountEmail, const QString &fo
     QSqlQuery qOrphan(database);
     qOrphan.exec(QStringLiteral("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"));
     const int removedCanonicalRows = qOrphan.numRowsAffected();
-
-    qInfo("[timing] t=%lld pruneFolderToUids done in %lldms folder=%s remoteUids=%d deleted=%d orphans=%d",
-          (long long)QDateTime::currentMSecsSinceEpoch(),
-          (long long)t.elapsed(), qPrintable(fld), (int)uids.size(), removedFolderRows, removedCanonicalRows);
 
     if (removedFolderRows > 0 || removedCanonicalRows > 0)
         scheduleDataChangedSignal();
@@ -3140,12 +3132,6 @@ void DataStore::scheduleDataChangedSignal()
     if (!m_reloadInboxScheduled.compare_exchange_strong(expected, true))
         return;
 
-    static std::atomic<int> s_scheduleCount{0};
-    const int n = ++s_scheduleCount;
-    qInfo("[timing] t=%lld scheduleDataChanged fired (#%d) thread=%s",
-          (long long)QDateTime::currentMSecsSinceEpoch(),
-          n, QThread::currentThread() == thread() ? "ui" : "worker");
-
     QTimer::singleShot(300, this, [this]() {
         m_reloadInboxScheduled.store(false);
         notifyDataChanged();
@@ -3192,18 +3178,14 @@ void DataStore::warmStatsCacheThen(std::function<void()> callback)
         m_tagItemsCacheValid = false;
     }
     auto *watcher = new QFutureWatcher<void>(this);
-    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, cb = std::move(callback)]() {
+    connect(watcher, &QFutureWatcher<void>::finished, this, [watcher, cb = std::move(callback)]() {
         watcher->deleteLater();
         cb();
     });
     watcher->setFuture(QtConcurrent::run([this, keys]() {
-        QElapsedTimer tw; tw.start();
         for (const QString &key : keys)
             (void)statsForFolder(key, {});
         (void)tagItems();   // pre-warm tagItems cache so tagFolderItems() is instant on UI thread
-        qInfo("[timing] t=%lld stats pre-warm done in %lldms keys=%d",
-              (long long)QDateTime::currentMSecsSinceEpoch(),
-              (long long)tw.elapsed(), keys.size());
     }));
 }
 
@@ -3212,8 +3194,6 @@ void DataStore::notifyDataChanged()
     // Pre-warm stats cache on a worker thread, then emit dataChanged so QML
     // folderStatsByKey bindings (which fire on dataChanged) get instant cache hits.
     warmStatsCacheThen([this]() {
-        qInfo("[timing] t=%lld dataChanged (stats cache warmed)",
-              (long long)QDateTime::currentMSecsSinceEpoch());
         emit dataChanged();
     });
 }
@@ -4665,7 +4645,6 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
 
 void DataStore::reloadFolders()
 {
-    QElapsedTimer t; t.start();
     m_folders.clear();
     auto database = db();
     if (!database.isValid() || !database.isOpen()) {
@@ -4697,15 +4676,9 @@ void DataStore::reloadFolders()
         m_folders.push_back(row);
     }
 
-    qInfo("[timing] t=%lld reloadFolders done in %lldms folders=%d",
-          (long long)QDateTime::currentMSecsSinceEpoch(),
-          (long long)t.elapsed(), (int)m_folders.size());
-
     // Pre-warm stats cache on worker thread so QML folderStats delegates see
     // instant cache hits when foldersChanged fires (no synchronous DB queries on UI thread).
     warmStatsCacheThen([this]() {
-        qInfo("[timing] t=%lld foldersChanged (stats cache warmed)",
-              (long long)QDateTime::currentMSecsSinceEpoch());
         emit foldersChanged();
     });
 }

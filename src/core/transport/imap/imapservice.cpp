@@ -13,6 +13,7 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QTimeZone>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QEventLoop>
@@ -1831,8 +1832,9 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                     const QDate eExclusive = QDate::fromString(endDateStr, Qt::ISODate);
                     if (s.isValid() && eExclusive.isValid()) {
                         isAllDay = true;
-                        startDt = QDateTime(s, QTime(0, 0, 0), Qt::LocalTime);
-                        endDt = QDateTime(eExclusive, QTime(0, 0, 0), Qt::LocalTime);
+                        const QTimeZone localTz = QTimeZone::systemTimeZone();
+                        startDt = QDateTime(s, QTime(0, 0, 0), localTz);
+                        endDt = QDateTime(eExclusive, QTime(0, 0, 0), localTz);
                     }
                 }
 
@@ -1886,20 +1888,12 @@ ImapService::hydrateMessageBody(const QString &accountEmail, const QString &fold
 void
 ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QString &folderName, const QString &uid,
                                         const bool userInitiated) {
-    static std::atomic<int> s_hydrateCalls{0};
-    const int callN = ++s_hydrateCalls;
-    QElapsedTimer t; t.start();
-
     const auto emailNorm = accountEmail.trimmed();
     const auto folderNorm = folderName.trimmed();
     const auto uidNorm = uid.trimmed();
 
     if (m_destroying || !m_accounts || !m_store || emailNorm.isEmpty() || uidNorm.isEmpty())
         return;
-
-    qInfo("[timing] t=%lld hydrateBodyInternal #%d uid=%s src=%s",
-          (long long)QDateTime::currentMSecsSinceEpoch(),
-          callN, qPrintable(uidNorm), userInitiated ? "user" : "bg");
 
     const QString inFlightKey = (emailNorm + "|"_L1 + folderNorm.toLower() + "|"_L1 + uidNorm);
     {
@@ -1935,9 +1929,6 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
     auto *watcher = new QFutureWatcher<QString>(this);
     registerWatcher(watcher);
-    qInfo("[timing] t=%lld hydrateBodyInternal #%d setup took %lldms (launching async fetch)",
-          (long long)QDateTime::currentMSecsSinceEpoch(),
-          callN, (long long)t.elapsed());
 
     connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, emailNorm, folderNorm, uidNorm, inFlightKey, userInitiated]() {
         const QString html = watcher->result();
