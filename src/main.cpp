@@ -14,6 +14,8 @@
 #include <QPainter>
 #include <QThread>
 #include <QRandomGenerator>
+#include <QAbstractEventDispatcher>
+#include <QDateTime>
 #include <cmath>
 #include <KLocalizedContext>
 #include <KLocalizedString>
@@ -66,6 +68,25 @@ int main(int argc, char *argv[])
                           : kestrelIcon);
 
     KLocalizedString::setApplicationDomain("kestrel-mail");
+
+    // ── UI-thread lag detector ─────────────────────────────────────────────────
+    // Measures how long each Qt event-loop dispatch cycle takes on the UI thread.
+    // Logs anything ≥ 20 ms with the prefix [ui-lag] so it can be grep'd.
+    static QElapsedTimer s_uiFrameTimer;
+    static qint64        s_uiFrameStart = 0;
+    s_uiFrameTimer.start();
+    {
+        auto *ed = QAbstractEventDispatcher::instance();
+        QObject::connect(ed, &QAbstractEventDispatcher::awake, &app, []() {
+            s_uiFrameStart = s_uiFrameTimer.elapsed();
+        });
+        QObject::connect(ed, &QAbstractEventDispatcher::aboutToBlock, &app, []() {
+            const qint64 ms = s_uiFrameTimer.elapsed() - s_uiFrameStart;
+            if (ms >= 20)
+                qInfo("[ui-lag] t=%lld +%lld ms", (long long)QDateTime::currentMSecsSinceEpoch(), (long long)ms);
+        });
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     QSplashScreen *splash = nullptr;
     QElapsedTimer splashTimer;
@@ -145,7 +166,7 @@ int main(int argc, char *argv[])
         }
 
         // static constexpr qint64 kSplashMinMs = 10000;
-        static constexpr qint64 kSplashMinMs = 1000;
+        static constexpr qint64 kSplashMinMs = 10000;
 
         const QPixmap baseSplash(QStringLiteral(":/data/assets/splash.png"));
         int frame = 0;

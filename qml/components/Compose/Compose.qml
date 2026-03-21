@@ -3,6 +3,7 @@ import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import QtQuick.Window
 import QtQuick.Dialogs
+import QtWebEngine
 import org.kde.kirigami as Kirigami
 import ".."
 import "../Attachments"
@@ -33,7 +34,7 @@ Window {
     property bool sending: false
     property bool showCcBcc: false
     property bool composeDarkView: false
-    property bool _updatingBodyForViewToggle: false
+    readonly property bool _isHtmlBody: /<(?:html|body|table)\b/i.test(root._rawBody)
     property string _rawBody: ""
     property var smtpServiceObj: null
     property var imapServiceObj: null
@@ -103,17 +104,20 @@ Window {
     }
 
     function _bodyForSending() {
-        return root._rawBody.length ? root._rawBody : (bodyArea.text || "").toString();
+        const userText = (bodyArea.text || "").toString();
+        if (root._isHtmlBody && root._rawBody.length)
+            return userText.length ? userText + "\n\n" + root._rawBody : root._rawBody;
+        return userText;
     }
 
-    function _renderedDarkHtml() {
+    function _renderedHtml() {
         if (!root._rawBody.length)
             return "";
         htmlProcessor.darkBg      = Qt.darker(Kirigami.Theme.backgroundColor, 1.35).toString();
         htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
         htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
         htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
-        return htmlProcessor.prepare(htmlProcessor.sanitize(root._rawBody), true);
+        return htmlProcessor.prepare(htmlProcessor.sanitize(root._rawBody), root.composeDarkView);
     }
 
     function _resolveAttachmentPaths(startFetch) {
@@ -208,7 +212,7 @@ Window {
         }
     }
 
-    function openCompose(to, subject, body, attachments, initialDarkMode) {
+    function openCompose(to, subject, body, attachments, initialDarkMode, bodyText) {
         toChipModel.clear();
         ccChipModel.clear();
         bccChipModel.clear();
@@ -225,9 +229,10 @@ Window {
         fmtStrike = false;
         _applyAttachments(attachments);
         composeDarkView = !!initialDarkMode;
-        _updatingBodyForViewToggle = true;
-        bodyArea.text = _rawBody;
-        _updatingBodyForViewToggle = false;
+        if (bodyText && bodyText.length > 0)
+            bodyArea.text = bodyText;
+        else
+            bodyArea.text = /<(?:html|body|table)\b/i.test(_rawBody) ? "" : _rawBody;
         if (to && to.trim().length > 0)
             _addChipToModel(toChipModel, to.trim());
         root.show();
@@ -238,6 +243,7 @@ Window {
         else
             subjectField.forceActiveFocus();
     }
+
     function openComposeReply(params) {
         toChipModel.clear();
         ccChipModel.clear();
@@ -255,9 +261,7 @@ Window {
         fmtStrike = false;
         _applyAttachments(params.attachments || []);
         composeDarkView = !!params.darkMode;
-        _updatingBodyForViewToggle = true;
-        bodyArea.text = composeDarkView ? _applyDarkViewStyle(_rawBody) : _rawBody;
-        _updatingBodyForViewToggle = false;
+        bodyArea.text = /<(?:html|body|table)\b/i.test(_rawBody) ? "" : _rawBody;
         const toList = params.toList || [];
         for (let i = 0; i < toList.length; i++)
             _addChipToModel(toChipModel, toList[i]);
@@ -892,26 +896,8 @@ Window {
 
                         onModeToggled: darkMode => {
                             root.composeDarkView = darkMode;
-                            root._updatingBodyForViewToggle = true;
-                            bodyArea.text = darkMode ? root._applyDarkViewStyle(root._rawBody) : root._rawBody;
-                            root._updatingBodyForViewToggle = false;
                         }
                     }
-
-
-                    // QQC2.Button {
-                    //     Layout.rightMargin: 7
-                    //     icon.name: root.composeDarkView ? "weather-clear-night" : "weather-clear"
-                    //     text: root.composeDarkView ? i18n("Dark") : i18n("Light")
-                    //
-                    //     onClicked: {
-                    //         const raw = root._stripViewWrapper(bodyArea.text)
-                    //         root.composeDarkView = !root.composeDarkView
-                    //         root._updatingBodyForViewToggle = true
-                    //         bodyArea.text = root._applyViewThemeToBody(raw)
-                    //         root._updatingBodyForViewToggle = false
-                    //     }
-                    // }
                 }
             }
 
@@ -985,47 +971,54 @@ Window {
             }
 
             // ── Body ───────────────────────────────────────────────────────
-            QQC2.ScrollView {
+            // TextArea (top) is always present for composing.
+            // WebEngineView (bottom) appears when forwarding/replying with HTML,
+            // rendered via htmlProcessor — dark/light controlled by the toggle.
+            ColumnLayout {
                 Layout.fillHeight: true
                 Layout.fillWidth: true
-                QQC2.ScrollBar.vertical.policy: QQC2.ScrollBar.AsNeeded
-                clip: true
+                spacing: 0
 
-                background: Rectangle {
-                    color: root.composeDarkView ? "#0d1220" : root._bg
-                }
+                QQC2.ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: !root._isHtmlBody
+                    Layout.preferredHeight: root._isHtmlBody ? 150 : -1
+                    Layout.minimumHeight: root._isHtmlBody ? 80 : -1
+                    QQC2.ScrollBar.vertical.policy: QQC2.ScrollBar.AsNeeded
+                    clip: true
 
-                QQC2.TextArea {
-                    id: bodyArea
-
-                    bottomPadding: 12
-                    color: root.composeDarkView ? "#dfe9ff" : Kirigami.Theme.textColor
-                    font.pixelSize: 14
-                    leftPadding: 14
-                    placeholderText: i18n("Type a message here")
-                    placeholderTextColor: root.composeDarkView ? "#90a4cf" : Kirigami.Theme.disabledTextColor
-                    rightPadding: 14
-                    textFormat: TextEdit.RichText
-                    topPadding: 12
-                    width: parent.width
-                    wrapMode: TextEdit.Wrap
-
-                    background: Item {
+                    background: Rectangle {
+                        color: root._bg
                     }
 
-                    onTextChanged: {
-                        // Keep _rawBody in sync when the user types, but not during programmatic dark-mode toggles.
-                        // While composeDarkView is on with HTML content, _rawBody stays as the original
-                        // untransformed HTML so _bodyForSending() returns the correct send payload.
-                        if (!root._updatingBodyForViewToggle && !root.composeDarkView)
-                            root._rawBody = bodyArea.text;
-                    }
+                    QQC2.TextArea {
+                        id: bodyArea
 
-                    Keys.onPressed: event => {
-                        const hasFormat = root.fmtBold || root.fmtItalic || root.fmtUnderline || root.fmtStrike;
-                        if (!hasFormat || event.text.length === 0)
-                            return;
+                        bottomPadding: 12
+                        color: Kirigami.Theme.textColor
+                        font.pixelSize: 14
+                        leftPadding: 14
+                        placeholderText: i18n("Type a message here")
+                        placeholderTextColor: Kirigami.Theme.disabledTextColor
+                        rightPadding: 14
+                        textFormat: TextEdit.RichText
+                        topPadding: 12
+                        width: parent.width
+                        wrapMode: TextEdit.Wrap
+
+                        background: Item {
+                        }
+
+                        onLinkActivated: link => Qt.openUrlExternally(link)
+
+                        HoverHandler {
+                            cursorShape: bodyArea.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+                        }
+
+                        Keys.onPressed: event => {
                         // Only intercept printable characters (skip backspace=8, tab=9, enter=13, esc=27, del=127, etc.)
+                        if (event.text.length === 0)
+                            return;
                         const code = event.text.charCodeAt(0);
                         if (code <= 32 || code === 127)
                             return;
@@ -1052,6 +1045,12 @@ Window {
                         if (root.fmtStrike) {
                             open += "<s>";
                             close = "</s>" + close;
+                        }
+                        if (!open) {
+                            // Explicitly reset formatting so Qt's RichText engine doesn't
+                            // inherit bold/italic/etc. from adjacent formatted text.
+                            open = '<span style="font-weight:normal;font-style:normal;text-decoration:none">';
+                            close = "</span>";
                         }
                         bodyArea.insert(bodyArea.cursorPosition, open + event.text + close);
                     }
@@ -1116,6 +1115,54 @@ Window {
                                     dropZone.opacity = 0;
                                 }
                             }
+                        }
+                    }
+                }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    color: Qt.lighter(root._bg, 1.25)
+                    height: 1
+                    visible: root._isHtmlBody
+                }
+
+                WebEngineView {
+                    id: composeWebView
+
+                    Layout.fillHeight: true
+                    Layout.fillWidth: true
+                    backgroundColor: root.composeDarkView
+                        ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
+                        : Kirigami.Theme.backgroundColor
+                    settings.autoLoadImages: true
+                    settings.javascriptEnabled: true
+                    settings.localContentCanAccessFileUrls: true
+                    settings.localContentCanAccessRemoteUrls: true
+                    visible: root._isHtmlBody
+
+                    onNavigationRequested: function (request) {
+                        const url = request.url ? request.url.toString() : "";
+                        if (url.startsWith("http://") || url.startsWith("https://")) {
+                            request.action = WebEngineNavigationRequest.IgnoreRequest;
+                            Qt.openUrlExternally(url);
+                        }
+                    }
+                    onNewWindowRequested: function (request) {
+                        const url = request.requestedUrl ? request.requestedUrl.toString() : "";
+                        if (url.startsWith("http://") || url.startsWith("https://") || url.toLowerCase().startsWith("mailto:"))
+                            Qt.openUrlExternally(url);
+                    }
+
+                    Connections {
+                        target: root
+                        function onComposeDarkViewChanged() {
+                            if (root._isHtmlBody)
+                                composeWebView.loadHtml(root._renderedHtml(), "file:///");
+                        }
+                        function on_RawBodyChanged() {
+                            if (root._isHtmlBody)
+                                composeWebView.loadHtml(root._renderedHtml(), "file:///");
                         }
                     }
                 }

@@ -698,15 +698,36 @@ executeIncremental(SyncContext &ctx) {
     KestrelTimer folderSearchTimer;
 
     // Search for new UIDs above minUidExclusive.
-    // One round trip regardless of Gmail/non-Gmail — category routing uses X-GM-LABELS
-    // from the FETCH response (already requested in fetchUidBatch) via extractGmailCategoryFolder
-    // in ingestMessage.  The old 6x per-category searches are no longer needed.
     // CONDSTORE: if modseq is unchanged no new messages can exist, skip the search entirely.
     QStringList newUids;
     if (!ctx.condstoreUnchanged) {
         const auto sCmd = QStringLiteral("UID SEARCH UID %1:*").arg(ctx.minUidExclusive + 1);
         const auto sResp = ctx.cxn->execute(sCmd);
         newUids = parseSearchIds(sResp);
+
+        // For Gmail INBOX: also build per-category hints via X-GM-RAW searches.
+        // There is a race between message delivery and Gmail applying the category label
+        // to X-GM-LABELS, so a freshly delivered message's FETCH response may not yet
+        // include the category.  The X-GM-RAW "category:..." query is more reliable for
+        // newly arrived messages and fills the hints map used as a fallback in fetchUidBatch.
+        if (ctx.isGmailInbox() && !newUids.isEmpty()) {
+            static const QStringList inboxCategories = {
+                "primary"_L1, "promotions"_L1, "social"_L1,
+                "updates"_L1, "forums"_L1, "purchases"_L1
+            };
+            for (const auto &cat : inboxCategories) {
+                const auto hCmd = QStringLiteral("UID SEARCH UID %1:* X-GM-RAW \"category:%2\"")
+                                      .arg(ctx.minUidExclusive + 1).arg(cat);
+                const auto hResp = ctx.cxn->execute(hCmd);
+                const auto mappedFolder = categoryToFolder(cat);
+                if (mappedFolder.isEmpty()) continue;
+                for (const auto &u : parseSearchIds(hResp)) {
+                    bool ok = false;
+                    const qint32 v = u.toInt(&ok);
+                    if (ok && v > 0) state.categoryHints[v].insert(mappedFolder);
+                }
+            }
+        }
     }
 
     // Filter: only UIDs strictly greater than minUidExclusive.

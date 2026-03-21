@@ -1,5 +1,4 @@
 #include "messagelistmodel.h"
-#include "../transport/imap/sync/kestreltimer.h"
 
 #include "datastore.h"
 
@@ -9,6 +8,8 @@
 #include <QSet>
 #include <QTimer>
 #include <QLocale>
+#include <QElapsedTimer>
+#include <QtConcurrent/QtConcurrentRun>
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -190,6 +191,7 @@ void MessageListModel::setSelection(const QString &folderKey, const QStringList 
 
 void MessageListModel::setBucketExpanded(const QString &bucketKey, bool expanded)
 {
+    // Expansion state only affects the view — no DB re-query needed.
     const QString key = bucketKey.trimmed();
     bool changed = false;
     if (key == QStringLiteral("today")) {
@@ -213,7 +215,7 @@ void MessageListModel::setBucketExpanded(const QString &bucketKey, bool expanded
         m_weekdayExpanded.insert(key, expanded);
     }
     if (!changed) return;
-    refresh();
+    refreshView();
 }
 
 void MessageListModel::setExpansionState(bool todayExpanded,
@@ -234,42 +236,83 @@ void MessageListModel::setExpansionState(bool todayExpanded,
     m_lastWeekExpanded = lastWeekExpanded;
     m_twoWeeksAgoExpanded = twoWeeksAgoExpanded;
     m_olderExpanded = olderExpanded;
-    refresh();
+    refreshView();
 }
 
 void MessageListModel::refresh()
 {
     if (m_isLoadingPage) {
+        m_pendingRefresh = true;
         return;
     }
     m_isLoadingPage = true;
+    m_pendingRefresh = false;
 
-    Imap::KestrelTimer refreshTimer;
-
-
-    QVariantList sourceRows;
-    bool hasMore = false;
-    const int preserveLimit = qMax(m_pageSize, m_nextOffset);
-    if (m_dataStore) {
-        sourceRows = m_dataStore->messagesForSelection(m_folderKey,
-                                                       m_selectedCategories,
-                                                       m_selectedCategoryIndex,
-                                                       preserveLimit,
-                                                       0,
-                                                       &hasMore);
+    DataStore *store = m_dataStore.data();
+    if (!store) {
+        m_loadedSourceRows = {};
+        m_nextOffset = 0;
+        refreshView();
+        m_isLoadingPage = false;
+        return;
     }
 
-    m_loadedSourceRows = sourceRows;
-    m_nextOffset = m_loadedSourceRows.size();
+    const int preserveLimit = qMax(m_pageSize, m_nextOffset);
+    const QString folderKey = m_folderKey;
+    const QStringList selectedCategories = m_selectedCategories;
+    const int selectedCategoryIndex = m_selectedCategoryIndex;
 
+    using Result = std::pair<QVariantList, bool>;
+    auto *watcher = new QFutureWatcher<Result>(this);
+    m_refreshWatcher = watcher;
 
-    const bool oldHasMore = m_hasMore;
-    m_hasMore = hasMore;
-    if (oldHasMore != m_hasMore) emit pagingChanged();
+    connect(watcher, &QFutureWatcher<Result>::finished, this, [this, watcher]() {
+        m_refreshWatcher = nullptr;
+        watcher->deleteLater();
 
+        QElapsedTimer t; t.start();
+        const auto [rows, hasMore] = watcher->result();
+        m_loadedSourceRows = rows;
+        m_nextOffset = m_loadedSourceRows.size();
+
+        const bool oldHasMore = m_hasMore;
+        m_hasMore = hasMore;
+        if (oldHasMore != m_hasMore) emit pagingChanged();
+
+        refreshView();
+        qInfo("[timing] t=%lld refresh apply (buildRows+applyRows) in %lldms rows=%d",
+              (long long)QDateTime::currentMSecsSinceEpoch(),
+              (long long)t.elapsed(), (int)m_loadedSourceRows.size());
+        m_isLoadingPage = false;
+
+        if (m_pendingRefresh) {
+            m_pendingRefresh = false;
+            refresh();
+        }
+    });
+
+    watcher->setFuture(QtConcurrent::run(
+        [store, folderKey, selectedCategories, selectedCategoryIndex, preserveLimit]() -> Result {
+            QElapsedTimer t; t.start();
+            bool hasMore = false;
+            auto rows = store->messagesForSelection(
+                folderKey, selectedCategories, selectedCategoryIndex, preserveLimit, 0, &hasMore);
+            qInfo("[timing] t=%lld messagesForSelection in %lldms key=%s rows=%d",
+                  (long long)QDateTime::currentMSecsSinceEpoch(),
+                  (long long)t.elapsed(), qPrintable(folderKey), (int)rows.size());
+            return {std::move(rows), hasMore};
+        }));
+}
+
+void MessageListModel::refreshView()
+{
     m_allRows = buildRows(m_loadedSourceRows);
     emit totalRowCountChanged();
+    applyWindow();
+}
 
+void MessageListModel::applyWindow()
+{
     if (m_windowStart < 0) m_windowStart = 0;
 
     const int effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
@@ -279,9 +322,6 @@ void MessageListModel::refresh()
     const int end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
     for (int i = m_windowStart; i < end; ++i) window.push_back(m_allRows.at(i));
     applyRows(std::move(window));
-
-
-    m_isLoadingPage = false;
 }
 
 void MessageListModel::loadMore()
@@ -391,7 +431,7 @@ void MessageListModel::setWindowSize(int size)
     if (m_windowSize == normalized) return;
     m_windowSize = normalized;
     emit windowSizeChanged();
-    refresh();
+    applyWindow();
 }
 
 void MessageListModel::shiftWindowDown()
@@ -403,7 +443,7 @@ void MessageListModel::shiftWindowDown()
     const int next = qMin(maxStart, m_windowStart + step);
     if (next == m_windowStart) return;
     m_windowStart = next;
-    refresh();
+    applyWindow();
 }
 
 void MessageListModel::shiftWindowUp()
@@ -414,7 +454,7 @@ void MessageListModel::shiftWindowUp()
     const int next = qMax(0, m_windowStart - step);
     if (next == m_windowStart) return;
     m_windowStart = next;
-    refresh();
+    applyWindow();
 }
 
 QVector<MessageListModel::Row> MessageListModel::buildRows(const QVariantList &rows) const

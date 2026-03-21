@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QVariantMap>
 #include <QVector>
+#include <QFutureWatcher>
 
 class QTimer;
 class DataStore;
@@ -123,9 +124,13 @@ private:
     const int m_pageSize = 50;
     bool m_hasMore = false;
     bool m_isLoadingPage = false;
+    bool m_pendingRefresh = false;
+    QFutureWatcher<std::pair<QVariantList, bool>> *m_refreshWatcher = nullptr;
 
     void scheduleRefresh();
     void onMessageMarkedRead(const QString &accountEmail, const QString &uid);
+    void refreshView();
+    void applyWindow();
     QVector<Row> buildRows(const QVariantList &rows) const;
     void applyRows(QVector<Row> &&nextRows);
     static bool rowEquals(const Row &a, const Row &b);

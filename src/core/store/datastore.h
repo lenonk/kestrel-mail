@@ -1,9 +1,13 @@
 #pragma once
 
 #include <QHash>
+#include <QMutex>
 #include <QObject>
 #include <QVariantList>
 #include <QStringList>
+
+#include <atomic>
+#include <functional>
 
 class QSqlDatabase;
 
@@ -118,17 +122,40 @@ signals:
 
 private:
     QString m_connectionName;
+    QString m_dbPath;
     QVariantList m_folders;
-    bool m_reloadInboxScheduled = false;
+    std::atomic<bool> m_reloadInboxScheduled{false};
+    std::atomic<bool> m_pendingFoldersReload{false};
+
+    // Cache for statsForFolder() results — pre-warmed on worker thread before foldersChanged is
+    // emitted, so QML delegates never run DB queries on the UI thread.
+    mutable QMutex m_folderStatsCacheMutex;
+    mutable QHash<QString, QVariantMap> m_folderStatsCache;
+
+    // Cache for tagItems() — pre-warmed alongside statsForFolder so tagFolderItems() in QML
+    // returns instantly when foldersChanged fires (avoids correlated GROUP BY on UI thread).
+    mutable QMutex m_tagItemsCacheMutex;
+    mutable QVariantList m_tagItemsCache;
+    mutable bool m_tagItemsCacheValid{false};
+
+    // Per-thread SQLite connections — keyed by thread ID (quintptr).
+    // Each worker thread gets its own connection, eliminating BlockingQueuedConnection
+    // round-trips to the UI thread for every DataStore read.
+    mutable QMutex m_connMutex;
+    mutable QHash<quintptr, QString> m_threadConnections;
 
     // In-memory cache for contact_avatars lookups — keyed by normalised email.
     // Populated on first DB hit; invalidated/updated on upsert. Eliminates
     // repeated SQL queries during list-scroll delegate creation.
+    mutable QMutex m_avatarCacheMutex;
     mutable QHash<QString, QString> m_avatarCache;
-    static constexpr int kAvatarCacheNotQueried = -1;  // sentinel: email not yet looked up
 
     QSqlDatabase db() const;
     void scheduleDataChangedSignal();
+    // Returns the set of keys to pass to statsForFolder() pre-warm, derived from m_folders.
+    QStringList statsKeysFromFolders() const;
+    // Pre-warms m_folderStatsCache on a worker thread, then invokes callback on the UI thread.
+    void warmStatsCacheThen(std::function<void()> callback);
     QString avatarDirPath() const;
     // Parses a data URI, writes bytes to avatarDirPath(), stores file:// URL in DB.
     // Returns the file:// URL on success, empty string on failure.

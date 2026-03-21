@@ -144,8 +144,6 @@ private:
     void stopIdleWatcher(bool waitForStop = true) const;
     void startBackgroundWorker();
     void stopBackgroundWorker(bool waitForStop = true) const;
-    void idlePruneFolderToUids(const QString &email, const QString &folder, const QStringList &uids);
-    void idleRemoveUids(const QString &email, const QStringList &uids);
     void idleOnInboxChanged();
     void workerEmitRealtimeStatus(bool ok, const QString &message);
     void backgroundSyncHeadersAndFlags(const QVariantMap &account, const QString &email,
@@ -164,7 +162,6 @@ private:
 
     QString workerRefreshAccessToken(const QVariantMap &account, const QString &email);
     QString refreshAccessToken(const QVariantMap &account, const QString &email);
-    QStringList idleGetFolderUids(const QString &email, const QString &folder);
 
     void backgroundOnIdleLiveUpdate(const QVariantMap &account, const QString &email);
 

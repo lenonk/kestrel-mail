@@ -1347,8 +1347,8 @@ Kirigami.ApplicationWindow {
         composeDialog.openCompose("", "", "")
     }
 
-    function openForwardCompose(subject, body, attachments, initialDarkMode) {
-        composeDialog.openCompose("", subject || "", body || "", attachments || [], !!initialDarkMode)
+    function openForwardCompose(subject, body, bodyText, attachments, initialDarkMode) {
+        composeDialog.openCompose("", subject || "", body || "", attachments || [], !!initialDarkMode, bodyText || "")
     }
 
     function _forwardDateText(d) {
@@ -1360,33 +1360,67 @@ Kirigami.ApplicationWindow {
     function forwardMessageFromData(d, dateText, attachments) {
         if (!d) return
 
-        const fromText = ((d.sender && d.sender.toString().length > 0) ? d.sender.toString() : (d.accountEmail || "").toString())
-        const dt = (dateText && dateText.toString().length > 0) ? dateText.toString() : root._forwardDateText(d)
-
-        // Preserve original payload; only prepend forward metadata header.
-        let body = ""
         const originalHtml = (d.bodyHtml && d.bodyHtml.toString().length > 0) ? d.bodyHtml.toString() : ""
         const originalText = (d.body && d.body.toString().length > 0) ? d.body.toString() : ((d.snippet || "").toString())
 
-        if (originalHtml.length > 0) {
-            const esc = function(s) {
-                return (s || "").toString()
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;")
+        function esc(s) {
+            return (s || "").toString()
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+        }
+        function mailtoLink(email) {
+            return '<a href="mailto:' + email + '">' + esc(email) + '</a>'
+        }
+        // bodyArea is RichText; produce HTML: re-quote name, escape <>, link the email address.
+        function _fmtFromHtml(raw) {
+            const s = (raw || "").toString().trim()
+            const lt = s.lastIndexOf('<')
+            const gt = s.lastIndexOf('>')
+            if (lt > 0 && gt > lt) {
+                const name = s.slice(0, lt).trim()
+                const email = s.slice(lt + 1, gt).trim()
+                return name.length
+                    ? '&quot;' + esc(name) + '&quot; &lt;' + mailtoLink(email) + '&gt;'
+                    : mailtoLink(email)
             }
-            body = "<div>--- Forwarded message ---<br>"
-                 + "From: " + esc(fromText) + "<br>"
-                 + "Date: " + esc(dt) + "</div><br>"
-                 + originalHtml
-        } else {
-            body = "--- Forwarded message ---\n"
-                 + "From: " + fromText + "\n"
-                 + "Date: " + dt + "\n\n"
-                 + originalText
+            return s.includes('@') ? mailtoLink(s) : esc(s)
+        }
+        // Extract email from "Name <email>" and render as mailto link.
+        function _fmtToHtml(raw) {
+            const s = (raw || "").toString().trim()
+            const lt = s.lastIndexOf('<')
+            const gt = s.lastIndexOf('>')
+            const email = (lt >= 0 && gt > lt) ? s.slice(lt + 1, gt).trim() : s
+            return email.includes('@') ? mailtoLink(email) : esc(email)
         }
 
-        root.openForwardCompose(root._fwdSubject(d.subject), body, attachments || [], root.contentPaneDarkModeEnabled)
+        const senderRaw = (d.sender && d.sender.toString().length > 0) ? d.sender.toString() : (d.accountEmail || "").toString()
+        const toRaw = (d.recipient || "").toString()
+        const fwdDate = d.receivedAt
+            ? new Date(d.receivedAt).toLocaleString(Qt.locale(), "M/d/yyyy h:mm:ss AP")
+            : (dateText || "").toString()
+
+        const header = "<br>------ Forwarded Message ------<br>"
+                     + "From: " + _fmtFromHtml(senderRaw) + "<br>"
+                     + "To: " + _fmtToHtml(toRaw) + "<br>"
+                     + "Date: " + esc(fwdDate) + "<br>"
+                     + "Subject: " + esc((d.subject || "").toString()) + "<br><br>"
+
+        let body = ""
+        let bodyText = ""
+
+        if (originalHtml.length > 0) {
+            // HTML body: header in the editable TextArea, original HTML in the WebEngineView.
+            body = originalHtml
+            bodyText = header
+        } else {
+            // Plain text: escape and convert newlines for the RichText TextArea.
+            const escapedText = esc(originalText).replace(/\n/g, "<br>")
+            bodyText = header + escapedText
+        }
+
+        root.openForwardCompose(root._fwdSubject(d.subject), body, bodyText, attachments || [], root.contentPaneDarkModeEnabled)
     }
 
     function openComposerTo(address, contextLabel, subjectParam = "") {

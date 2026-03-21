@@ -20,6 +20,8 @@
 #include <limits>
 
 #include "src/core/transport/imap/sync/kestreltimer.h"
+#include <QtConcurrent/QtConcurrentRun>
+#include <QFutureWatcher>
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -601,33 +603,53 @@ int pruneFolderEdgesToUids(QSqlDatabase &database,
                            const QString &folder,
                            const QStringList &uids)
 {
-    QSqlQuery q(database);
-    int removed = 0;
     if (uids.isEmpty()) {
-        q.prepare(QStringLiteral("DELETE FROM message_folder_map WHERE account_email=:account_email AND folder=:folder"));
+        // Wipe the entire folder.
+        QSqlQuery q(database);
+        q.prepare(QStringLiteral("DELETE FROM message_folder_map WHERE account_email=:account_email AND lower(folder)=lower(:folder)"));
         q.bindValue(QStringLiteral(":account_email"), accountEmail);
         q.bindValue(QStringLiteral(":folder"), folder);
         q.exec();
-        removed = q.numRowsAffected();
-    } else {
-        QStringList placeholders;
-        placeholders.reserve(uids.size());
-        for (int i = 0; i < uids.size(); ++i) placeholders << QStringLiteral(":u%1").arg(i);
-
-        const QString sql = QStringLiteral(
-                                "DELETE FROM message_folder_map WHERE account_email=:account_email AND folder=:folder AND uid NOT IN (%1)")
-                                .arg(placeholders.join(QStringLiteral(",")));
-        q.prepare(sql);
-        q.bindValue(QStringLiteral(":account_email"), accountEmail);
-        q.bindValue(QStringLiteral(":folder"), folder);
-        for (int i = 0; i < uids.size(); ++i) {
-            q.bindValue(QStringLiteral(":u%1").arg(i), uids.at(i));
-        }
-        q.exec();
-        removed = q.numRowsAffected();
+        return q.numRowsAffected();
     }
 
-    return removed;
+    // Compute set-difference in C++ to avoid a huge NOT IN (...) clause.
+    // A typical reconcile prune removes 0-10 UIDs from a mailbox of thousands,
+    // so building the delete set in application memory is far cheaper than
+    // sending a 30KB+ SQL string to SQLite and binding thousands of parameters.
+    QSqlQuery qLocal(database);
+    qLocal.prepare(QStringLiteral("SELECT uid FROM message_folder_map WHERE account_email=:account_email AND lower(folder)=lower(:folder)"));
+    qLocal.bindValue(QStringLiteral(":account_email"), accountEmail);
+    qLocal.bindValue(QStringLiteral(":folder"), folder);
+    if (!qLocal.exec()) return 0;
+
+    const QSet<QString> remoteSet(uids.begin(), uids.end());
+    QStringList toDelete;
+    while (qLocal.next()) {
+        const QString uid = qLocal.value(0).toString().trimmed();
+        if (!uid.isEmpty() && !remoteSet.contains(uid))
+            toDelete.push_back(uid);
+    }
+
+    if (toDelete.isEmpty()) return 0;
+
+    // Delete only the few stale UIDs (typically 0–10 even for large mailboxes).
+    QStringList placeholders;
+    placeholders.reserve(toDelete.size());
+    for (int i = 0; i < toDelete.size(); ++i)
+        placeholders << QStringLiteral(":d%1").arg(i);
+
+    const QString sql = QStringLiteral(
+        "DELETE FROM message_folder_map WHERE account_email=:account_email AND lower(folder)=lower(:folder) AND uid IN (%1)")
+        .arg(placeholders.join(QStringLiteral(",")));
+    QSqlQuery qDel(database);
+    qDel.prepare(sql);
+    qDel.bindValue(QStringLiteral(":account_email"), accountEmail);
+    qDel.bindValue(QStringLiteral(":folder"), folder);
+    for (int i = 0; i < toDelete.size(); ++i)
+        qDel.bindValue(QStringLiteral(":d%1").arg(i), toDelete.at(i));
+    qDel.exec();
+    return qDel.numRowsAffected();
 }
 
 }
@@ -640,19 +662,47 @@ DataStore::DataStore(QObject *parent)
 
 DataStore::~DataStore()
 {
-    const auto conn = m_connectionName;
-    {
-        auto d = QSqlDatabase::database(conn, false);
-        if (d.isValid()) {
-            d.close();
-        }
+    QMutexLocker lock(&m_connMutex);
+    for (const QString &connName : std::as_const(m_threadConnections)) {
+        auto d = QSqlDatabase::database(connName, false);
+        if (d.isValid()) d.close();
+        QSqlDatabase::removeDatabase(connName);
     }
-    QSqlDatabase::removeDatabase(conn);
+    m_threadConnections.clear();
 }
 
 QSqlDatabase DataStore::db() const
 {
-    return QSqlDatabase::database(m_connectionName);
+    const auto tid = reinterpret_cast<quintptr>(QThread::currentThreadId());
+    {
+        QMutexLocker lock(&m_connMutex);
+        auto it = m_threadConnections.constFind(tid);
+        if (it != m_threadConnections.constEnd())
+            return QSqlDatabase::database(*it);
+    }
+
+    if (m_dbPath.isEmpty())
+        return QSqlDatabase::database(m_connectionName);
+
+    // Create a new per-thread connection for this worker thread.
+    const QString connName = m_connectionName + "-t"_L1 + QString::number(tid, 16);
+    {
+        QSqlDatabase newDb = QSqlDatabase::addDatabase("QSQLITE"_L1, connName);
+        newDb.setDatabaseName(m_dbPath);
+        if (!newDb.open()) {
+            qWarning() << "[DataStore] failed to open per-thread DB connection for thread" << tid;
+            return newDb;
+        }
+        QSqlQuery q(newDb);
+        q.exec("PRAGMA journal_mode=WAL"_L1);
+        q.exec("PRAGMA busy_timeout=5000"_L1);
+        q.exec("PRAGMA synchronous=NORMAL"_L1);
+    }
+    {
+        QMutexLocker lock(&m_connMutex);
+        m_threadConnections[tid] = connName;
+    }
+    return QSqlDatabase::database(connName);
 }
 
 bool DataStore::init()
@@ -668,7 +718,19 @@ bool DataStore::init()
         return false;
     }
 
+    // Store path and register this thread's connection before any queries.
+    m_dbPath = path;
+    {
+        QMutexLocker lock(&m_connMutex);
+        m_threadConnections[reinterpret_cast<quintptr>(QThread::currentThreadId())] = m_connectionName;
+    }
+
     QSqlQuery q(database);
+
+    // Enable WAL mode so worker-thread per-connection reads don't block writes.
+    q.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+    q.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
+    q.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
 
     // Finalized schema cleanup:
     // - drop legacy pre-refactor messages table
@@ -1029,9 +1091,15 @@ bool DataStore::init()
     // Expression index so lower(folder) comparisons in fetchCandidatesForMessageKey use the index
     // instead of a full table scan (lower() on a plain-column index is not usable by SQLite).
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_account_lf_uid ON message_folder_map(account_email, lower(folder), uid)"));
+    // Standalone lower(folder) index for statsForFolder() WHERE lower(folder)=:f queries.
+    q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_lower_folder ON message_folder_map(lower(folder))"));
+    // Covering index for EXISTS(...unread=1) subqueries in statsForFolder().
+    q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_account_message_unread ON message_folder_map(account_email, message_id, unread)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_ml_account_message_label ON message_labels(account_email, message_id, label)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_ml_label_lower ON message_labels(lower(label))"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mtm_account_message_tag ON message_tag_map(account_email, message_id, tag_id)"));
+    // Standalone tag_id index for correlated subqueries in tagItems() (WHERE mtm2.tag_id=t.id).
+    q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mtm_tag_id ON message_tag_map(tag_id)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mp_address_lower ON message_participants(lower(address))"));
 
     // Cleanup: remove poisoned display names that look like address lists/emails.
@@ -1127,12 +1195,19 @@ void DataStore::upsertHeaders(const QVariantList &headers)
         database = db();
     }
 
+    QElapsedTimer t; t.start();
     database.transaction();
     for (const QVariant &v : headers) {
         if (const QVariantMap h = v.toMap(); !h.isEmpty())
             upsertHeader(h);
     }
     database.commit();
+    if (t.elapsed() >= 50)
+        qInfo("[timing] t=%lld upsertHeaders slow: %lldms for %d headers thread=%s",
+              (long long)QDateTime::currentMSecsSinceEpoch(),
+              (long long)t.elapsed(), (int)headers.size(),
+              QThread::currentThread()->objectName().isEmpty()
+                  ? "worker" : qPrintable(QThread::currentThread()->objectName()));
 
     static int invariantTick = 0;
     ++invariantTick;
@@ -1602,7 +1677,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
             qAvatar.bindValue(QStringLiteral(":avatar_url"), storedSenderUrl);
             qAvatar.bindValue(QStringLiteral(":source"), avatarSourceValue);
             qAvatar.exec();
-            m_avatarCache.insert(senderEmailValue, storedSenderUrl);
+            { QMutexLocker lock(&m_avatarCacheMutex); m_avatarCache.insert(senderEmailValue, storedSenderUrl); }
         }
     }
     if (!recipientEmailValue.isEmpty() && !recipientAvatarUrlValue.isEmpty()) {
@@ -1621,7 +1696,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
             qAvatar.bindValue(QStringLiteral(":email"), recipientEmailValue);
             qAvatar.bindValue(QStringLiteral(":avatar_url"), storedRecipientUrl);
             qAvatar.exec();
-            m_avatarCache.insert(recipientEmailValue, storedRecipientUrl);
+            { QMutexLocker lock(&m_avatarCacheMutex); m_avatarCache.insert(recipientEmailValue, storedRecipientUrl); }
         }
     } else if (!recipientEmailValue.isEmpty() && recipientAvatarLookupMiss) {
         QSqlQuery qAvatarMiss(database);
@@ -1651,7 +1726,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
         )"));
         qAvatarMiss.bindValue(QStringLiteral(":email"), recipientEmailValue);
         qAvatarMiss.exec();
-        m_avatarCache.remove(recipientEmailValue);  // CASE expression; evict to re-query
+        { QMutexLocker lock(&m_avatarCacheMutex); m_avatarCache.remove(recipientEmailValue); }  // CASE expression; evict to re-query
     }
 
     if (!senderEmailValue.isEmpty() && avatarUrlValue.isEmpty()) {
@@ -1678,7 +1753,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
         )"));
         qAvatarMiss.bindValue(QStringLiteral(":email"), senderEmailValue);
         qAvatarMiss.exec();
-        m_avatarCache.remove(senderEmailValue);  // CASE expression; evict to re-query
+        { QMutexLocker lock(&m_avatarCacheMutex); m_avatarCache.remove(senderEmailValue); }  // CASE expression; evict to re-query
     }
 
     auto upsertDisplayName = [&](const QString &email, const QString &displayName, const QString &source) {
@@ -1874,6 +1949,13 @@ QStringList DataStore::inboxCategoryTabs() const
 
 QVariantList DataStore::tagItems() const
 {
+    // Fast path: return cached result pre-warmed before foldersChanged/dataChanged.
+    {
+        QMutexLocker lock(&m_tagItemsCacheMutex);
+        if (m_tagItemsCacheValid)
+            return m_tagItemsCache;
+    }
+
     QVariantList out;
     const auto database = db();
     if (!database.isValid() || !database.isOpen()) return out;
@@ -2032,6 +2114,13 @@ QVariantList DataStore::tagItems() const
         row.insert(QStringLiteral("color"), color);
         out.push_back(row);
     }
+
+    // Store in cache.
+    {
+        QMutexLocker lock(&m_tagItemsCacheMutex);
+        m_tagItemsCache = out;
+        m_tagItemsCacheValid = true;
+    }
     return out;
 }
 
@@ -2058,11 +2147,23 @@ void DataStore::upsertFolder(const QVariantMap &folder)
     q.bindValue(QStringLiteral(":special_use"), folder.value(QStringLiteral("specialUse")));
     q.exec();
 
-    reloadFolders();
+    if (QThread::currentThread() == thread()) {
+        reloadFolders();
+    } else {
+        // Coalesce rapid upsertFolder calls (e.g. 16 folders at startup) into one reloadFolders.
+        bool expected = false;
+        if (m_pendingFoldersReload.compare_exchange_strong(expected, true)) {
+            QMetaObject::invokeMethod(this, [this]() {
+                m_pendingFoldersReload.store(false);
+                reloadFolders();
+            }, Qt::QueuedConnection);
+        }
+    }
 }
 
 void DataStore::pruneFolderToUids(const QString &accountEmail, const QString &folder, const QStringList &uids)
 {
+    QElapsedTimer t; t.start();
     auto database = db();
     if (!database.isValid() || !database.isOpen()) {
         if (!init()) return;
@@ -2110,12 +2211,9 @@ void DataStore::pruneFolderToUids(const QString &accountEmail, const QString &fo
     qOrphan.exec(QStringLiteral("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"));
     const int removedCanonicalRows = qOrphan.numRowsAffected();
 
-    qInfo().noquote() << "[prune]"
-                      << "account=" << acc
-                      << "folder=" << fld
-                      << "remoteUidCount=" << uids.size()
-                      << "removedFolderRows=" << removedFolderRows
-                      << "removedCanonicalRows=" << removedCanonicalRows;
+    qInfo("[timing] t=%lld pruneFolderToUids done in %lldms folder=%s remoteUids=%d deleted=%d orphans=%d",
+          (long long)QDateTime::currentMSecsSinceEpoch(),
+          (long long)t.elapsed(), qPrintable(fld), (int)uids.size(), removedFolderRows, removedCanonicalRows);
 
     if (removedFolderRows > 0 || removedCanonicalRows > 0)
         scheduleDataChangedSignal();
@@ -3038,20 +3136,86 @@ bool DataStore::updateBodyForKey(const QString &accountEmail,
 
 void DataStore::scheduleDataChangedSignal()
 {
-    if (m_reloadInboxScheduled)
+    bool expected = false;
+    if (!m_reloadInboxScheduled.compare_exchange_strong(expected, true))
         return;
 
-    m_reloadInboxScheduled = true;
+    static std::atomic<int> s_scheduleCount{0};
+    const int n = ++s_scheduleCount;
+    qInfo("[timing] t=%lld scheduleDataChanged fired (#%d) thread=%s",
+          (long long)QDateTime::currentMSecsSinceEpoch(),
+          n, QThread::currentThread() == thread() ? "ui" : "worker");
+
     QTimer::singleShot(300, this, [this]() {
-        m_reloadInboxScheduled = false;
+        m_reloadInboxScheduled.store(false);
         notifyDataChanged();
     });
 }
 
+QStringList DataStore::statsKeysFromFolders() const
+{
+    QStringList keys;
+    keys << QStringLiteral("favorites:all-inboxes")
+         << QStringLiteral("favorites:unread")
+         << QStringLiteral("favorites:flagged");
+    for (const QVariant &fv : m_folders) {
+        const QVariantMap f = fv.toMap();
+        const QString rawName = f.value(QStringLiteral("name")).toString().trimmed();
+        if (rawName.isEmpty()) continue;
+        if (rawName.contains(QStringLiteral("/Categories/"), Qt::CaseInsensitive)) continue;
+        QString norm = rawName;
+        if (norm.toLower().startsWith(QStringLiteral("[gmail]/")))
+            norm = norm.mid(8);
+        else if (norm.toLower().startsWith(QStringLiteral("[google mail]/")))
+            norm = norm.mid(14);
+        norm = norm.toLower();
+        keys << (QStringLiteral("account:") + norm);
+        if (f.value(QStringLiteral("specialUse")).toString().trimmed().isEmpty()
+                && !norm.contains(QLatin1Char('/')))
+            keys << (QStringLiteral("tag:") + norm);
+    }
+    keys.removeDuplicates();
+    return keys;
+}
+
+void DataStore::warmStatsCacheThen(std::function<void()> callback)
+{
+    const QStringList keys = statsKeysFromFolders();
+    // Invalidate stale entries we're about to recompute.
+    {
+        QMutexLocker lock(&m_folderStatsCacheMutex);
+        for (const QString &k : keys)
+            m_folderStatsCache.remove(k);
+    }
+    {
+        QMutexLocker lock(&m_tagItemsCacheMutex);
+        m_tagItemsCacheValid = false;
+    }
+    auto *watcher = new QFutureWatcher<void>(this);
+    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, cb = std::move(callback)]() {
+        watcher->deleteLater();
+        cb();
+    });
+    watcher->setFuture(QtConcurrent::run([this, keys]() {
+        QElapsedTimer tw; tw.start();
+        for (const QString &key : keys)
+            (void)statsForFolder(key, {});
+        (void)tagItems();   // pre-warm tagItems cache so tagFolderItems() is instant on UI thread
+        qInfo("[timing] t=%lld stats pre-warm done in %lldms keys=%d",
+              (long long)QDateTime::currentMSecsSinceEpoch(),
+              (long long)tw.elapsed(), keys.size());
+    }));
+}
+
 void DataStore::notifyDataChanged()
 {
-    // Legacy notification hook retained for listeners while m_inbox cache is removed.
-    emit dataChanged();
+    // Pre-warm stats cache on a worker thread, then emit dataChanged so QML
+    // folderStatsByKey bindings (which fire on dataChanged) get instant cache hits.
+    warmStatsCacheThen([this]() {
+        qInfo("[timing] t=%lld dataChanged (stats cache warmed)",
+              (long long)QDateTime::currentMSecsSinceEpoch());
+        emit dataChanged();
+    });
 }
 
 QVariantList DataStore::messagesForSelection(const QString &folderKey,
@@ -3801,8 +3965,11 @@ QString DataStore::avatarForEmail(const QString &email) const
         return {};
 
     // Fast path: in-memory cache populated on first DB hit.
-    if (m_avatarCache.contains(e))
-        return m_avatarCache.value(e);
+    {
+        QMutexLocker lock(&m_avatarCacheMutex);
+        if (m_avatarCache.contains(e))
+            return m_avatarCache.value(e);
+    }
 
     auto database = db();
     if (database.isValid() && database.isOpen()) {
@@ -3811,11 +3978,13 @@ QString DataStore::avatarForEmail(const QString &email) const
         q.bindValue(QStringLiteral(":email"), e);
         if (q.exec() && q.next()) {
             const QString cached = q.value(0).toString().trimmed();
+            QMutexLocker lock(&m_avatarCacheMutex);
             m_avatarCache.insert(e, cached);
             return cached;
         }
     }
 
+    QMutexLocker lock(&m_avatarCacheMutex);
     m_avatarCache.insert(e, {});
     return {};
 }
@@ -4066,7 +4235,7 @@ void DataStore::updateContactAvatar(const QString &email, const QString &avatarU
     q.bindValue(QStringLiteral(":source"), source.trimmed().isEmpty()
                 ? QStringLiteral("google-people") : source.trimmed().toLower());
     q.exec();
-    m_avatarCache.insert(e, storedUrl);
+    { QMutexLocker lock(&m_avatarCacheMutex); m_avatarCache.insert(e, storedUrl); }
 }
 
 bool DataStore::hasCachedHeadersForFolder(const QString &rawFolderName, int minCount) const
@@ -4095,6 +4264,16 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
     int total = 0;
     int unread = 0;
 
+    const QString key = folderKey.trimmed().toLower();
+
+    // Fast path: return cached result (pre-warmed on worker thread before foldersChanged).
+    {
+        QMutexLocker lock(&m_folderStatsCacheMutex);
+        auto it = m_folderStatsCache.constFind(key);
+        if (it != m_folderStatsCache.cend())
+            return *it;
+    }
+
     const auto database = db();
     if (!database.isValid() || !database.isOpen()) {
         out.insert(QStringLiteral("total"), 0);
@@ -4108,8 +4287,6 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
             unread = q.value(1).toInt();
         }
     };
-
-    const QString key = folderKey.trimmed().toLower();
     if (key == QStringLiteral("favorites:all-inboxes") || key == QStringLiteral("favorites:unread")) {
         const bool unreadOnly = (key == QStringLiteral("favorites:unread"));
         QSqlQuery q(database);
@@ -4477,11 +4654,18 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
 
     out.insert(QStringLiteral("total"), total);
     out.insert(QStringLiteral("unread"), unread);
+
+    // Cache for future calls (e.g. after pre-warm, subsequent delegate creations are instant).
+    {
+        QMutexLocker lock(&m_folderStatsCacheMutex);
+        m_folderStatsCache.insert(key, out);
+    }
     return out;
 }
 
 void DataStore::reloadFolders()
 {
+    QElapsedTimer t; t.start();
     m_folders.clear();
     auto database = db();
     if (!database.isValid() || !database.isOpen()) {
@@ -4513,7 +4697,17 @@ void DataStore::reloadFolders()
         m_folders.push_back(row);
     }
 
-    emit foldersChanged();
+    qInfo("[timing] t=%lld reloadFolders done in %lldms folders=%d",
+          (long long)QDateTime::currentMSecsSinceEpoch(),
+          (long long)t.elapsed(), (int)m_folders.size());
+
+    // Pre-warm stats cache on worker thread so QML folderStats delegates see
+    // instant cache hits when foldersChanged fires (no synchronous DB queries on UI thread).
+    warmStatsCacheThen([this]() {
+        qInfo("[timing] t=%lld foldersChanged (stats cache warmed)",
+              (long long)QDateTime::currentMSecsSinceEpoch());
+        emit foldersChanged();
+    });
 }
 
 void DataStore::upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments)
