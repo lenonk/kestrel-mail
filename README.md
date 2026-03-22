@@ -62,7 +62,7 @@ cmake --build build
 
 ### Demo screencast
 
-<video src="Screenshots/Screencast_20260319_025819.webm" controls width="960"></video>
+![Demo screencast](Screenshots/Screencast_20260319_025819.gif)
 
 ## License
 
