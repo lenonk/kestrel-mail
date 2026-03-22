@@ -75,6 +75,13 @@ QSemaphore g_bgHydrateSem{1};
 QSemaphore g_bgFolderSyncSem{1};
 constexpr int kPoolAcquireTimeoutMs = 3500;
 
+bool offlineModeEnabledFromEnv() {
+    const QByteArray raw = qgetenv("KESTREL_OFFLINE_MODE").trimmed().toLower();
+    if (raw.isEmpty())
+        return false;
+    return raw == "1" || raw == "true" || raw == "yes" || raw == "on";
+}
+
 // Dedicated hydration slot — one per account, established before the pool.
 // Used exclusively for user-click-initiated hydration to guarantee availability.
 QMutex g_hydrateMutex;
@@ -214,7 +221,10 @@ ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVau
     : QObject(parent)
     , m_accounts(accounts)
     , m_store(store)
-    , m_vault(vault) {
+    , m_vault(vault)
+    , m_offlineMode(offlineModeEnabledFromEnv()) {
+    if (m_offlineMode)
+        qInfo() << "[offline-mode] KESTREL_OFFLINE_MODE enabled; IMAP network operations are disabled.";
     Imap::Connection::setThrottleObserver([this](const QString &accountEmail, bool throttled, const QString &response) {
         const QString msg = QStringLiteral("Account throttled by server: %1")
                                 .arg(response.simplified().left(240));
@@ -255,6 +265,11 @@ ImapService::initialize() {
             }
             return {};
         };
+    }
+
+    if (m_offlineMode) {
+        emit realtimeStatus(true, QStringLiteral("Offline mode is enabled (KESTREL_OFFLINE_MODE=1). IMAP sync is paused."));
+        return;
     }
 
     if (!g_poolInitialized.exchange(true)) {
@@ -614,7 +629,7 @@ static bool isImageAttachment(const QVariantMap &am) {
 
 void
 ImapService::prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    if (!m_store)
+    if (m_offlineMode || !m_store)
         return;
 
     const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
@@ -740,7 +755,7 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
 
 void
 ImapService::prefetchImageAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    if (!m_store)
+    if (m_offlineMode || !m_store)
         return;
 
     const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
@@ -1472,6 +1487,14 @@ ImapService::fetchFolderHeaders(const QString &email,
         if (m_store) m_store->reconcileReadFlags(acctEmail, folder, readUids);
     };
 
+    ctx.lookupByMessageIdHeaders = [this](const QString &acctEmail, const QStringList &msgIds) {
+        return m_store ? m_store->lookupByMessageIdHeaders(acctEmail, msgIds) : QMap<QString,qint64>{};
+    };
+    ctx.insertFolderEdge = [this](const QString &acctEmail, qint64 msgId,
+                                   const QString &folder, const QString &uid, int unread) {
+        if (m_store) m_store->insertFolderEdge(acctEmail, msgId, folder, uid, unread);
+    };
+
     // CONDSTORE: load the modseq we recorded at the end of the previous sync for this
     // folder.  SyncEngine compares it with the fresh EXAMINE HIGHESTMODSEQ to decide
     // whether any server-side changes occurred since our last sync.
@@ -1541,9 +1564,10 @@ ImapService::syncFolderInternal(const AccountInfo &account,
             // No target set — backfill everything missing.
             budget = -1;
         } else {
-            const qint64 localCount = m_store ? m_store->folderMessageCount(email, target) : 0;
-            budget = (localCount < static_cast<qint64>(fetchTarget))
-                         ? static_cast<int>(fetchTarget - localCount) : 0;
+            // Allow a full fetchTarget-sized backfill batch each session.
+            // SyncEngine's internal check (localCount == remoteExists via EXAMINE) skips
+            // UID SEARCH ALL if we already have everything, so this is safe to leave open.
+            budget = fetchTarget;
         }
     }
 
@@ -1594,6 +1618,11 @@ ImapService::refreshFolderList(bool announce) {
     if (m_destroying)
         return;
 
+    if (m_offlineMode) {
+        if (announce)
+            emit syncFinished(true, QStringLiteral("Offline mode: skipped folder refresh."));
+        return;
+    }
 
     if (!m_accounts || !m_store) {
         if (announce)
@@ -1895,6 +1924,12 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
     if (m_destroying || !m_accounts || !m_store || emailNorm.isEmpty() || uidNorm.isEmpty())
         return;
 
+    if (m_offlineMode) {
+        if (userInitiated)
+            emit hydrateStatus(false, QStringLiteral("Offline mode is enabled. Body hydration is paused."));
+        return;
+    }
+
     const QString inFlightKey = (emailNorm + "|"_L1 + folderNorm.toLower() + "|"_L1 + uidNorm);
     {
         QMutexLocker locker(&m_inFlightBodyHydrationsMutex);
@@ -2105,6 +2140,11 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
             m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
     }
 
+    if (m_offlineMode) {
+        emit realtimeStatus(true, QStringLiteral("Offline mode: skipped IMAP move for %1.").arg(uid));
+        return;
+    }
+
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
@@ -2150,6 +2190,9 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
 
     if (m_store)
         m_store->markMessageRead(accountEmail, uid);
+
+    if (m_offlineMode)
+        return;
 
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid]() {
         if (m_destroying.load()) return;
@@ -2213,6 +2256,11 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
         // Optimistic local membership so UI reflects the tag immediately.
         if (messageId > 0)
             m_store->insertFolderEdge(accountEmail, messageId, resolvedTarget, uid, unreadVal);
+    }
+
+    if (m_offlineMode) {
+        emit realtimeStatus(true, QStringLiteral("Offline mode: skipped IMAP add-to-folder for %1.").arg(uid));
+        return;
     }
 
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, messageId, unreadVal]() {
@@ -2313,6 +2361,11 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
             m_store->deleteSingleFolderEdge(accountEmail, resolvedTarget, uid);
     }
 
+    if (m_offlineMode) {
+        emit realtimeStatus(true, QStringLiteral("Offline mode: skipped IMAP remove-from-folder for %1.").arg(uid));
+        return;
+    }
+
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, targetUid]() {
         if (m_destroying.load())
             return;
@@ -2347,6 +2400,12 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
         return;
 
     const auto target = folderName.trimmed().isEmpty() ? "INBOX"_L1 : folderName.trimmed();
+
+    if (m_offlineMode) {
+        if (announce)
+            emit syncFinished(true, QStringLiteral("Offline mode: skipped sync for %1.").arg(target));
+        return;
+    }
     const QString syncTargetKey = target.trimmed().toLower();
 
     if (!announce) {
@@ -2505,6 +2564,11 @@ ImapService::syncAll(bool announce) {
     if (m_destroying)
         return;
 
+    if (m_offlineMode) {
+        if (announce)
+            emit syncFinished(true, QStringLiteral("Offline mode: skipped sync all."));
+        return;
+    }
 
     if (!m_accounts || !m_store) {
         if (announce)

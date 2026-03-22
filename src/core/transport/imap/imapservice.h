@@ -125,6 +125,7 @@ private:
     QMutex                    m_bgHydrateMutex;
 
     QHash<QString, bool>      m_accountThrottleState;
+    bool                       m_offlineMode = false;
 
     struct AttachmentCacheEntry { QString localPath; qint64 expiresAt = 0; };
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;
