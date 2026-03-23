@@ -44,10 +44,19 @@ Rectangle {
     property int modelThreadCount
     property var modelUid
     property bool modelUnread
+    property var modelAllSenders
+    property bool modelFlagged
     readonly property string nameLabel: {
         if (!appRoot)
             return "";
-        return showRecipient ? i18n("To: %1", appRoot.displayRecipientNames(modelRecipient, modelAccountEmail)) : appRoot.displaySenderName(modelSender, modelAccountEmail);
+        if (showRecipient)
+            return i18n("To: %1", appRoot.displayRecipientNames(modelRecipient, modelAccountEmail));
+        if (modelThreadCount > 1 && modelAllSenders) {
+            const participants = appRoot.displayThreadParticipants(modelAllSenders, modelAccountEmail);
+            if (participants.length)
+                return participants;
+        }
+        return appRoot.displaySenderName(modelSender, modelAccountEmail);
     }
     readonly property string selectedFolderKey: (appRoot && appRoot.selectedFolderKey) ? appRoot.selectedFolderKey.toString().toLowerCase() : ""
     readonly property string selectedFolderNorm: (appRoot && appRoot.normalizedFolderFromKey) ? appRoot.normalizedFolderFromKey(appRoot.selectedFolderKey).toString().toLowerCase() : "" || ""
@@ -206,18 +215,27 @@ Rectangle {
                 width: 9
             }
 
-            // Flag icon on hover
+            // Flag icon — always visible when flagged, shown on hover otherwise
             Item {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredHeight: 20
                 Layout.preferredWidth: 20
-                visible: rowHover.hovered
+                visible: modelFlagged || rowHover.hovered
 
                 MouseArea {
-                    id: flagHoverArea
+                    id: flagMouseArea
                     anchors.fill: parent
-                    enabled: rowHover.hovered
                     hoverEnabled: true
+
+                    onClicked: function (mouse) {
+                        mouse.accepted = true;
+                        if (!messageCard.appRoot) return;
+                        messageCard.appRoot.toggleMessageFlagged(
+                            (modelAccountEmail || "").toString(),
+                            (modelFolder || "").toString(),
+                            (modelUid || "").toString(),
+                            !!modelFlagged);
+                    }
                 }
 
                 Image {
@@ -231,7 +249,9 @@ Rectangle {
 
                 ColorOverlay {
                     anchors.fill: flagImage
-                    color: flagHoverArea.containsMouse ? Kirigami.Theme.textColor : Qt.darker(Kirigami.Theme.textColor, 1.25)
+                    color: modelFlagged ? "#E53935"
+                                       : (flagMouseArea.containsMouse ? Kirigami.Theme.textColor
+                                                                       : Qt.darker(Kirigami.Theme.textColor, 1.25))
                     source: flagImage
                 }
             }

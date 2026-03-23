@@ -176,11 +176,48 @@ Item {
             return;
         _threadHydrateIfNeeded(msgs[index]);
         _loadCardAttachments(msgs[index]);
+        _startCardImagePrefetch(msgs[index]);
     }
-    function _threadRecipientName(msg) {
-        if (!msg || !msg.recipient)
-            return "";
-        return appRoot.displayRecipientNames(msg.recipient, msg.accountEmail || "");
+
+    function _startCardImagePrefetch(msg) {
+        if (!msg || !appRoot || !appRoot.imapServiceObj)
+            return;
+        const account = (msg.accountEmail || "").toString();
+        const folder = (msg.folder || "").toString();
+        const uid = (msg.uid || "").toString();
+        if (!account.length || !folder.length || !uid.length)
+            return;
+        appRoot.imapServiceObj.prefetchImageAttachments(account, folder, uid);
+        if (appRoot.dataStoreObj && appRoot.dataStoreObj.fetchCandidatesForMessageKey) {
+            const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
+            for (let i = 0; i < candidates.length; ++i) {
+                const c = candidates[i] || {};
+                const cf = (c.folder || "").toString();
+                const cu = (c.uid || "").toString();
+                if (!cf.length || !cu.length || (cf === folder && cu === uid))
+                    continue;
+                appRoot.imapServiceObj.prefetchImageAttachments(account, cf, cu);
+            }
+        }
+    }
+    function _threadAddressTokens(msg) {
+        if (!msg) return []
+        const acct = (msg.accountEmail || "").toString()
+        const toMailboxes = appRoot._splitRecipientMailboxes((msg.recipient || "").toString().trim())
+        const ccRaw = (msg.cc || "").toString().trim()
+        const ccMailboxes = ccRaw.length > 0 ? appRoot._splitRecipientMailboxes(ccRaw) : []
+        const tokens = []
+        for (let i = 0; i < toMailboxes.length; i++) {
+            if (i > 0) tokens.push({ type: "separator", text: "," })
+            const raw = toMailboxes[i].trim()
+            tokens.push({ type: "address", raw: raw, label: appRoot.displayRecipientName(raw, acct) })
+        }
+        for (let i = 0; i < ccMailboxes.length; i++) {
+            tokens.push({ type: "separator", text: i === 0 ? i18n("and copy to") : "," })
+            const raw = ccMailboxes[i].trim()
+            tokens.push({ type: "address", raw: raw, label: appRoot.displayRecipientName(raw, acct) })
+        }
+        return tokens
     }
     function _threadScrolledOffTopCount() {
         const yTop = threadFlickable.contentY;
@@ -709,43 +746,50 @@ Item {
                                     // Expanded: recipient line
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        spacing: 4
+                                        spacing: 3
                                         visible: threadCard.isExpanded
 
                                         QQC2.Label {
                                             font.pixelSize: 12
                                             opacity: 0.8
                                             text: i18n("to")
+                                            rightPadding: 1
                                         }
-                                        QQC2.Label {
-                                            id: threadRecipientLabel
-                                            Layout.fillWidth: false
-                                            color: "#4ea3ff"
-                                            elide: Text.ElideRight
-                                            font.bold: true
-                                            font.pixelSize: 12
-                                            text: root._threadRecipientName(threadCard.modelData)
+                                        Repeater {
+                                            model: root._threadAddressTokens(threadCard.modelData)
+                                            delegate: QQC2.Label {
+                                                id: threadTokenLbl
+                                                required property var modelData
+                                                readonly property bool isAddress: modelData.type === "address"
+                                                text: isAddress ? modelData.label : modelData.text
+                                                color: isAddress ? "#4ea3ff" : Kirigami.Theme.textColor
+                                                font.bold: isAddress
+                                                font.pixelSize: 12
+                                                opacity: isAddress ? 0.95 : 0.8
 
-                                            MouseArea {
-                                                id: threadRecipientMouse
-                                                anchors.fill: parent
-                                                cursorShape: Qt.PointingHandCursor
-                                                hoverEnabled: true
-                                                onClicked: appRoot.openComposerTo(threadCard.modelData.recipient || "", i18n("recipient"))
-                                            }
-                                            ContactHoverPopup {
-                                                anchorItem: threadRecipientLabel
-                                                avatarSources: appRoot.senderAvatarSources(threadCard.modelData.recipient || "", "", "", threadCard.modelData.accountEmail || "")
-                                                avatarText: (root._threadRecipientName(threadCard.modelData) || "?").slice(0, 1).toUpperCase()
-                                                primaryButtonText: i18n("Send mail")
-                                                secondaryButtonText: i18n("Add to contacts")
-                                                subtitleText: threadCard.modelData.recipient || ""
-                                                targetHovered: threadRecipientMouse.containsMouse
-                                                titleText: root._threadRecipientName(threadCard.modelData)
-                                                onPrimaryTriggered: appRoot.openComposerTo(threadCard.modelData.recipient || "", i18n("recipient"))
-                                                onSecondaryTriggered: appRoot.showInlineStatus(i18n("Add to contacts requested for %1").arg(threadCard.modelData.recipient || ""), false)
+                                                MouseArea {
+                                                    id: threadTokenMouse
+                                                    anchors.fill: parent
+                                                    cursorShape: threadTokenLbl.isAddress ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                                    hoverEnabled: threadTokenLbl.isAddress
+                                                    enabled: threadTokenLbl.isAddress
+                                                    onClicked: appRoot.openComposerTo(threadTokenLbl.modelData.raw, i18n("recipient"))
+                                                }
+                                                ContactHoverPopup {
+                                                    anchorItem: threadTokenLbl
+                                                    avatarSources: threadTokenLbl.isAddress ? appRoot.senderAvatarSources(threadTokenLbl.modelData.raw, "", "", threadCard.modelData ? threadCard.modelData.accountEmail : "") : []
+                                                    avatarText: threadTokenLbl.isAddress ? (threadTokenLbl.modelData.label || "?").slice(0, 1).toUpperCase() : "?"
+                                                    primaryButtonText: i18n("Send mail")
+                                                    secondaryButtonText: i18n("Add to contacts")
+                                                    subtitleText: threadTokenLbl.isAddress ? threadTokenLbl.modelData.raw : ""
+                                                    targetHovered: threadTokenMouse.containsMouse
+                                                    titleText: threadTokenLbl.isAddress ? threadTokenLbl.modelData.label : ""
+                                                    onPrimaryTriggered: appRoot.openComposerTo(threadTokenLbl.modelData.raw, i18n("recipient"))
+                                                    onSecondaryTriggered: appRoot.showInlineStatus(i18n("Add to contacts requested for %1").arg(threadTokenLbl.modelData.raw), false)
+                                                }
                                             }
                                         }
+                                        Item { Layout.fillWidth: true }
                                     }
                                 }
 
@@ -788,17 +832,16 @@ Item {
                                                 const msg = threadCard.modelData;
                                                 if (!msg)
                                                     return;
+                                                const cardDark = root._threadCardDarkMode(threadCard.index);
                                                 if (actionText === i18n("Reply all")) {
-                                                    const subject =  i18n("Re: %1", root.messageSubject);
-                                                    appRoot.openComposerTo(msg.recipient || "", i18n("reply all"), subject);
+                                                    appRoot.openReplyCompose(msg, true, cardDark);
                                                 }
                                                 else if (actionText === i18n("Forward")) {
                                                     const forwardAttachments = root._forwardAttachmentPathsForMessage(msg);
-                                                    appRoot.forwardMessageFromData(msg, root._threadDate(msg), forwardAttachments);
+                                                    appRoot.forwardMessageFromData(msg, root._threadDate(msg), forwardAttachments, cardDark);
                                                 }
                                                 else {
-                                                    const subject = i18n("Re: %1", root.messageSubject);
-                                                    appRoot.openComposerTo(msg.replyTo || msg.sender || "", i18n("reply"), subject);
+                                                    appRoot.openReplyCompose(msg, false, cardDark);
                                                 }
                                             }
                                         }

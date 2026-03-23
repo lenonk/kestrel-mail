@@ -1087,6 +1087,49 @@ Kirigami.ApplicationWindow {
         return raw.length ? raw : i18n("Unknown sender")
     }
 
+    // Returns a comma-separated string of unique participant display names for a
+    // thread, with the current user's accounts replaced by "Me" and "Me" sorted last.
+    function displayThreadParticipants(allSendersRaw, accountEmailHint) {
+        const raw = (allSendersRaw || "").toString()
+        if (!raw.length) return ""
+
+        // Collect all account emails for "Me" detection
+        const myEmails = (root.accountRepositoryObj ? root.accountRepositoryObj.accounts : [])
+            .map(function(a) { return (a.email || "").toString().trim().toLowerCase() })
+            .filter(function(e) { return e.length > 0 })
+
+        const parts = raw.split("\x1f")
+        const seen = {}
+        const others = []
+        let hasSelf = false
+
+        for (let i = 0; i < parts.length; ++i) {
+            const sender = (parts[i] || "").trim()
+            if (!sender.length) continue
+
+            // Extract email from "Display Name <email>" or plain email
+            const m = sender.match(/<([^>]+)>/)
+            const email = (m ? m[1] : sender).trim().toLowerCase()
+
+            const isSelf = myEmails.some(function(me) { return me === email })
+            if (isSelf) {
+                hasSelf = true
+                continue
+            }
+
+            // Get display name
+            const label = root.displaySenderName(sender, accountEmailHint)
+            const key = label.toLowerCase()
+            if (!seen[key]) {
+                seen[key] = true
+                others.push(label)
+            }
+        }
+
+        if (hasSelf) others.push(i18n("Me"))
+        return others.join(", ")
+    }
+
     function _titleCaseWords(s) {
         const raw = (s || "").toString().trim()
         if (!raw.length) return ""
@@ -1357,12 +1400,10 @@ Kirigami.ApplicationWindow {
         return new Date(d.receivedAt).toLocaleString(Qt.locale(), "ddd M/d/yyyy h:mm AP")
     }
 
-    function forwardMessageFromData(d, dateText, attachments) {
-        if (!d) return
-
-        const originalHtml = (d.bodyHtml && d.bodyHtml.toString().length > 0) ? d.bodyHtml.toString() : ""
-        const originalText = (d.body && d.body.toString().length > 0) ? d.body.toString() : ((d.snippet || "").toString())
-
+    // Builds {body, bodyText} for a quoted message compose window.
+    // body    → original HTML for WebEngineView (empty if plain-text source)
+    // bodyText → RichText header + optional plain text for the editable TextArea
+    function _buildQuotedContent(d, headerLabel) {
         function esc(s) {
             return (s || "").toString()
                 .replace(/&/g, "&amp;")
@@ -1372,7 +1413,6 @@ Kirigami.ApplicationWindow {
         function mailtoLink(email) {
             return '<a href="mailto:' + email + '">' + esc(email) + '</a>'
         }
-        // bodyArea is RichText; produce HTML: re-quote name, escape <>, link the email address.
         function _fmtFromHtml(raw) {
             const s = (raw || "").toString().trim()
             const lt = s.lastIndexOf('<')
@@ -1386,7 +1426,6 @@ Kirigami.ApplicationWindow {
             }
             return s.includes('@') ? mailtoLink(s) : esc(s)
         }
-        // Extract email from "Name <email>" and render as mailto link.
         function _fmtToHtml(raw) {
             const s = (raw || "").toString().trim()
             const lt = s.lastIndexOf('<')
@@ -1395,32 +1434,31 @@ Kirigami.ApplicationWindow {
             return email.includes('@') ? mailtoLink(email) : esc(email)
         }
 
+        const originalHtml = (d.bodyHtml && d.bodyHtml.toString().length > 0) ? d.bodyHtml.toString() : ""
+        const originalText = (d.body && d.body.toString().length > 0) ? d.body.toString() : ((d.snippet || "").toString())
         const senderRaw = (d.sender && d.sender.toString().length > 0) ? d.sender.toString() : (d.accountEmail || "").toString()
         const toRaw = (d.recipient || "").toString()
-        const fwdDate = d.receivedAt
+        const msgDate = d.receivedAt
             ? new Date(d.receivedAt).toLocaleString(Qt.locale(), "M/d/yyyy h:mm:ss AP")
-            : (dateText || "").toString()
+            : ""
 
-        const header = "<br>------ Forwarded Message ------<br>"
+        const header = "<br>------ " + headerLabel + " ------<br>"
                      + "From: " + _fmtFromHtml(senderRaw) + "<br>"
                      + "To: " + _fmtToHtml(toRaw) + "<br>"
-                     + "Date: " + esc(fwdDate) + "<br>"
+                     + (msgDate ? "Date: " + esc(msgDate) + "<br>" : "")
                      + "Subject: " + esc((d.subject || "").toString()) + "<br><br>"
 
-        let body = ""
-        let bodyText = ""
+        if (originalHtml.length > 0)
+            return { body: originalHtml, bodyText: header }
 
-        if (originalHtml.length > 0) {
-            // HTML body: header in the editable TextArea, original HTML in the WebEngineView.
-            body = originalHtml
-            bodyText = header
-        } else {
-            // Plain text: escape and convert newlines for the RichText TextArea.
-            const escapedText = esc(originalText).replace(/\n/g, "<br>")
-            bodyText = header + escapedText
-        }
+        const escapedText = esc(originalText).replace(/\n/g, "<br>")
+        return { body: "", bodyText: header + escapedText }
+    }
 
-        root.openForwardCompose(root._fwdSubject(d.subject), body, bodyText, attachments || [], root.contentPaneDarkModeEnabled)
+    function forwardMessageFromData(d, dateText, attachments, darkMode) {
+        if (!d) return
+        const quoted = root._buildQuotedContent(d, "Forwarded Message")
+        root.openForwardCompose(root._fwdSubject(d.subject), quoted.body, quoted.bodyText, attachments || [], darkMode !== undefined ? !!darkMode : root.contentPaneDarkModeEnabled)
     }
 
     function openComposerTo(address, contextLabel, subjectParam = "") {
@@ -1431,6 +1469,50 @@ Kirigami.ApplicationWindow {
                 ? i18n("Re: %1").arg(root.selectedMessageData.subject) : ""
         }
         composeDialog.openCompose(email, subject, "")
+    }
+
+    function openReplyCompose(d, isReplyAll, darkMode) {
+        if (!d) return
+        const replyTo = (d.replyTo && d.replyTo.length > 0) ? d.replyTo : d.sender
+        const quoted = root._buildQuotedContent(d, "Original Message")
+        const params = {
+            toList: [replyTo],
+            subject: root._replySubject(d.subject),
+            body: quoted.body,
+            bodyText: quoted.bodyText,
+            darkMode: !!darkMode
+        }
+        if (isReplyAll) {
+            const myEmails = (root.accountRepositoryObj ? root.accountRepositoryObj.accounts : [])
+                             .map(a => (a.email || "").toLowerCase())
+
+            // Extract bare email from "Display Name <email>" or plain email
+            function bareEmail(addr) {
+                const m = (addr || "").match(/<([^>]+)>/)
+                return (m ? m[1] : addr).trim().toLowerCase()
+            }
+
+            // Addresses already going into TO — don't duplicate in CC
+            const toEmails = params.toList.map(bareEmail)
+
+            // Original TO + original CC are all CC candidates for reply-all
+            const candidates = root._splitRecipientMailboxes((d.recipient || "").toString())
+                .concat(root._splitRecipientMailboxes((d.cc || "").toString()))
+
+            const seen = {}
+            params.ccList = []
+            for (let i = 0; i < candidates.length; i++) {
+                const addr = candidates[i].trim()
+                if (!addr.length) continue
+                const email = bareEmail(addr)
+                if (!email.length || seen[email]) continue
+                seen[email] = true
+                if (myEmails.some(me => me === email)) continue   // skip self
+                if (toEmails.some(t => t === email)) continue     // skip already-in-TO
+                params.ccList.push(addr)
+            }
+        }
+        composeDialog.openComposeReply(params)
     }
 
     function _replySubject(subj) {
@@ -1477,6 +1559,11 @@ Kirigami.ApplicationWindow {
         delete next["msg:" + accountEmail + "|" + folder + "|" + uid]
         root.selectedMessageKeys = next
         imapServiceObj.moveMessage(accountEmail, folder, uid, targetFolder)
+    }
+
+    function toggleMessageFlagged(accountEmail, folder, uid, currentlyFlagged) {
+        if (!imapServiceObj || !accountEmail.length || !uid.length) return
+        imapServiceObj.markMessageFlagged(accountEmail, folder, uid, !currentlyFlagged)
     }
 
     // Delete all checked messages (or the currently viewed one if nothing is checked).
@@ -1871,25 +1958,7 @@ Kirigami.ApplicationWindow {
                         ]
                         onTriggered: (actionText) => {
                             const d = root.selectedMessageData; if (!d) return
-                            const replyTo = (d.replyTo && d.replyTo.length > 0) ? d.replyTo : d.sender
-                            if (actionText === i18n("Reply to all")) {
-                                const myEmails = (root.accountRepositoryObj ? root.accountRepositoryObj.accounts : [])
-                                                 .map(a => (a.email || "").toLowerCase())
-                                const ccRaw = (d.recipient || "").split(",").map(s => s.trim()).filter(s => {
-                                    if (!s.length) return false
-                                    const l = s.toLowerCase()
-                                    return !myEmails.some(me => l.includes(me))
-                                })
-                                composeDialog.openComposeReply({
-                                    toList: [replyTo], ccList: ccRaw,
-                                    subject: root._replySubject(d.subject), body: root._quotedBody(d)
-                                })
-                            } else {
-                                composeDialog.openComposeReply({
-                                    toList: [replyTo],
-                                    subject: root._replySubject(d.subject), body: root._quotedBody(d)
-                                })
-                            }
+                            root.openReplyCompose(d, actionText === i18n("Reply to all"), root.contentPaneDarkModeEnabled)
                         }
                     }
                     Components.MailActionButton {
@@ -1897,18 +1966,7 @@ Kirigami.ApplicationWindow {
                         text: i18n("Reply All")
                         onTriggered: {
                             const d = root.selectedMessageData; if (!d) return
-                            const replyTo = (d.replyTo && d.replyTo.length > 0) ? d.replyTo : d.sender
-                            const myEmails = (root.accountRepositoryObj ? root.accountRepositoryObj.accounts : [])
-                                             .map(a => (a.email || "").toLowerCase())
-                            const ccRaw = (d.recipient || "").split(",").map(s => s.trim()).filter(s => {
-                                if (!s.length) return false
-                                const l = s.toLowerCase()
-                                return !myEmails.some(me => l.includes(me))
-                            })
-                            composeDialog.openComposeReply({
-                                toList: [replyTo], ccList: ccRaw,
-                                subject: root._replySubject(d.subject), body: root._quotedBody(d)
-                            })
+                            root.openReplyCompose(d, true, root.contentPaneDarkModeEnabled)
                         }
                     }
                     Components.MailActionButton {
@@ -1916,6 +1974,9 @@ Kirigami.ApplicationWindow {
                         text: i18n("Forward")
                         onTriggered: {
                             const d = root.selectedMessageData; if (!d) return
+                            // Kick off downloads now so they're ready (or in flight) by the time Send is clicked.
+                            if (messageContentPane && messageContentPane.startAllAttachmentPrefetchForCurrentMessage)
+                                messageContentPane.startAllAttachmentPrefetchForCurrentMessage()
                             const a = (messageContentPane && messageContentPane.forwardAttachmentPathsForCurrentMessage)
                                         ? messageContentPane.forwardAttachmentPathsForCurrentMessage() : []
                             root.forwardMessageFromData(d, root._forwardDateText(d), a)

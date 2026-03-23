@@ -52,7 +52,9 @@ public:
         HasAttachmentsRole,
         HasTrackingPixelRole,
         ThreadCountRole,
-        IsImportantRole
+        IsImportantRole,
+        AllSendersRole,
+        FlaggedRole
     };
 
     explicit MessageListModel(QObject *parent = nullptr);
@@ -129,6 +131,7 @@ private:
 
     void scheduleRefresh();
     void onMessageMarkedRead(const QString &accountEmail, const QString &uid);
+    void onMessageFlaggedChanged(const QString &accountEmail, const QString &uid, bool flagged);
     void refreshView();
     void applyWindow();
     QVector<Row> buildRows(const QVariantList &rows) const;

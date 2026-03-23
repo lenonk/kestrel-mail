@@ -92,6 +92,38 @@ QString HtmlProcessor::sanitizeTrackingLinks(const QString &html) const
 
 QString HtmlProcessor::buildDarkModeInjection() const
 {
+    // Common near-white bgcolor values used by marketing/transactional emails.
+    // CSS !important in an author stylesheet beats both presentational hints (bgcolor attr)
+    // and non-!important inline styles, so this is more reliable than JS for this pattern.
+    static const QLatin1StringView kBgColorSelectors(
+        "[bgcolor='#ffffff'],[bgcolor='#FFFFFF'],[bgcolor='#fff'],[bgcolor='#FFF'],[bgcolor='white'],"
+        "[bgcolor='#f9f9f9'],[bgcolor='#F9F9F9'],[bgcolor='#fafafa'],[bgcolor='#FAFAFA'],"
+        "[bgcolor='#f8f8f8'],[bgcolor='#F8F8F8'],[bgcolor='#f5f5f5'],[bgcolor='#F5F5F5'],"
+        "[bgcolor='#f0f0f0'],[bgcolor='#F0F0F0'],[bgcolor='#eeeeee'],[bgcolor='#EEEEEE'],"
+        "[bgcolor='#e8e8e8'],[bgcolor='#E8E8E8'],[bgcolor='#e0e0e0'],[bgcolor='#E0E0E0'],"
+        "[bgcolor='#d9d9d9'],[bgcolor='#D9D9D9']");
+    // Same coverage for inline style="background-color: ..." (CSS !important beats non-!important inline).
+    static const QLatin1StringView kInlineStyleSelectors(
+        "[style*='background-color:#fff'],[style*='background-color: #fff'],"
+        "[style*='background-color:#FFF'],[style*='background-color: #FFF'],"
+        "[style*='background-color:white'],[style*='background-color: white'],"
+        "[style*='background-color:#ffffff'],[style*='background-color: #ffffff'],"
+        "[style*='background-color:#FFFFFF'],[style*='background-color: #FFFFFF'],"
+        "[style*='background-color:#f9f9f9'],[style*='background-color: #f9f9f9'],"
+        "[style*='background-color:#F9F9F9'],[style*='background-color: #F9F9F9'],"
+        "[style*='background-color:#fafafa'],[style*='background-color: #fafafa'],"
+        "[style*='background-color:#FAFAFA'],[style*='background-color: #FAFAFA'],"
+        "[style*='background-color:#f8f8f8'],[style*='background-color: #f8f8f8'],"
+        "[style*='background-color:#F8F8F8'],[style*='background-color: #F8F8F8'],"
+        "[style*='background-color:#f5f5f5'],[style*='background-color: #f5f5f5'],"
+        "[style*='background-color:#F5F5F5'],[style*='background-color: #F5F5F5'],"
+        "[style*='background-color:#f0f0f0'],[style*='background-color: #f0f0f0'],"
+        "[style*='background-color:#F0F0F0'],[style*='background-color: #F0F0F0'],"
+        "[style*='background-color:#eeeeee'],[style*='background-color: #eeeeee'],"
+        "[style*='background-color:#EEEEEE'],[style*='background-color: #EEEEEE'],"
+        "[style*='background-color:#e8e8e8'],[style*='background-color: #e8e8e8'],"
+        "[style*='background-color:#E8E8E8'],[style*='background-color: #E8E8E8']");
+
     const QString style =
         "<style data-dark-mode='baseline'>"
         "html, body { background-color:" + m_darkBg + " !important; color:" + m_lightText + " !important; }"
@@ -99,7 +131,9 @@ QString HtmlProcessor::buildDarkModeInjection() const
         "td[style*='border'], div[style*='border'], table[style*='border'] { border-color:" + m_borderColor + " !important; }"
         "hr { border-color:" + m_borderColor + " !important; }"
         "img, svg, canvas, video, picture, iframe { filter:none !important; mix-blend-mode:normal !important; opacity:1 !important; }"
-        "</style>"_L1;
+        + QLatin1StringView(kBgColorSelectors) + "{ background-color:" + m_darkBg + " !important; }"
+        + QLatin1StringView(kInlineStyleSelectors) + "{ background-color:" + m_darkBg + " !important; }"
+        + "</style>"_L1;
 
     const QString colorVars =
         "var DARK_BG='"    + m_darkBg    + "',"
@@ -119,8 +153,8 @@ function isImageShell(el){if(!el.querySelector||!el.querySelector('img,svg,canva
 function isTextLink(el){return !el.querySelector('div,table,p,h1,h2,h3,h4,h5,h6,section,article,header,footer');}
 function effectiveBg(el,doc){var cur=el;while(cur){var b=doc.defaultView.getComputedStyle(cur).backgroundColor;if(!isTransparent(b))return b;cur=cur.parentElement;}return DARK_BG;}
 function processEl(el,doc,origMap){if(MEDIA[el.tagName])return;var cs=doc.defaultView.getComputedStyle(el);if(!cs)return;var bg=cs.backgroundColor,fg=cs.color,hasBgImg=(cs.backgroundImage&&cs.backgroundImage!=='none')||el.hasAttribute('background');if(!isTransparent(bg)&&!hasBgImg){var rgb=parseRGB(bg);if(rgb&&lum(rgb[0],rgb[1],rgb[2])>0.7&&!isSaturated(rgb)){if(isImageShell(el)){el.style.setProperty('background-color','transparent','important');}else{var tgt=lum(rgb[0],rgb[1],rgb[2])>0.97?DARK_BG:SURFACE_BG;el.style.setProperty('background','none','important');el.style.setProperty('background-color',tgt,'important');}}}var fgR=parseRGB(fg);if(fgR){var fgL=lum(fgR[0],fgR[1],fgR[2]);if(fgL<0.35){var eff=effectiveBg(el,doc);var effR=parseRGB(eff)||[30,30,30];var effL=lum(effR[0],effR[1],effR[2]);var lo=Math.min(fgL,effL),hi=Math.max(fgL,effL);if((hi+0.05)/(lo+0.05)<3){var target=LIGHT_TEXT;if(el.tagName==='A'){target=isTextLink(el)?'#7ab4f5':LIGHT_TEXT;}else if(Math.max(fgR[0],fgR[1],fgR[2])-Math.min(fgR[0],fgR[1],fgR[2])>150){target='#7ab4f5';}el.style.setProperty('color',target,'important');}}else if(fgL>0.5){var ownBg2=cs.backgroundColor;if(isTransparent(ownBg2)||isLight(ownBg2)){var eff2=effectiveBg(el,doc);if(isLight(eff2)){var origColor=(origMap&&origMap.get(el))||el.style.color||'rgb(0,0,0)';el.style.setProperty('color',origColor,'important');}}}}var bc=cs.borderColor;if(bc&&isLight(bc))el.style.setProperty('border-color',BORDER_COLOR,'important');}
-function run(){try{var d=document;if(!d||!d.body)return;var all=d.querySelectorAll('*');var origMap=null;var myStyle=d.querySelector('style[data-dark-mode]');if(myStyle){origMap=new WeakMap();myStyle.disabled=true;for(var j=0;j<all.length;j++)origMap.set(all[j],d.defaultView.getComputedStyle(all[j]).color);myStyle.disabled=false;}for(var i=0;i<all.length;i++)processEl(all[i],d,origMap);}catch(e){console.log('kestrel-dark-error',e);}}
-if(document.readyState==='complete'||document.readyState==='interactive')run();else document.addEventListener('DOMContentLoaded',run,{once:true});
+function run(){var d=document;if(!d||!d.body)return;var all=d.querySelectorAll('*');var origMap=null;var myStyle=d.querySelector('style[data-dark-mode]');if(myStyle){origMap=new WeakMap();myStyle.disabled=true;for(var j=0;j<all.length;j++){try{origMap.set(all[j],d.defaultView.getComputedStyle(all[j]).color);}catch(e){}}myStyle.disabled=false;}for(var i=0;i<all.length;i++){try{processEl(all[i],d,origMap);}catch(e){console.log('kestrel-dark-error',e);}}}
+if(document.readyState==='complete'||document.readyState==='interactive')run();else document.addEventListener('DOMContentLoaded',run,{once:true});window.addEventListener('load',run,{once:true});setTimeout(run,0);
 )js");
 
     const QString script = "<script>(function(){"_L1 + colorVars + jsBody + "})();</script>"_L1;

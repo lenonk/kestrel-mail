@@ -234,6 +234,7 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
 
     const auto fromHeader     = decodeRfc2047(extractField(headerSource, "From"_L1)).trimmed();
     const auto toHeader       = sanitizeAddressHeader(decodeRfc2047(extractField(headerSource, "To"_L1)).trimmed());
+    const auto ccHeader       = sanitizeAddressHeader(decodeRfc2047(extractField(headerSource, "Cc"_L1)).trimmed());
     const auto senderHeader   = decodeRfc2047(extractField(headerSource, "Sender"_L1)).trimmed();
     const auto replyToHeader  = decodeRfc2047(extractField(headerSource, "Reply-To"_L1)).trimmed();
     auto returnPathHeader     = decodeRfc2047(extractField(headerSource, "Return-Path"_L1)).trimmed();
@@ -266,6 +267,8 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
 
     h.insert("sender"_L1, normalizeSenderValue(fromHeader, senderFallback));
     h.insert("recipient"_L1, toHeader);
+    if (!ccHeader.isEmpty())
+        h.insert("cc"_L1, ccHeader);
     h.insert("messageIdHeader"_L1, extractField(headerSource, "Message-ID"_L1).trimmed());
 
     {
@@ -507,6 +510,7 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     h.insert("bodyHtml"_L1, QString());
     h.insert("folder"_L1,   messageFolder);
     h.insert("unread"_L1,   !fetchResp.contains("\\Seen"_L1, Qt::CaseInsensitive));
+    h.insert("flagged"_L1,  fetchResp.contains("\\Flagged"_L1, Qt::CaseInsensitive) ? 1 : 0);
 
     const QString rawLabelsAll = extractGmailLabelsRaw(fetchResp);
     const QString inferredCategoryFolder = ctx.isInbox()
@@ -634,7 +638,7 @@ fetchUidBatch(SyncContext &ctx,
     const QString gmailItems = ctx.isGmail() ? QStringLiteral("X-GM-LABELS X-GM-MSGID X-GM-THRID ") : QString{};
     const QString fetchCmd = QStringLiteral(
         "UID FETCH %1 (UID FLAGS INTERNALDATE %3BODYSTRUCTURE "
-        "BODY.PEEK[HEADER.FIELDS (FROM TO SENDER REPLY-TO RETURN-PATH SUBJECT DATE MESSAGE-ID "
+        "BODY.PEEK[HEADER.FIELDS (FROM TO CC SENDER REPLY-TO RETURN-PATH SUBJECT DATE MESSAGE-ID "
         "AUTHENTICATION-RESULTS X-MAILER IN-REPLY-TO REFERENCES RECEIVED "
         "X-MAILGUN-SID X-SG-EID X-SMTPAPI X-MC-USER X-KLAVIYO-MESSAGE-ID X-PM-MESSAGE-ID X-SES-OUTGOING "
         "LIST-ID LIST-UNSUBSCRIBE BIMI-LOCATION LIST-PREVIEW X-PREHEADER X-MC-PREVIEW-TEXT X-ALT-DESCRIPTION)] "
@@ -714,6 +718,128 @@ enrichSnippets(const SyncContext &ctx, IngestState &state) {
     Q_UNUSED(state);
 }
 
+// ── Cross-folder dedup pre-pass ───────────────────────────────────────────────
+
+struct PrepassResult {
+    std::vector<qint32> needFullFetch;
+    int edgesInserted = 0;
+};
+
+PrepassResult
+prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, const IngestState &state)
+{
+    PrepassResult result;
+    if (uids.empty() || !ctx.lookupByMessageIdHeaders || !ctx.insertFolderEdge) {
+        result.needFullFetch = uids;
+        return result;
+    }
+
+    using SyncUtils::kSyncBatchSize;
+
+    static const QRegularExpression kFlagsRe(
+        R"(FLAGS\s*\(([^)]*)\))"_L1, QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression kSeenRe(
+        R"(\\Seen)"_L1, QRegularExpression::CaseInsensitiveOption);
+
+    // uid → {rawMessageIdHeader, unread}
+    QHash<qint32, QPair<QString, int>> uidInfo;
+    uidInfo.reserve(static_cast<int>(uids.size()));
+
+    // Cheap batch fetch: just Message-ID header + FLAGS.
+    for (int base = 0; base < static_cast<int>(uids.size()); base += kSyncBatchSize) {
+        if (ctx.cancelRequested && ctx.cancelRequested->load()) break;
+
+        const int end = std::min(base + kSyncBatchSize, static_cast<int>(uids.size()));
+        std::vector<qint32> chunk(uids.begin() + base, uids.begin() + end);
+        std::ranges::sort(chunk);
+
+        QStringList uidStrs;
+        uidStrs.reserve(static_cast<int>(chunk.size()));
+        for (const qint32 u : chunk) uidStrs.push_back(QString::number(u));
+
+        const QString resp = ctx.cxn->execute(
+            QStringLiteral("UID FETCH %1 (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+                .arg(uidStrs.join(u',')));
+
+        if (!resp.contains(" OK"_L1, Qt::CaseInsensitive)) continue;
+
+        for (const QString &part : splitFetchResponses(resp)) {
+            const QString uid = parseUidFromFetch(part);
+            if (uid.isEmpty()) continue;
+            bool ok = false;
+            const qint32 uidV = uid.toInt(&ok);
+            if (!ok) continue;
+
+            const auto flagsM = kFlagsRe.match(part);
+            const int unread = (flagsM.hasMatch() && kSeenRe.match(flagsM.captured(1)).hasMatch()) ? 0 : 1;
+
+            const QString headerBlock = extractHeaderFieldsLiteral(part.toUtf8());
+            const QString &src = headerBlock.isEmpty() ? part : headerBlock;
+            const QString msgId = extractField(src, "Message-ID"_L1).trimmed();
+
+            uidInfo.insert(uidV, {msgId, unread});
+        }
+    }
+
+    // Account for any UIDs the server didn't respond for (pass them through).
+    QSet<qint32> respondedUids;
+    respondedUids.reserve(uidInfo.size());
+    for (auto it = uidInfo.cbegin(); it != uidInfo.cend(); ++it)
+        respondedUids.insert(it.key());
+    for (const qint32 u : uids) {
+        if (!respondedUids.contains(u))
+            result.needFullFetch.push_back(u);
+    }
+
+    // Collect non-empty Message-IDs for batch DB lookup.
+    QStringList msgIdList;
+    msgIdList.reserve(uidInfo.size());
+    for (auto it = uidInfo.cbegin(); it != uidInfo.cend(); ++it) {
+        if (!it.value().first.isEmpty())
+            msgIdList.push_back(it.value().first);
+    }
+
+    const QMap<QString, qint64> known = msgIdList.isEmpty()
+        ? QMap<QString, qint64>{}
+        : ctx.lookupByMessageIdHeaders(ctx.cxn->email(), msgIdList);
+
+    const QString &folder = ctx.cxn->selectedFolder();
+
+    for (auto it = uidInfo.cbegin(); it != uidInfo.cend(); ++it) {
+        const qint32 uid        = it.key();
+        const QString &msgId    = it.value().first;
+        const int unread        = it.value().second;
+
+        if (!msgId.isEmpty() && known.contains(msgId)) {
+            const qint64 existingRow = known.value(msgId);
+            ctx.insertFolderEdge(ctx.cxn->email(), existingRow, folder, QString::number(uid), unread);
+
+            // For Gmail INBOX: also insert the category folder edge so the message
+            // appears in the right tab (Primary/Promotions/Social/etc.).
+            if (ctx.isGmailInbox()) {
+                const auto categoryFolders = state.categoryHints.value(uid);
+                for (const QString &catFolder : categoryFolders) {
+                    if (!catFolder.isEmpty())
+                        ctx.insertFolderEdge(ctx.cxn->email(), existingRow,
+                                             catFolder, QString::number(uid), unread);
+                }
+            }
+
+            ++result.edgesInserted;
+            qInfo().noquote() << "[dedup]"
+                              << "folder=" << folder
+                              << "uid=" << uid
+                              << "msg-id=" << msgId
+                              << "-> existing row" << existingRow
+                              << "(skipped full fetch)";
+        } else {
+            result.needFullFetch.push_back(uid);
+        }
+    }
+
+    return result;
+}
+
 // ── Incremental sync ──────────────────────────────────────────────────────────
 
 SyncResult
@@ -752,19 +878,33 @@ executeIncremental(SyncContext &ctx) {
     });
 
 
-    // Fetch new UIDs in batches.
+    // Cross-folder dedup pre-pass for new UIDs.
     qint32 throttleBackoffMs = 0;
     using SyncUtils::kSyncBatchSize;
-    std::array<qint32, kSyncBatchSize> incBatch{};
-    int incN = 0;
 
+    std::vector<qint32> incUids;
+    incUids.reserve(newUids.size());
     for (const auto &uid : newUids) {
         bool ok = false;
         const qint32 v = uid.toInt(&ok);
+        if (ok) incUids.push_back(v);
+    }
 
-        if (!ok)
-            continue;
+    if (!incUids.empty()) {
+        const auto prepass = prepassMessageIds(ctx, incUids, state);
+        if (prepass.edgesInserted > 0) {
+            qInfo().noquote() << "[dedup] inc-sync folder=" << ctx.folderName
+                              << "pre-pass resolved" << prepass.edgesInserted
+                              << "of" << incUids.size() << "new UIDs via cross-folder dedup";
+        }
+        incUids = prepass.needFullFetch;
+    }
 
+    // Fetch remaining new UIDs (not resolved by dedup) in batches.
+    std::array<qint32, kSyncBatchSize> incBatch{};
+    int incN = 0;
+
+    for (const qint32 v : incUids) {
         incBatch[incN++] = v;
         if (incN == kSyncBatchSize) {
             if (throttleBackoffMs > 0)
@@ -824,41 +964,48 @@ executeIncremental(SyncContext &ctx) {
             return a.toLongLong() < b.toLongLong();
         });
 
-        int fetchedBackfill = 0;
-        std::array<qint32, kSyncBatchSize> backfillBatch{};
-        int backfillN = 0;
-
-        auto flushBackfill = [&]() {
-            if (backfillN <= 0) return;
-
-            if (throttleBackoffMs > 0)
-                QThread::msleep(static_cast<unsigned long>(throttleBackoffMs));
-
-            fetchUidBatch(ctx,
-                          std::vector<qint32>(backfillBatch.begin(), backfillBatch.begin() + backfillN),
-                          "folder-backfill"_L1, state, throttleBackoffMs);
-
-            backfillN = 0;
-        };
-
-        for (auto i = allUids.size() - 1; i >= 0 && (ctx.fetchBudget < 0 || fetchedBackfill < ctx.fetchBudget); --i) {
+        // Collect all backfill UIDs (budget-capped, newest first), run dedup pre-pass,
+        // then full-fetch only the ones not already in the DB.
+        std::vector<qint32> backfillCandidates;
+        const int backfillBudget = (ctx.fetchBudget < 0) ? INT_MAX : ctx.fetchBudget;
+        backfillCandidates.reserve(static_cast<int>(allUids.size()));
+        for (auto i = allUids.size() - 1;
+             i >= 0 && static_cast<int>(backfillCandidates.size()) < backfillBudget; --i) {
             const auto uid = allUids.at(i);
-            if (newSet.contains(uid) || localSet.contains(uid))
-                continue;
-
+            if (newSet.contains(uid) || localSet.contains(uid)) continue;
             bool ok = false;
             const qint32 uidV = uid.toInt(&ok);
-
-            if (!ok) continue;
-
-            backfillBatch[backfillN++] = uidV;
-            ++fetchedBackfill;
-
-            if (backfillN == kSyncBatchSize)
-                flushBackfill();
+            if (ok) backfillCandidates.push_back(uidV);
         }
 
-        flushBackfill();
+        if (!backfillCandidates.empty()) {
+            const auto prepass = prepassMessageIds(ctx, backfillCandidates, state);
+            if (prepass.edgesInserted > 0) {
+                qInfo().noquote() << "[dedup] backfill folder=" << ctx.folderName
+                                  << "pre-pass resolved" << prepass.edgesInserted
+                                  << "of" << backfillCandidates.size()
+                                  << "UIDs via cross-folder dedup";
+            }
+
+            int backfillN = 0;
+            std::array<qint32, kSyncBatchSize> backfillBatch{};
+            auto flushBackfill = [&]() {
+                if (backfillN <= 0) return;
+                if (throttleBackoffMs > 0)
+                    QThread::msleep(static_cast<unsigned long>(throttleBackoffMs));
+                fetchUidBatch(ctx,
+                              std::vector<qint32>(backfillBatch.begin(), backfillBatch.begin() + backfillN),
+                              "folder-backfill"_L1, state, throttleBackoffMs);
+                backfillN = 0;
+            };
+
+            for (const qint32 uidV : prepass.needFullFetch) {
+                backfillBatch[backfillN++] = uidV;
+                if (backfillN == kSyncBatchSize)
+                    flushBackfill();
+            }
+            flushBackfill();
+        }
     }
 
     enrichSnippets(ctx, state);
@@ -926,6 +1073,22 @@ executeFull(SyncContext &ctx) {
     // hint map used in fetchUidBatch when extractGmailCategoryFolder returns empty.
     if (!pendingUidSet.isEmpty())
         buildCategoryHints(ctx, state, 1, INT_MAX);
+
+    // Cross-folder dedup pre-pass: cheaply fetch Message-ID + FLAGS for all pending
+    // UIDs and insert folder edges for messages already in the DB from another folder.
+    // Only the UIDs that are truly new need a full FETCH.
+    if (!pendingUidSet.isEmpty()) {
+        std::vector<qint32> pendingVec(pendingUidSet.cbegin(), pendingUidSet.cend());
+        const auto prepass = prepassMessageIds(ctx, pendingVec, state);
+        if (prepass.edgesInserted > 0) {
+            qInfo().noquote() << "[dedup] full-sync folder=" << ctx.folderName
+                              << "pre-pass resolved" << prepass.edgesInserted
+                              << "of" << pendingVec.size() << "UIDs via cross-folder dedup";
+        }
+        pendingUidSet.clear();
+        for (const qint32 u : prepass.needFullFetch)
+            pendingUidSet.insert(u);
+    }
 
     searchAllTimer.restart();
 
@@ -1156,6 +1319,16 @@ SyncEngine::execute(SyncContext &ctx) {
         const QStringList seenUids = parseSearchIds(flagResp);
         if (!seenUids.isEmpty()) {
             ctx.onFlagsReconciled(ctx.cxn->email(), ctx.cxn->selectedFolder(), seenUids);
+        }
+
+        if (ctx.onFlaggedReconciled) {
+            const QString flaggedResp = ctx.cxn->execute(
+                QStringLiteral("UID SEARCH UID %1:%2 FLAGGED")
+                    .arg(windowStart).arg(ctx.minUidExclusive));
+            const QStringList flaggedUids = parseSearchIds(flaggedResp);
+            if (!flaggedUids.isEmpty()) {
+                ctx.onFlaggedReconciled(ctx.cxn->email(), ctx.cxn->selectedFolder(), flaggedUids);
+            }
         }
     }
 

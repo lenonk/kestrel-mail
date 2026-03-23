@@ -498,10 +498,13 @@ bool isSystemLabelName(const QString &label)
 int folderEdgeCount(QSqlDatabase &database, const QString &accountEmail, const QString &folder)
 {
     QSqlQuery q(database);
+    // JOIN against messages so orphan edges (message row deleted but edge remains)
+    // are excluded — keeps the count consistent with what the sync engine actually has.
     q.prepare(QStringLiteral(R"(
         SELECT COUNT(*)
-        FROM message_folder_map
-        WHERE account_email=:account_email AND lower(folder)=:folder
+        FROM message_folder_map mfm
+        JOIN messages m ON m.id = mfm.message_id AND m.account_email = mfm.account_email
+        WHERE mfm.account_email=:account_email AND lower(mfm.folder)=:folder
     )"));
     q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
     q.bindValue(QStringLiteral(":folder"), folder.trimmed().toLower());
@@ -799,6 +802,8 @@ bool DataStore::init()
     q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN gm_thr_id TEXT"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_gm_thr ON messages(account_email, gm_thr_id)"));
     q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN has_tracking_pixel INTEGER DEFAULT 0"));
+    q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN cc TEXT"));
+    q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN flagged INTEGER DEFAULT 0"));
     q.exec(QStringLiteral("ALTER TABLE folder_sync_status ADD COLUMN last_sync_modseq INTEGER NOT NULL DEFAULT 0"));
 
     // Backfill thread_id for existing messages (new ones get it in upsertHeader).
@@ -1398,6 +1403,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
     const QString inReplyToValue        = header.value(QStringLiteral("inReplyTo")).toString().trimmed();
     const QString referencesValue       = header.value(QStringLiteral("references")).toString().trimmed();
     const QString espVendorValue        = header.value(QStringLiteral("espVendor")).toString().trimmed();
+    const QString ccValue               = header.value(QStringLiteral("cc")).toString().trimmed();
     const bool primaryLabelObserved = header.value(QStringLiteral("primaryLabelObserved"), false).toBool();
     const QString rawGmailLabels = header.value(QStringLiteral("rawGmailLabels")).toString();
 
@@ -1488,8 +1494,8 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
     QSqlQuery qCanon(database);
     qCanon.prepare(QStringLiteral(R"(
-        INSERT INTO messages (account_email, logical_key, sender, recipient, subject, received_at, snippet, body_html, message_id_header, gm_msg_id, unread, list_unsubscribe, reply_to, return_path, auth_results, x_mailer, in_reply_to, references_header, esp_vendor, thread_id, gm_thr_id, has_tracking_pixel)
-        VALUES (:account_email, :logical_key, :sender, :recipient, :subject, :received_at, :snippet, :body_html, :message_id_header, :gm_msg_id, :unread, :list_unsubscribe, :reply_to, :return_path, :auth_results, :x_mailer, :in_reply_to, :references_header, :esp_vendor, :thread_id, :gm_thr_id, :has_tracking_pixel)
+        INSERT INTO messages (account_email, logical_key, sender, recipient, subject, received_at, snippet, body_html, message_id_header, gm_msg_id, unread, list_unsubscribe, reply_to, return_path, auth_results, x_mailer, in_reply_to, references_header, esp_vendor, thread_id, gm_thr_id, has_tracking_pixel, cc, flagged)
+        VALUES (:account_email, :logical_key, :sender, :recipient, :subject, :received_at, :snippet, :body_html, :message_id_header, :gm_msg_id, :unread, :list_unsubscribe, :reply_to, :return_path, :auth_results, :x_mailer, :in_reply_to, :references_header, :esp_vendor, :thread_id, :gm_thr_id, :has_tracking_pixel, :cc, :flagged)
         ON CONFLICT(account_email, logical_key) DO UPDATE SET
           sender = excluded.sender,
           recipient = CASE
@@ -1560,7 +1566,11 @@ void DataStore::upsertHeader(const QVariantMap &header)
                                        AND length(trim(excluded.body_html)) > 0
                                   THEN excluded.has_tracking_pixel
                                   ELSE messages.has_tracking_pixel
-                                END
+                                END,
+          cc = CASE
+                 WHEN excluded.cc IS NOT NULL AND length(trim(excluded.cc)) > 0
+                 THEN excluded.cc ELSE messages.cc END,
+          flagged = MAX(messages.flagged, excluded.flagged)
     )"));
     qCanon.bindValue(QStringLiteral(":account_email"), accountEmail);
     qCanon.bindValue(QStringLiteral(":logical_key"), lkey);
@@ -1583,6 +1593,8 @@ void DataStore::upsertHeader(const QVariantMap &header)
     qCanon.bindValue(QStringLiteral(":esp_vendor"),         espVendorValue.isEmpty()      ? QVariant() : QVariant(espVendorValue));
     qCanon.bindValue(QStringLiteral(":gm_thr_id"),          gmThrIdValue.isEmpty()         ? QVariant() : QVariant(gmThrIdValue));
     qCanon.bindValue(QStringLiteral(":has_tracking_pixel"), computeHasTrackingPixel(bodyHtmlValue, senderValue) ? 1 : 0);
+    qCanon.bindValue(QStringLiteral(":cc"),                 ccValue.isEmpty() ? QVariant() : QVariant(ccValue));
+    qCanon.bindValue(QStringLiteral(":flagged"),            header.value(QStringLiteral("flagged"), 0).toInt());
     {
         // For Gmail messages with X-GM-THRID, use it as the canonical thread ID.
         // This groups all messages in the same Gmail conversation correctly even
@@ -2413,6 +2425,61 @@ void DataStore::reconcileReadFlags(const QString &accountEmail, const QString &f
     }
 }
 
+void DataStore::markMessageFlagged(const QString &accountEmail, const QString &uid, bool flagged)
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return;
+    const QString acc = accountEmail.trimmed();
+    if (acc.isEmpty() || uid.trimmed().isEmpty()) return;
+
+    const int val = flagged ? 1 : 0;
+    QSqlQuery qMsg(database);
+    qMsg.prepare(
+        "UPDATE messages SET flagged=:val "
+        "WHERE id IN ("
+        "  SELECT DISTINCT message_id FROM message_folder_map "
+        "  WHERE account_email=:acc AND uid=:uid"
+        ")"_L1);
+    qMsg.bindValue(":val"_L1, val);
+    qMsg.bindValue(":acc"_L1, acc);
+    qMsg.bindValue(":uid"_L1, uid);
+    qMsg.exec();
+
+    emit messageFlaggedChanged(acc, uid, flagged);
+    if (qMsg.numRowsAffected() > 0)
+        scheduleDataChangedSignal();
+}
+
+void DataStore::reconcileFlaggedUids(const QString &accountEmail, const QString &folder,
+                                     const QStringList &flaggedUids)
+{
+    if (flaggedUids.isEmpty()) return;
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return;
+    const QString acc = accountEmail.trimmed();
+    if (acc.isEmpty()) return;
+
+    QStringList placeholders;
+    placeholders.reserve(flaggedUids.size());
+    for (int i = 0; i < flaggedUids.size(); ++i) placeholders << QStringLiteral(":u%1").arg(i);
+
+    QSqlQuery qMsg(database);
+    qMsg.prepare(
+        "UPDATE messages SET flagged=1 "
+        "WHERE id IN ("
+        "  SELECT DISTINCT message_id FROM message_folder_map "
+        "  WHERE account_email=:acc AND lower(folder)=lower(:folder) AND uid IN (%1)"
+        ")"_L1.arg(placeholders.join(","_L1)));
+    qMsg.bindValue(":acc"_L1,    acc);
+    qMsg.bindValue(":folder"_L1, folder);
+    for (int i = 0; i < flaggedUids.size(); ++i)
+        qMsg.bindValue(QStringLiteral(":u%1").arg(i), flaggedUids.at(i));
+    qMsg.exec();
+
+    if (qMsg.numRowsAffected() > 0)
+        scheduleDataChangedSignal();
+}
+
 QVariantMap DataStore::folderMapRowForEdge(const QString &accountEmail,
                                             const QString &folder,
                                             const QString &uid) const
@@ -2509,6 +2576,38 @@ void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId,
     scheduleDataChangedSignal();
 }
 
+QMap<QString, qint64> DataStore::lookupByMessageIdHeaders(const QString &accountEmail,
+                                                             const QStringList &messageIdHeaders)
+{
+    QMap<QString, qint64> result;
+    if (messageIdHeaders.isEmpty()) return result;
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return result;
+
+    // Build parameterized IN clause.
+    QStringList placeholders;
+    placeholders.reserve(messageIdHeaders.size());
+    for (int i = 0; i < messageIdHeaders.size(); ++i)
+        placeholders.push_back(QStringLiteral(":mid%1").arg(i));
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(
+        "SELECT message_id_header, id FROM messages "
+        "WHERE account_email = :account_email "
+        "  AND message_id_header IN (%1) "
+        "  AND message_id_header IS NOT NULL "
+        "  AND length(trim(message_id_header)) > 0"
+    ).arg(placeholders.join(u',')));
+    q.bindValue(u":account_email"_s, accountEmail);
+    for (int i = 0; i < messageIdHeaders.size(); ++i)
+        q.bindValue(placeholders[i], messageIdHeaders[i]);
+
+    if (!q.exec()) return result;
+    while (q.next())
+        result.insert(q.value(0).toString(), q.value(1).toLongLong());
+    return result;
+}
+
 void DataStore::removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId)
 {
     if (messageId <= 0) return;
@@ -2535,7 +2634,14 @@ QStringList DataStore::folderUids(const QString &accountEmail, const QString &fo
     }
 
     QSqlQuery q(database);
-    q.prepare(QStringLiteral("SELECT uid FROM message_folder_map WHERE account_email=:account_email AND lower(folder)=lower(:folder)"));
+    // JOIN against messages so orphan edges (where the messages row was deleted
+    // but the folder-map row wasn't) are excluded. The sync engine uses this list
+    // to decide which UIDs are already local — orphan edges would make it skip
+    // re-fetching messages that are effectively missing from the DB.
+    q.prepare(QStringLiteral(
+        "SELECT mfm.uid FROM message_folder_map mfm "
+        "JOIN messages m ON m.id = mfm.message_id AND m.account_email = mfm.account_email "
+        "WHERE mfm.account_email=:account_email AND lower(mfm.folder)=lower(:folder)"));
     q.bindValue(QStringLiteral(":account_email"), accountEmail.trimmed());
     q.bindValue(QStringLiteral(":folder"), folder.trimmed());
     if (!q.exec()) return out;
@@ -2975,7 +3081,9 @@ QVariantMap DataStore::messageByKey(const QString &accountEmail, const QString &
                    AND m2.thread_id = cm.thread_id
                    AND cm.thread_id IS NOT NULL
                    AND length(trim(COALESCE(cm.thread_id, ''))) > 0
-               ), 1)                                as thread_count
+               ), 1)                                as thread_count,
+               COALESCE(cm.cc, '')                  as cc,
+               COALESCE(cm.flagged, 0)              as flagged
         FROM message_folder_map mfm
         JOIN messages cm ON cm.id = mfm.message_id
         WHERE mfm.account_email=:account_email
@@ -3013,6 +3121,8 @@ QVariantMap DataStore::messageByKey(const QString &accountEmail, const QString &
     row.insert(QStringLiteral("espVendor"),       q.value(22).toString());
     row.insert(QStringLiteral("threadId"),        q.value(23).toString());
     row.insert(QStringLiteral("threadCount"),     q.value(24).toInt());
+    row.insert(QStringLiteral("cc"),              q.value(25).toString());
+    row.insert(QStringLiteral("flagged"),         q.value(26).toInt() == 1);
     return row;
 }
 
@@ -3040,7 +3150,9 @@ QVariantList DataStore::messagesForThread(const QString &accountEmail, const QSt
                cm.avatar_source,
                mfm.unread,
                COALESCE(cm.thread_id, '') as thread_id,
-               COALESCE(cm.reply_to, '')  as reply_to
+               COALESCE(cm.reply_to, '')  as reply_to,
+               COALESCE(cm.cc, '')        as cc,
+               COALESCE(cm.flagged, 0)    as flagged
         FROM messages cm
         JOIN message_folder_map mfm ON mfm.message_id = cm.id
           AND mfm.account_email = cm.account_email
@@ -3076,6 +3188,8 @@ QVariantList DataStore::messagesForThread(const QString &accountEmail, const QSt
         row[QStringLiteral("unread")]       = q.value(13).toInt() == 1;
         row[QStringLiteral("threadId")]     = q.value(14).toString();
         row[QStringLiteral("replyTo")]      = q.value(15).toString();
+        row[QStringLiteral("cc")]           = q.value(16).toString();
+        row[QStringLiteral("flagged")]      = q.value(17).toInt() == 1;
         result.push_back(row);
     }
     return result;
@@ -3229,13 +3343,12 @@ QStringList DataStore::statsKeysFromFolders() const
         const QString rawName = f.value(QStringLiteral("name")).toString().trimmed();
         if (rawName.isEmpty()) continue;
         if (rawName.contains(QStringLiteral("/Categories/"), Qt::CaseInsensitive)) continue;
-        QString norm = rawName;
-        if (norm.toLower().startsWith(QStringLiteral("[gmail]/")))
-            norm = norm.mid(8);
-        else if (norm.toLower().startsWith(QStringLiteral("[google mail]/")))
-            norm = norm.mid(14);
-        norm = norm.toLower();
-        keys << (QStringLiteral("account:") + norm);
+        // Normalize to match QML's normalizedRemoteFolderName: [Google Mail]/ → [Gmail]/,
+        // but keep the [Gmail]/ prefix so the cache key matches what QML passes.
+        QString norm = rawName.toLower();
+        if (norm.startsWith("[google mail]/"_L1))
+            norm = "[gmail]/"_L1 + norm.mid(14);
+        keys << ("account:"_L1 + norm);
         if (f.value(QStringLiteral("specialUse")).toString().trimmed().isEmpty()
                 && !norm.contains(QLatin1Char('/')))
             keys << (QStringLiteral("tag:") + norm);
@@ -3377,10 +3490,98 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
         return out;
     };
 
-    if (key.startsWith(QStringLiteral("local:"), Qt::CaseInsensitive)
-        || key.compare(QStringLiteral("favorites:flagged"), Qt::CaseInsensitive) == 0) {
+    if (key.startsWith(QStringLiteral("local:"), Qt::CaseInsensitive)) {
         if (hasMore) *hasMore = false;
         return {};
+    }
+
+    if (key.compare(QStringLiteral("favorites:flagged"), Qt::CaseInsensitive) == 0) {
+        if (!database.isValid() || !database.isOpen()) return {};
+        const int safeOffset = qMax(0, offset);
+        QSqlQuery qFlagged(database);
+        qFlagged.prepare(QStringLiteral(R"(
+            SELECT mfm.account_email,
+                   mfm.folder,
+                   mfm.uid,
+                   cm.id,
+                   cm.sender,
+                   cm.subject,
+                   cm.recipient,
+                   '' as recipient_avatar_url,
+                   cm.received_at,
+                   cm.snippet,
+                   COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
+                   '' as avatar_domain,
+                   '' as avatar_url,
+                   '' as avatar_source,
+                   mfm.unread,
+                   COALESCE(cm.thread_id, '') as thread_id,
+                   COALESCE((SELECT COUNT(DISTINCT m2.id) FROM messages m2
+                             WHERE m2.account_email = cm.account_email
+                               AND m2.thread_id = cm.thread_id
+                               AND cm.thread_id IS NOT NULL
+                               AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                   COALESCE(cm.gm_thr_id, '') as gm_thr_id,
+                   COALESCE((SELECT GROUP_CONCAT(m2.sender, char(31))
+                             FROM messages m2
+                             WHERE m2.account_email = cm.account_email
+                               AND m2.thread_id = cm.thread_id
+                               AND cm.thread_id IS NOT NULL
+                               AND length(trim(COALESCE(cm.thread_id, ''))) > 0), '') as all_senders,
+                   COALESCE(cm.flagged, 0) as flagged
+            FROM message_folder_map mfm
+            JOIN messages cm ON cm.id = mfm.message_id
+            WHERE cm.account_email=mfm.account_email
+              AND cm.flagged=1
+            GROUP BY cm.id
+            ORDER BY cm.received_at DESC
+            LIMIT :limit OFFSET :offset
+        )"));
+        qFlagged.bindValue(QStringLiteral(":limit"), limit > 0 ? limit + 1 : 5000);
+        qFlagged.bindValue(QStringLiteral(":offset"), safeOffset);
+
+        QVariantList out;
+        if (qFlagged.exec()) {
+            while (qFlagged.next()) {
+                const QString tid  = qFlagged.value(15).toString().trimmed();
+                QString gtid       = qFlagged.value(17).toString().trimmed();
+                const QString acct = qFlagged.value(0).toString();
+                const QString mid  = qFlagged.value(3).toString();
+                if (gtid.isEmpty() && tid.startsWith(QStringLiteral("gm:"), Qt::CaseInsensitive))
+                    gtid = tid.mid(3).trimmed();
+
+                QVariantMap row;
+                row.insert(QStringLiteral("accountEmail"), qFlagged.value(0));
+                row.insert(QStringLiteral("folder"), qFlagged.value(1));
+                row.insert(QStringLiteral("uid"), qFlagged.value(2));
+                row.insert(QStringLiteral("messageId"), mid);
+                row.insert(QStringLiteral("sender"), qFlagged.value(4));
+                row.insert(QStringLiteral("subject"), qFlagged.value(5));
+                row.insert(QStringLiteral("recipient"), qFlagged.value(6));
+                row.insert(QStringLiteral("recipientAvatarUrl"), qFlagged.value(7));
+                row.insert(QStringLiteral("receivedAt"), qFlagged.value(8));
+                row.insert(QStringLiteral("snippet"),          qFlagged.value(9));
+                row.insert(QStringLiteral("hasTrackingPixel"), qFlagged.value(10).toInt() == 1);
+                row.insert(QStringLiteral("avatarDomain"),     qFlagged.value(11));
+                row.insert(QStringLiteral("avatarUrl"), qFlagged.value(12));
+                row.insert(QStringLiteral("avatarSource"), qFlagged.value(13));
+                row.insert(QStringLiteral("unread"), qFlagged.value(14).toInt() == 1);
+                row.insert(QStringLiteral("threadId"),    tid);
+                row.insert(QStringLiteral("threadCount"), qFlagged.value(16).toInt());
+                row.insert(QStringLiteral("gmThrId"),     gtid);
+                row.insert(QStringLiteral("allSenders"),  qFlagged.value(18));
+                row.insert(QStringLiteral("flagged"),     true);
+                out.push_back(row);
+            }
+        }
+        if (limit > 0 && out.size() > limit) {
+            if (hasMore) *hasMore = true;
+            out = out.mid(0, limit);
+        } else {
+            if (hasMore) *hasMore = false;
+        }
+        annotateMessageFlags(out);
+        return out;
     }
 
     if (key.compare(QStringLiteral("favorites:all-inboxes"), Qt::CaseInsensitive) == 0
@@ -3419,7 +3620,14 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                        AND m2.thread_id = cm.thread_id
                                        AND cm.thread_id IS NOT NULL
                                        AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
-                           COALESCE(cm.gm_thr_id, '') as gm_thr_id
+                           COALESCE(cm.gm_thr_id, '') as gm_thr_id,
+                           COALESCE((SELECT GROUP_CONCAT(m2.sender, char(31))
+                                     FROM messages m2
+                                     WHERE m2.account_email = cm.account_email
+                                       AND m2.thread_id = cm.thread_id
+                                       AND cm.thread_id IS NOT NULL
+                                       AND length(trim(COALESCE(cm.thread_id, ''))) > 0), '') as all_senders,
+                           COALESCE(cm.flagged, 0) as flagged
                     FROM message_folder_map mfm
                     JOIN messages cm ON cm.id = mfm.message_id
                     WHERE (
@@ -3480,6 +3688,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                         row.insert(QStringLiteral("threadId"),    tid);
                         row.insert(QStringLiteral("threadCount"), q.value(16).toInt());
                         row.insert(QStringLiteral("gmThrId"),     gtid);
+                        row.insert(QStringLiteral("allSenders"),  q.value(18));
+                        row.insert(QStringLiteral("flagged"),     q.value(19).toInt() == 1);
                         out.push_back(row);
 
                         if (targetCount > 0 && out.size() >= targetCount)
@@ -3574,7 +3784,14 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                            AND m2.thread_id = cm.thread_id
                                            AND cm.thread_id IS NOT NULL
                                            AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
-                               COALESCE(cm.gm_thr_id, '') as gm_thr_id
+                               COALESCE(cm.gm_thr_id, '') as gm_thr_id,
+                               COALESCE((SELECT GROUP_CONCAT(m2.sender, char(31))
+                                         FROM messages m2
+                                         WHERE m2.account_email = cm.account_email
+                                           AND m2.thread_id = cm.thread_id
+                                           AND cm.thread_id IS NOT NULL
+                                           AND length(trim(COALESCE(cm.thread_id, ''))) > 0), '') as all_senders,
+                               COALESCE(cm.flagged, 0) as flagged
                         FROM message_folder_map mfm
                         JOIN messages cm ON cm.id = mfm.message_id
                         WHERE ((:is_important=1 AND lower(mfm.folder) LIKE '%/important')
@@ -3605,7 +3822,14 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                            AND m2.thread_id = cm.thread_id
                                            AND cm.thread_id IS NOT NULL
                                            AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
-                               COALESCE(cm.gm_thr_id, '') as gm_thr_id
+                               COALESCE(cm.gm_thr_id, '') as gm_thr_id,
+                               COALESCE((SELECT GROUP_CONCAT(m2.sender, char(31))
+                                         FROM messages m2
+                                         WHERE m2.account_email = cm.account_email
+                                           AND m2.thread_id = cm.thread_id
+                                           AND cm.thread_id IS NOT NULL
+                                           AND length(trim(COALESCE(cm.thread_id, ''))) > 0), '') as all_senders,
+                               COALESCE(cm.flagged, 0) as flagged
                         FROM message_folder_map mfm
                         JOIN messages cm ON cm.id = mfm.message_id
                         WHERE ((:is_important=1 AND lower(mfm.folder) LIKE '%/important')
@@ -3663,6 +3887,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                         row.insert(QStringLiteral("threadId"),    tid);
                         row.insert(QStringLiteral("threadCount"), qFolder.value(16).toInt());
                         row.insert(QStringLiteral("gmThrId"),     gtid);
+                        row.insert(QStringLiteral("allSenders"),  qFolder.value(18));
+                        row.insert(QStringLiteral("flagged"),     qFolder.value(19).toInt() == 1);
                         filtered.push_back(row);
 
                         if (targetCount > 0 && filtered.size() >= targetCount)
@@ -3798,7 +4024,14 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                                    AND m2.thread_id = cm.thread_id
                                    AND cm.thread_id IS NOT NULL
                                    AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
-                       COALESCE(cm.gm_thr_id, '') as gm_thr_id
+                       COALESCE(cm.gm_thr_id, '') as gm_thr_id,
+                       COALESCE((SELECT GROUP_CONCAT(m2.sender, char(31))
+                                 FROM messages m2
+                                 WHERE m2.account_email = cm.account_email
+                                   AND m2.thread_id = cm.thread_id
+                                   AND cm.thread_id IS NOT NULL
+                                   AND length(trim(COALESCE(cm.thread_id, ''))) > 0), '') as all_senders,
+                       COALESCE(cm.flagged, 0) as flagged
                 FROM message_folder_map mfm
                 JOIN messages cm ON cm.id = mfm.message_id
                 WHERE mfm.account_email=:account_email
@@ -3852,6 +4085,8 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                 row.insert(QStringLiteral("threadId"),    tid);
                 row.insert(QStringLiteral("threadCount"), qRow.value(16).toInt());
                 row.insert(QStringLiteral("gmThrId"),     gtid);
+                row.insert(QStringLiteral("allSenders"),  qRow.value(18));
+                row.insert(QStringLiteral("flagged"),     qRow.value(19).toInt() == 1);
                 out.push_back(row);
             }
         }

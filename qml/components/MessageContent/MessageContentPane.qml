@@ -130,9 +130,29 @@ Rectangle {
     readonly property var messageData: appRoot.selectedMessageData
     readonly property string messageSubject: (messageData && messageData.subject) ? messageData.subject : i18n("(No subject)")
     readonly property string receivedAtText: appRoot.formatContentDate(messageData ? messageData.receivedAt : "")
-    readonly property var recipientAvatarSources: appRoot.senderAvatarSources(recipientsText, "", "", messageData && messageData.accountEmail ? messageData.accountEmail : "")
-    readonly property string recipientName: appRoot.displayRecipientNames(recipientsText, messageData && messageData.accountEmail ? messageData.accountEmail : "")
     readonly property string recipientsText: (messageData && messageData.recipient && messageData.recipient.toString().trim().length > 0) ? messageData.recipient : ((messageData && messageData.accountEmail) ? messageData.accountEmail : i18n("No recipient"))
+    readonly property string ccText: (messageData && messageData.cc) ? messageData.cc.toString().trim() : ""
+    // Flat token list for the To/CC address line. Each entry is either:
+    //   { type: "address", raw: rawMailbox, label: displayLabel }
+    //   { type: "separator", text: "," | "and copy to" }
+    readonly property var recipientAddressTokens: {
+        if (!appRoot || !messageData) return []
+        const acct = (messageData.accountEmail || "").toString()
+        const toMailboxes = appRoot._splitRecipientMailboxes(recipientsText)
+        const ccMailboxes = ccText.length > 0 ? appRoot._splitRecipientMailboxes(ccText) : []
+        const tokens = []
+        for (let i = 0; i < toMailboxes.length; i++) {
+            if (i > 0) tokens.push({ type: "separator", text: "," })
+            const raw = toMailboxes[i].trim()
+            tokens.push({ type: "address", raw: raw, label: appRoot.displayRecipientName(raw, acct) })
+        }
+        for (let i = 0; i < ccMailboxes.length; i++) {
+            tokens.push({ type: "separator", text: i === 0 ? i18n("and copy to") : "," })
+            const raw = ccMailboxes[i].trim()
+            tokens.push({ type: "address", raw: raw, label: appRoot.displayRecipientName(raw, acct) })
+        }
+        return tokens
+    }
     readonly property string renderMessageKey: {
         if (!messageData)
             return "";
@@ -666,23 +686,15 @@ Rectangle {
         if (!root.messageData || !appRoot || !appRoot.imapServiceObj)
             return;
         const account = (root.messageData.accountEmail || "").toString();
-        const folder = (root.messageData.folder || "").toString();
-        const uid = (root.messageData.uid || "").toString();
+        // Prefer the source folder/uid that actually holds attachment metadata (set by
+        // reloadAttachmentsForCurrentMessage via candidate fallback). Falls back to the
+        // primary messageData edge so we still try when attachments haven't loaded yet.
+        const folder = (root.attachmentSourceFolder || root.messageData.folder || "").toString();
+        const uid = (root.attachmentSourceUid || root.messageData.uid || "").toString();
         if (!account.length || !folder.length || !uid.length)
             return;
 
         appRoot.imapServiceObj.prefetchImageAttachments(account, folder, uid);
-        if (appRoot.dataStoreObj && appRoot.dataStoreObj.fetchCandidatesForMessageKey) {
-            const candidates = appRoot.dataStoreObj.fetchCandidatesForMessageKey(account, folder, uid) || [];
-            for (let i = 0; i < candidates.length; ++i) {
-                const c = candidates[i] || {};
-                const cf = (c.folder || "").toString();
-                const cu = (c.uid || "").toString();
-                if (!cf.length || !cu.length || (cf === folder && cu === uid))
-                    continue;
-                appRoot.imapServiceObj.prefetchImageAttachments(account, cf, cu);
-            }
-        }
     }
     // Parse the DKIM signing domain from an Authentication-Results header and return its SLD.
     // Handles both "header.d=example.com" and "header.i=@example.com" forms.
@@ -770,12 +782,10 @@ Rectangle {
             root.attachmentProgress = ({});
             root.attachmentDownloading = ({});
             root.reloadAttachmentsForCurrentMessage();
-            root.startAllAttachmentPrefetchForCurrentMessage();
             root.startImageAttachmentPrefetchForCurrentMessage();
         } else if (root.attachmentItems.length === 0) {
             // Same message, attachments not yet loaded — retry (race with DB hydration).
             root.reloadAttachmentsForCurrentMessage();
-            root.startAllAttachmentPrefetchForCurrentMessage();
             root.startImageAttachmentPrefetchForCurrentMessage();
         }
         // Same message with attachments already loaded: leave all state untouched.
@@ -1015,52 +1025,49 @@ Rectangle {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 4
+                    spacing: 3
 
                     QQC2.Label {
                         color: Kirigami.Theme.textColor
                         opacity: 0.9
                         text: i18n("to")
+                        rightPadding: 1
                     }
-                    QQC2.Label {
-                        id: recipientLink
+                    Repeater {
+                        model: root.recipientAddressTokens
+                        delegate: QQC2.Label {
+                            id: tokenLbl
+                            required property var modelData
+                            readonly property bool isAddress: modelData.type === "address"
+                            text: isAddress ? modelData.label : modelData.text
+                            color: isAddress ? "#4ea3ff" : Kirigami.Theme.textColor
+                            font.bold: isAddress
+                            font.pixelSize: 13
+                            opacity: isAddress ? 0.95 : 0.9
 
-                        Layout.fillWidth: false
-                        color: "#4ea3ff"
-                        elide: Text.ElideRight
-                        font.bold: true
-                        font.pixelSize: 13
-                        opacity: 0.95
-                        text: root.recipientName
-
-                        MouseArea {
-                            id: recipientMouse
-
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            hoverEnabled: true
-
-                            onClicked: appRoot.openComposerTo(root.recipientsText, i18n("recipient"))
+                            MouseArea {
+                                id: tokenMouse
+                                anchors.fill: parent
+                                cursorShape: tokenLbl.isAddress ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                hoverEnabled: tokenLbl.isAddress
+                                enabled: tokenLbl.isAddress
+                                onClicked: appRoot.openComposerTo(tokenLbl.modelData.raw, i18n("recipient"))
+                            }
+                            ContactHoverPopup {
+                                anchorItem: tokenLbl
+                                avatarSources: tokenLbl.isAddress ? appRoot.senderAvatarSources(tokenLbl.modelData.raw, "", "", root.messageData ? root.messageData.accountEmail : "") : []
+                                avatarText: tokenLbl.isAddress ? (tokenLbl.modelData.label || "?").slice(0, 1).toUpperCase() : "?"
+                                primaryButtonText: i18n("Send mail")
+                                secondaryButtonText: i18n("Add to contacts")
+                                subtitleText: tokenLbl.isAddress ? tokenLbl.modelData.raw : ""
+                                targetHovered: tokenMouse.containsMouse
+                                titleText: tokenLbl.isAddress ? tokenLbl.modelData.label : ""
+                                onPrimaryTriggered: appRoot.openComposerTo(tokenLbl.modelData.raw, i18n("recipient"))
+                                onSecondaryTriggered: appRoot.showInlineStatus(i18n("Add to contacts requested for %1").arg(tokenLbl.modelData.raw), false)
+                            }
                         }
-                        ContactHoverPopup {
-                            id: recipientPopup
-
-                            anchorItem: recipientLink
-                            avatarSources: root.recipientAvatarSources
-                            avatarText: (root.recipientName || "?").slice(0, 1).toUpperCase()
-                            primaryButtonText: i18n("Send mail")
-                            secondaryButtonText: i18n("Add to contacts")
-                            subtitleText: root.recipientsText
-                            targetHovered: recipientMouse.containsMouse
-                            titleText: root.recipientName
-
-                            onPrimaryTriggered: appRoot.openComposerTo(root.recipientsText, i18n("recipient"))
-                            onSecondaryTriggered: appRoot.showInlineStatus(i18n("Add to contacts requested for %1").arg(root.recipientsText), false)
-                        }
                     }
-                    Item {
-                        Layout.fillWidth: true
-                    }
+                    Item { Layout.fillWidth: true }
                 }
             }
             ColumnLayout {
@@ -1095,16 +1102,15 @@ Rectangle {
 
                         onTriggered: function (actionText) {
                             if (actionText === i18n("Reply") || actionText.length === 0) {
-                                const subject = i18n("Re: %1", root.messageSubject);
-                                appRoot.openComposerTo(root.senderEmail, i18n("reply"), subject);
+                                appRoot.openReplyCompose(root.messageData, false, appRoot.contentPaneDarkModeEnabled);
                             }
                             else if (actionText === i18n("Reply all")) {
-                                const subject = i18n("Re: %1", root.messageSubject);
-                                appRoot.openComposerTo(root.recipientsText, i18n("reply all"), subject);
+                                appRoot.openReplyCompose(root.messageData, true, appRoot.contentPaneDarkModeEnabled);
                             }
                             else if (actionText === i18n("Forward")) {
+                                root.startAllAttachmentPrefetchForCurrentMessage()
                                 const forwardAttachments = root.forwardAttachmentPathsForCurrentMessage();
-                                appRoot.forwardMessageFromData(root.messageData, root.receivedAtText, forwardAttachments);
+                                appRoot.forwardMessageFromData(root.messageData, root.receivedAtText, forwardAttachments, appRoot.contentPaneDarkModeEnabled);
                             }
                         }
                     }
@@ -1202,7 +1208,6 @@ Rectangle {
                     }
                     HoverHandler {
                         id: attachmentHover
-
                         onHoveredChanged: if (hovered)
                             root.startAllAttachmentPrefetchForCurrentMessage()
                     }
@@ -1212,7 +1217,6 @@ Rectangle {
                         cursorShape: Qt.PointingHandCursor
 
                         onClicked: function (mouse) {
-                            root.startAllAttachmentPrefetchForCurrentMessage();
                             if (mouse.button === Qt.LeftButton) {
                                 root.selectedAttachmentKey = attachmentCard.modelData.partId;
                             } else if (mouse.button === Qt.RightButton) {
@@ -1223,7 +1227,6 @@ Rectangle {
                         onDoubleClicked: function (mouse) {
                             if (mouse.button !== Qt.LeftButton)
                                 return;
-                            root.startAllAttachmentPrefetchForCurrentMessage();
                             appRoot.imapServiceObj.openAttachment(root.messageData.accountEmail, root.messageData.folder, root.messageData.uid, attachmentCard.modelData.partId, attachmentCard.modelData.name, attachmentCard.modelData.encoding);
                         }
                     }
@@ -1380,7 +1383,12 @@ Rectangle {
 
             if (!root.messageData)
                 return;
-            if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid)
+            const _matchAcc = (root.messageData.accountEmail || "").toString().toLowerCase();
+            if (accountEmail.toString().toLowerCase() !== _matchAcc)
+                return;
+            const _msgUid = (root.messageData.uid || "").toString();
+            const _srcUid = root.attachmentSourceUid ? root.attachmentSourceUid.toString() : _msgUid;
+            if (uid.toString() !== _msgUid && uid.toString() !== _srcUid)
                 return;
             const prev = Number(root.attachmentProgress[partId] || 0);
             const next = (progressPercent === 0 && prev > 0 && prev < 100) ? prev : Math.max(prev, progressPercent);
@@ -1396,7 +1404,14 @@ Rectangle {
         function onAttachmentReady(accountEmail, uid, partId, localPath) {
             if (!root.messageData)
                 return;
-            if (accountEmail !== root.messageData.accountEmail || uid !== root.messageData.uid)
+            const matchAccount = (root.messageData.accountEmail || "").toString().toLowerCase();
+            if (accountEmail.toString().toLowerCase() !== matchAccount)
+                return;
+            // Accept attachmentSourceUid as well as messageData.uid — they differ when the
+            // attachment metadata lives on a candidate edge (e.g. different Gmail folder UID).
+            const msgUid = (root.messageData.uid || "").toString();
+            const srcUid = root.attachmentSourceUid ? root.attachmentSourceUid.toString() : msgUid;
+            if (uid.toString() !== msgUid && uid.toString() !== srcUid)
                 return;
             const updated = Object.assign({}, root.attachmentLocalPaths);
             updated[partId] = localPath;

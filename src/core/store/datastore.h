@@ -34,6 +34,11 @@ public:
     void reconcileReadFlags(const QString &accountEmail, const QString &folder,
                             const QStringList &readUids);
     Q_INVOKABLE void markMessageRead(const QString &accountEmail, const QString &uid);
+    // Sets or clears the \Flagged state for a message identified by any uid.
+    void markMessageFlagged(const QString &accountEmail, const QString &uid, bool flagged);
+    // Batch: marks messages.flagged=1 for UIDs the server confirms are flagged.
+    void reconcileFlaggedUids(const QString &accountEmail, const QString &folder,
+                              const QStringList &flaggedUids);
     // Returns {messageId (qint64), unread (int)} for a specific folder/uid edge.
     QVariantMap folderMapRowForEdge(const QString &accountEmail, const QString &folder, const QString &uid) const;
     // Deletes the specific (folder, uid) edge, cleans orphaned messages, reloads inbox.
@@ -44,6 +49,9 @@ public:
     QString folderUidForMessageId(const QString &accountEmail, const QString &folder, qint64 messageId) const;
     // Inserts a new (folder, uid) edge for an already-known message_id (used after UID MOVE COPYUID).
     void insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread);
+    // Cross-folder dedup: returns {message_id_header → messages.id} for any of the given
+    // Message-ID header values already stored for this account.
+    QMap<QString, qint64> lookupByMessageIdHeaders(const QString &accountEmail, const QStringList &messageIdHeaders);
     // Removes ALL folder edges for a message_id (fallback when server gives no COPYUID).
     void removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId);
     Q_INVOKABLE QStringList folderUids(const QString &accountEmail, const QString &folder) const;
@@ -120,6 +128,8 @@ signals:
     // Emitted immediately after the DB is updated, before the full inbox reload.
     // Allows the message list to update just the unread dot for a single row instantly.
     void messageMarkedRead(const QString &accountEmail, const QString &uid);
+    // Emitted after flagged state is updated for a single message.
+    void messageFlaggedChanged(const QString &accountEmail, const QString &uid, bool flagged);
     // Emitted after body_html is stored for a message. Does NOT trigger an inbox
     // reload — QML bindings that need the fresh body should depend on this signal.
     void bodyHtmlUpdated(const QString &accountEmail, const QString &folder, const QString &uid);

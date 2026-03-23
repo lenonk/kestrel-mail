@@ -112,6 +112,8 @@ QVariant MessageListModel::data(const QModelIndex &index, int role) const
     case HasTrackingPixelRole: return row.message.value(QStringLiteral("hasTrackingPixel"));
     case ThreadCountRole: return row.message.value(QStringLiteral("threadCount"));
     case IsImportantRole: return row.message.value(QStringLiteral("isImportant"));
+    case AllSendersRole:  return row.message.value(QStringLiteral("allSenders"));
+    case FlaggedRole:     return row.message.value(QStringLiteral("flagged"));
     default: return {};
     }
 }
@@ -141,7 +143,9 @@ QHash<int, QByteArray> MessageListModel::roleNames() const
         { HasAttachmentsRole, QByteArrayLiteral("hasAttachments") },
         { HasTrackingPixelRole, QByteArrayLiteral("hasTrackingPixel") },
         { ThreadCountRole, QByteArrayLiteral("threadCount") },
-        { IsImportantRole, QByteArrayLiteral("isImportant") }
+        { IsImportantRole, QByteArrayLiteral("isImportant") },
+        { AllSendersRole,  QByteArrayLiteral("allSenders") },
+        { FlaggedRole,     QByteArrayLiteral("flagged") }
     };
 }
 
@@ -160,6 +164,7 @@ void MessageListModel::setDataStore(DataStore *store)
     if (m_dataStore) {
         connect(m_dataStore, &DataStore::dataChanged, this, &MessageListModel::scheduleRefresh);
         connect(m_dataStore, &DataStore::messageMarkedRead, this, &MessageListModel::onMessageMarkedRead);
+        connect(m_dataStore, &DataStore::messageFlaggedChanged, this, &MessageListModel::onMessageFlaggedChanged);
         connect(m_dataStore, &QObject::destroyed, this, [this]() {
             m_dataStore = nullptr;
             refresh();
@@ -413,6 +418,29 @@ void MessageListModel::onMessageMarkedRead(const QString &accountEmail, const QS
                 && row.message.value(QStringLiteral("accountEmail")).toString() == accountEmail
                 && row.message.value(QStringLiteral("uid")).toString() == uid) {
             row.message.insert(QStringLiteral("unread"), 0);
+            break;
+        }
+    }
+}
+
+void MessageListModel::onMessageFlaggedChanged(const QString &accountEmail, const QString &uid, bool flagged)
+{
+    const int newFlagged = flagged ? 1 : 0;
+    for (int i = 0; i < m_rows.size(); ++i) {
+        Row &row = m_rows[i];
+        if (row.type != MessageRow) continue;
+        if (row.message.value(QStringLiteral("accountEmail")).toString() != accountEmail) continue;
+        if (row.message.value(QStringLiteral("uid")).toString() != uid) continue;
+        if (row.message.value(QStringLiteral("flagged")).toInt() == newFlagged) continue;
+        row.message.insert(QStringLiteral("flagged"), newFlagged);
+        emit dataChanged(index(i), index(i), {FlaggedRole});
+        break;
+    }
+    for (Row &row : m_allRows) {
+        if (row.type == MessageRow
+                && row.message.value(QStringLiteral("accountEmail")).toString() == accountEmail
+                && row.message.value(QStringLiteral("uid")).toString() == uid) {
+            row.message.insert(QStringLiteral("flagged"), newFlagged);
             break;
         }
     }
@@ -674,6 +702,8 @@ QList<int> MessageListModel::changedRoles(const Row &oldRow, const Row &newRow) 
     if (o.value(QStringLiteral("hasTrackingPixel")) != n.value(QStringLiteral("hasTrackingPixel"))) roleSet.insert(HasTrackingPixelRole);
     if (o.value(QStringLiteral("threadCount"))   != n.value(QStringLiteral("threadCount")))   roleSet.insert(ThreadCountRole);
     if (o.value(QStringLiteral("isImportant"))   != n.value(QStringLiteral("isImportant")))   roleSet.insert(IsImportantRole);
+    if (o.value(QStringLiteral("allSenders"))    != n.value(QStringLiteral("allSenders")))    roleSet.insert(AllSendersRole);
+    if (o.value(QStringLiteral("flagged"))       != n.value(QStringLiteral("flagged")))       roleSet.insert(FlaggedRole);
 
     QList<int> roles = roleSet.values();
     std::sort(roles.begin(), roles.end());

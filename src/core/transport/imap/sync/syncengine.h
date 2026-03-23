@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QMap>
 #include <QVariantMap>
 #include <QVariantList>
 #include <QStringList>
@@ -48,6 +49,13 @@ struct SyncContext {
     // Preferred over removeUids (all-folder) to avoid removing valid edges in other folders.
     std::function<void(const QString &email, const QString &folder, const QStringList &remoteUids)> pruneFolder;
     std::function<void(const QString &email, const QString &folder, const QStringList &readUids)> onFlagsReconciled;
+    std::function<void(const QString &email, const QString &folder, const QStringList &flaggedUids)> onFlaggedReconciled;
+
+    // Cross-folder dedup: look up which Message-ID headers are already in the DB.
+    // Returns {message_id_header → messages.id} for known messages.
+    std::function<QMap<QString,qint64>(const QString &accountEmail, const QStringList &messageIdHeaders)> lookupByMessageIdHeaders;
+    // Insert a folder edge for an already-known message (cross-folder dedup shortcut).
+    std::function<void(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread)> insertFolderEdge;
 
     [[nodiscard]] bool isGmail() const {
         return cxn && cxn->host().contains(QStringLiteral("gmail"), Qt::CaseInsensitive);

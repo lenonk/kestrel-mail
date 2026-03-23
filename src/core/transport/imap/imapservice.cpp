@@ -1487,6 +1487,11 @@ ImapService::fetchFolderHeaders(const QString &email,
         if (m_store) m_store->reconcileReadFlags(acctEmail, folder, readUids);
     };
 
+    ctx.onFlaggedReconciled = [this](const QString &acctEmail, const QString &folder,
+                                     const QStringList &flaggedUids) {
+        if (m_store) m_store->reconcileFlaggedUids(acctEmail, folder, flaggedUids);
+    };
+
     ctx.lookupByMessageIdHeaders = [this](const QString &acctEmail, const QStringList &msgIds) {
         return m_store ? m_store->lookupByMessageIdHeaders(acctEmail, msgIds) : QMap<QString,qint64>{};
     };
@@ -2208,6 +2213,34 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
         const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
         Q_UNUSED(result);
     });
+}
+
+void
+ImapService::markMessageFlagged(const QString &accountEmail, const QString &folder, const QString &uid, bool flagged) {
+    if (m_destroying || accountEmail.isEmpty() || uid.isEmpty()) return;
+
+    if (m_store)
+        m_store->markMessageFlagged(accountEmail, uid, flagged);
+
+    if (m_offlineMode)
+        return;
+
+    const QString flags = flagged ? QStringLiteral("+FLAGS (\\Flagged)") : QStringLiteral("-FLAGS (\\Flagged)");
+    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, flags]() {
+        if (m_destroying.load()) return;
+
+        auto cxn = getPooledConnection(accountEmail, "flag-message");
+        if (!cxn) return;
+
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(folder);
+            if (!ok) return;
+        }
+
+        const QString result = cxn->execute(QStringLiteral("UID STORE %1 %2").arg(uid, flags));
+        Q_UNUSED(result);
+    });
+    Q_UNUSED(retval);
 }
 
 void

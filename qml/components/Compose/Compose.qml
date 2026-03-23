@@ -40,6 +40,7 @@ Window {
     property var imapServiceObj: null
     property bool pendingSendRequested: false
     property double pendingSendStartedMs: 0
+    property var attachmentProgress: ({})
 
     signal sendRequested
 
@@ -117,7 +118,9 @@ Window {
         htmlProcessor.surfaceBg   = Kirigami.Theme.alternateBackgroundColor.toString();
         htmlProcessor.lightText   = Kirigami.Theme.textColor.toString();
         htmlProcessor.borderColor = Kirigami.Theme.disabledTextColor.toString();
-        return htmlProcessor.prepare(htmlProcessor.sanitize(root._rawBody), root.composeDarkView);
+        const html = htmlProcessor.prepare(htmlProcessor.sanitize(root._rawBody), root.composeDarkView);
+        const noScroll = '<style>::-webkit-scrollbar{display:none!important}html,body{overflow:hidden!important}</style>';
+        return html.includes('</head>') ? html.replace('</head>', noScroll + '</head>') : noScroll + html;
     }
 
     function _resolveAttachmentPaths(startFetch) {
@@ -222,12 +225,14 @@ Window {
         sendError = "";
         sending = false;
         pendingSendRequested = false;
+        attachmentProgress = ({});
         sendRetryTimer.stop();
         fmtBold = false;
         fmtItalic = false;
         fmtUnderline = false;
         fmtStrike = false;
         _applyAttachments(attachments);
+        _resolveAttachmentPaths(true);
         composeDarkView = !!initialDarkMode;
         if (bodyText && bodyText.length > 0)
             bodyArea.text = bodyText;
@@ -261,7 +266,10 @@ Window {
         fmtStrike = false;
         _applyAttachments(params.attachments || []);
         composeDarkView = !!params.darkMode;
-        bodyArea.text = /<(?:html|body|table)\b/i.test(_rawBody) ? "" : _rawBody;
+        if (params.bodyText !== undefined)
+            bodyArea.text = params.bodyText || "";
+        else
+            bodyArea.text = /<(?:html|body|table)\b/i.test(_rawBody) ? "" : _rawBody;
         const toList = params.toList || [];
         for (let i = 0; i < toList.length; i++)
             _addChipToModel(toChipModel, toList[i]);
@@ -322,6 +330,41 @@ Window {
         }
 
         target: root.smtpServiceObj
+    }
+
+    Connections {
+        function onAttachmentDownloadProgress(accountEmail, uid, partId, progressPercent) {
+            const pid = (partId || "").toString();
+            if (!pid.length)
+                return;
+            const prev = Number(root.attachmentProgress[pid] || 0);
+            const next = (progressPercent === 0 && prev > 0 && prev < 100) ? prev : Math.max(prev, progressPercent);
+            const p = Object.assign({}, root.attachmentProgress);
+            p[pid] = next;
+            root.attachmentProgress = p;
+        }
+        function onAttachmentReady(accountEmail, uid, partId, localPath) {
+            for (let i = 0; i < attachmentModel.count; i++) {
+                const a = attachmentModel.get(i);
+                if ((a.path || "").toString().length)
+                    continue;
+                if ((a.accountEmail || "").toString().toLowerCase() !== accountEmail.toString().toLowerCase())
+                    continue;
+                if ((a.uid || "").toString() !== uid.toString())
+                    continue;
+                if ((a.partId || "").toString() !== partId.toString())
+                    continue;
+                attachmentModel.setProperty(i, "path", localPath.toString());
+            }
+            const pid = (partId || "").toString();
+            if (pid.length) {
+                const p = Object.assign({}, root.attachmentProgress);
+                p[pid] = 100;
+                root.attachmentProgress = p;
+            }
+        }
+
+        target: root.imapServiceObj
     }
 
     Timer {
@@ -737,8 +780,8 @@ Window {
                         AttachmentHoverPopup {
                             anchorItem: composeChip
                             arrowLeftPx: Math.max(24, composeChip.width * 0.25)
-                            downloadComplete: true
-                            downloadProgress: 100
+                            downloadComplete: !!(composeChip.modelData.path) || Number(root.attachmentProgress[composeChip.modelData.partId] || 0) >= 100
+                            downloadProgress: composeChip.modelData.path ? 100 : Number(root.attachmentProgress[composeChip.modelData.partId] || 0)
                             fallbackIcon: composeChip._icon
                             openButtonText: i18n("Open")
                             previewMimeType: ""
@@ -892,6 +935,7 @@ Window {
 
                     DarkLightToggleButton {
                         Layout.rightMargin: 7
+                        Layout.alignment: Qt.AlignVCenter
                         darkMode: root.composeDarkView
 
                         onModeToggled: darkMode => {
@@ -971,200 +1015,255 @@ Window {
             }
 
             // ── Body ───────────────────────────────────────────────────────
-            // TextArea (top) is always present for composing.
-            // WebEngineView (bottom) appears when forwarding/replying with HTML,
-            // rendered via htmlProcessor — dark/light controlled by the toggle.
-            ColumnLayout {
+            // Single Flickable containing both the compose TextArea and (when
+            // forwarding/replying HTML) the WebEngineView — one shared scrollbar,
+            // both items at their natural full height with no internal scroll.
+            Item {
                 Layout.fillHeight: true
                 Layout.fillWidth: true
-                spacing: 0
 
-                QQC2.ScrollView {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: !root._isHtmlBody
-                    Layout.preferredHeight: root._isHtmlBody ? 150 : -1
-                    Layout.minimumHeight: root._isHtmlBody ? 80 : -1
-                    QQC2.ScrollBar.vertical.policy: QQC2.ScrollBar.AsNeeded
+                Flickable {
+                    id: bodyFlickable
+
+                    QQC2.ScrollBar.vertical: bodyScrollBar
+                    anchors.fill: parent
+                    anchors.rightMargin: bodyScrollBar.width + 5
+                    boundsBehavior: Flickable.StopAtBounds
                     clip: true
+                    contentHeight: bodyColumn.height
+                    contentWidth: width
+                    interactive: false
 
-                    background: Rectangle {
-                        color: root._bg
+                    WheelHandler {
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: event => {
+                            const step = 60;
+                            const delta = -event.angleDelta.y / 120 * step;
+                            bodyFlickable.contentY = Math.max(0, Math.min(
+                                bodyFlickable.contentHeight - bodyFlickable.height,
+                                bodyFlickable.contentY + delta));
+                            event.accepted = true;
+                        }
                     }
 
-                    QQC2.TextArea {
-                        id: bodyArea
+                    // Overlay covering the WebEngineView area — intercepts scroll/click
+                    // events so the shared Flickable handles all scrolling.
+                    MouseArea {
+                        acceptedButtons: Qt.AllButtons
+                        height: composeWebView.height
+                        visible: root._isHtmlBody
+                        width: bodyFlickable.width
+                        y: bodyArea.height + (root._isHtmlBody ? 1 : 0)
+                        z: 10
 
-                        bottomPadding: 12
-                        color: Kirigami.Theme.textColor
-                        font.pixelSize: 14
-                        leftPadding: 14
-                        placeholderText: i18n("Type a message here")
-                        placeholderTextColor: Kirigami.Theme.disabledTextColor
-                        rightPadding: 14
-                        textFormat: TextEdit.RichText
-                        topPadding: 12
-                        width: parent.width
-                        wrapMode: TextEdit.Wrap
-
-                        background: Item {
+                        onWheel: event => {
+                            const step = 60;
+                            const delta = -event.angleDelta.y / 120 * step;
+                            bodyFlickable.contentY = Math.max(0, Math.min(
+                                bodyFlickable.contentHeight - bodyFlickable.height,
+                                bodyFlickable.contentY + delta));
+                            event.accepted = true;
                         }
-
-                        onLinkActivated: link => Qt.openUrlExternally(link)
-
-                        HoverHandler {
-                            cursorShape: bodyArea.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
-                        }
-
-                        Keys.onPressed: event => {
-                        // Only intercept printable characters (skip backspace=8, tab=9, enter=13, esc=27, del=127, etc.)
-                        if (event.text.length === 0)
-                            return;
-                        const code = event.text.charCodeAt(0);
-                        if (code <= 32 || code === 127)
-                            return;
-                        // Filter out Ctrl+key etc. (allow Shift for capitals/symbols)
-                        if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
-                            return;
-                        event.accepted = true;
-                        const s = bodyArea.selectionStart, e = bodyArea.selectionEnd;
-                        if (s !== e)
-                            bodyArea.remove(s, e);
-                        let open = "", close = "";
-                        if (root.fmtBold) {
-                            open += "<b>";
-                            close = "</b>" + close;
-                        }
-                        if (root.fmtItalic) {
-                            open += "<i>";
-                            close = "</i>" + close;
-                        }
-                        if (root.fmtUnderline) {
-                            open += "<u>";
-                            close = "</u>" + close;
-                        }
-                        if (root.fmtStrike) {
-                            open += "<s>";
-                            close = "</s>" + close;
-                        }
-                        if (!open) {
-                            // Explicitly reset formatting so Qt's RichText engine doesn't
-                            // inherit bold/italic/etc. from adjacent formatted text.
-                            open = '<span style="font-weight:normal;font-style:normal;text-decoration:none">';
-                            close = "</span>";
-                        }
-                        bodyArea.insert(bodyArea.cursorPosition, open + event.text + close);
                     }
 
-                    Rectangle {
-                        id: dropZoneBorder
+                    Column {
+                        id: bodyColumn
 
-                        border.color: dropZone.color
-                        border.width: 1
-                        color: "transparent"
-                        height: parent.height - 1
-                        opacity: dropZone.opacity > 0
-                        visible: true
-                        width: parent.width - 2
-                        x: parent.x + 1
-                        y: parent.y
-                        z: 9998
+                        width: bodyFlickable.width
+
+                        QQC2.TextArea {
+                            id: bodyArea
+
+                            bottomPadding: 12
+                            color: Kirigami.Theme.textColor
+                            font.pixelSize: 14
+                            leftPadding: 14
+                            placeholderText: i18n("Type a message here")
+                            placeholderTextColor: Kirigami.Theme.disabledTextColor
+                            rightPadding: 14
+                            textFormat: TextEdit.RichText
+                            topPadding: 12
+                            width: parent.width
+                            wrapMode: TextEdit.Wrap
+
+                            background: Item {
+                            }
+
+                            onCursorRectangleChanged: {
+                                const cy = cursorRectangle.y;
+                                const ch = cursorRectangle.height;
+                                if (cy < bodyFlickable.contentY)
+                                    bodyFlickable.contentY = Math.max(0, cy - 8);
+                                else if (cy + ch > bodyFlickable.contentY + bodyFlickable.height)
+                                    bodyFlickable.contentY = cy + ch - bodyFlickable.height + 8;
+                            }
+                            onLinkActivated: link => Qt.openUrlExternally(link)
+
+                            HoverHandler {
+                                cursorShape: bodyArea.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+                            }
+
+                            Keys.onPressed: event => {
+                            // Only intercept printable characters (skip backspace=8, tab=9, enter=13, esc=27, del=127, etc.)
+                            if (event.text.length === 0)
+                                return;
+                            const code = event.text.charCodeAt(0);
+                            if (code <= 32 || code === 127)
+                                return;
+                            // Filter out Ctrl+key etc. (allow Shift for capitals/symbols)
+                            if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
+                                return;
+                            event.accepted = true;
+                            const s = bodyArea.selectionStart, e = bodyArea.selectionEnd;
+                            if (s !== e)
+                                bodyArea.remove(s, e);
+                            let open = "", close = "";
+                            if (root.fmtBold) {
+                                open += "<b>";
+                                close = "</b>" + close;
+                            }
+                            if (root.fmtItalic) {
+                                open += "<i>";
+                                close = "</i>" + close;
+                            }
+                            if (root.fmtUnderline) {
+                                open += "<u>";
+                                close = "</u>" + close;
+                            }
+                            if (root.fmtStrike) {
+                                open += "<s>";
+                                close = "</s>" + close;
+                            }
+                            if (!open) {
+                                // Explicitly reset formatting so Qt's RichText engine doesn't
+                                // inherit bold/italic/etc. from adjacent formatted text.
+                                open = '<span style="font-weight:normal;font-style:normal;text-decoration:none">';
+                                close = "</span>";
+                            }
+                            bodyArea.insert(bodyArea.cursorPosition, open + event.text + close);
+                        }
+
+                            Rectangle {
+                                id: dropZoneBorder
+
+                                border.color: dropZone.color
+                                border.width: 1
+                                color: "transparent"
+                                height: parent.height - 1
+                                opacity: dropZone.opacity > 0
+                                visible: true
+                                width: parent.width - 2
+                                x: parent.x + 1
+                                y: parent.y
+                                z: 9998
+
+                                Rectangle {
+                                    id: dropZone
+
+                                    anchors.fill: parent
+                                    color: systemPalette.highlight
+                                    opacity: 0
+                                    z: 9999
+
+                                    DropArea {
+                                        anchors.fill: parent
+
+                                        onDropped: drop => {
+                                            dropZone.opacity = 0;
+
+                                            if (drop.hasUrls) {
+                                                drop.urls.forEach(url => {
+                                                    const urlString = url.toString();
+                                                    if (!urlString || !urlString.startsWith("file://"))
+                                                        return;
+
+                                                    const path = decodeURIComponent(urlString.replace(/^file:\/\//, ""));
+                                                    if (!path)
+                                                        return;
+
+                                                    const filename = path.split("/").pop();
+                                                    if (!filename)
+                                                        return;
+
+                                                    attachmentModel.append({
+                                                        filename: filename,
+                                                        path: path
+                                                    });
+                                                });
+                                            }
+
+                                            drop.accept();
+                                        }
+
+                                        onEntered: drag => {
+                                            dropZone.opacity = 0.075;
+                                        }
+
+                                        onExited: {
+                                            dropZone.opacity = 0;
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         Rectangle {
-                            id: dropZone
+                            color: Qt.lighter(root._bg, 1.25)
+                            height: root._isHtmlBody ? 1 : 0
+                            width: parent.width
+                        }
 
-                            anchors.fill: parent
-                            color: systemPalette.highlight
-                            opacity: 0
-                            z: 9999
+                        WebEngineView {
+                            id: composeWebView
 
-                            DropArea {
-                                anchors.fill: parent
+                            height: root._isHtmlBody ? Math.max(200, composeWebView.contentsSize.height) : 0
+                            width: parent.width
+                            backgroundColor: root.composeDarkView
+                                ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
+                                : Kirigami.Theme.backgroundColor
+                            settings.autoLoadImages: true
+                            settings.javascriptEnabled: true
+                            settings.localContentCanAccessFileUrls: true
+                            settings.localContentCanAccessRemoteUrls: true
+                            visible: root._isHtmlBody
 
-                                onDropped: drop => {
-                                    dropZone.opacity = 0;
-
-                                    if (drop.hasUrls) {
-                                        drop.urls.forEach(url => {
-                                            const urlString = url.toString();
-                                            if (!urlString || !urlString.startsWith("file://"))
-                                                return;
-
-                                            const path = decodeURIComponent(urlString.replace(/^file:\/\//, ""));
-                                            if (!path)
-                                                return;
-
-                                            const filename = path.split("/").pop();
-                                            if (!filename)
-                                                return;
-
-                                            attachmentModel.append({
-                                                filename: filename,
-                                                path: path
-                                            });
-                                        });
-                                    }
-
-                                    drop.accept();
+                            onNavigationRequested: function (request) {
+                                const url = request.url ? request.url.toString() : "";
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    request.action = WebEngineNavigationRequest.IgnoreRequest;
+                                    Qt.openUrlExternally(url);
                                 }
+                            }
+                            onNewWindowRequested: function (request) {
+                                const url = request.requestedUrl ? request.requestedUrl.toString() : "";
+                                if (url.startsWith("http://") || url.startsWith("https://") || url.toLowerCase().startsWith("mailto:"))
+                                    Qt.openUrlExternally(url);
+                            }
 
-                                onEntered: drag => {
-                                    dropZone.opacity = 0.075;
+                            Connections {
+                                target: root
+                                function onComposeDarkViewChanged() {
+                                    if (root._isHtmlBody)
+                                        composeWebView.loadHtml(root._renderedHtml(), "file:///");
                                 }
-
-                                onExited: {
-                                    dropZone.opacity = 0;
+                                function on_RawBodyChanged() {
+                                    if (root._isHtmlBody)
+                                        composeWebView.loadHtml(root._renderedHtml(), "file:///");
                                 }
                             }
                         }
                     }
                 }
-                }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    color: Qt.lighter(root._bg, 1.25)
-                    height: 1
-                    visible: root._isHtmlBody
-                }
+                QQC2.ScrollBar {
+                    id: bodyScrollBar
 
-                WebEngineView {
-                    id: composeWebView
-
-                    Layout.fillHeight: true
-                    Layout.fillWidth: true
-                    backgroundColor: root.composeDarkView
-                        ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
-                        : Kirigami.Theme.backgroundColor
-                    settings.autoLoadImages: true
-                    settings.javascriptEnabled: true
-                    settings.localContentCanAccessFileUrls: true
-                    settings.localContentCanAccessRemoteUrls: true
-                    visible: root._isHtmlBody
-
-                    onNavigationRequested: function (request) {
-                        const url = request.url ? request.url.toString() : "";
-                        if (url.startsWith("http://") || url.startsWith("https://")) {
-                            request.action = WebEngineNavigationRequest.IgnoreRequest;
-                            Qt.openUrlExternally(url);
-                        }
-                    }
-                    onNewWindowRequested: function (request) {
-                        const url = request.requestedUrl ? request.requestedUrl.toString() : "";
-                        if (url.startsWith("http://") || url.startsWith("https://") || url.toLowerCase().startsWith("mailto:"))
-                            Qt.openUrlExternally(url);
-                    }
-
-                    Connections {
-                        target: root
-                        function onComposeDarkViewChanged() {
-                            if (root._isHtmlBody)
-                                composeWebView.loadHtml(root._renderedHtml(), "file:///");
-                        }
-                        function on_RawBodyChanged() {
-                            if (root._isHtmlBody)
-                                composeWebView.loadHtml(root._renderedHtml(), "file:///");
-                        }
-                    }
+                    anchors.bottom: parent.bottom
+                    anchors.right: parent.right
+                    anchors.rightMargin: 5
+                    anchors.top: parent.top
+                    policy: QQC2.ScrollBar.AsNeeded
+                    width: 5
                 }
             }
 

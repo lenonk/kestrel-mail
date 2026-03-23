@@ -315,9 +315,11 @@ Rectangle {
                         modelSubject: (typeof model !== "undefined" && typeof model.subject !== "undefined") ? model.subject : ""
                         modelUnread: (typeof model !== "undefined" && typeof model.unread !== "undefined") ? model.unread : false
                         modelThreadCount: (typeof model !== "undefined" && typeof model.threadCount !== "undefined") ? model.threadCount : 0
+                        modelAllSenders: (typeof model !== "undefined" && typeof model.allSenders !== "undefined") ? model.allSenders : ""
                         modelHasTrackingPixel: (typeof model !== "undefined" && typeof model.hasTrackingPixel !== "undefined") ? model.hasTrackingPixel : false
                         modelHasAttachments: (typeof model !== "undefined" && typeof model.hasAttachments !== "undefined") ? model.hasAttachments : false
                         modelIsImportant: (typeof model !== "undefined" && typeof model.isImportant !== "undefined") ? model.isImportant : false
+                        modelFlagged: (typeof model !== "undefined" && typeof model.flagged !== "undefined") ? !!model.flagged : false
                         modelSnippet: (typeof model !== "undefined" && typeof model.snippet !== "undefined") ? model.snippet : ""
                         modelAccountEmail: (typeof model !== "undefined" && typeof model.accountEmail !== "undefined") ? model.accountEmail : ""
                         modelFolder: (typeof model !== "undefined" && typeof model.folder !== "undefined") ? model.folder : ""
