@@ -1,6 +1,6 @@
 # Kestrel Mail
 
-> ⚠️ **Pre-alpha / heavy development:** Kestrel Mail is currently under heavy development and is **not usable for normal day-to-day email yet**.
+> ⚠️ **Alpha / heavy development:** Kestrel Mail is currently under heavy development and is **usable for normal day-to-day email**, but not yet feature complete.  Things like search are still missing, and it may or may not work with IMAP servers other than Gmail.  That is untested so far!
 
 Kestrel Mail is a KDE-native email client focused on modern UX, reliable IMAP sync, and OAuth2-first account setup.
 
