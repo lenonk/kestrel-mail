@@ -79,6 +79,19 @@ QString normalizeSenderValue(const QString &fromHeader, const QString &fallbackH
         if (name.startsWith('"') || name.startsWith('\'')) name = name.mid(1).trimmed();
         if (name.endsWith('"') || name.endsWith('\'')) { name.chop(1); name = name.trimmed(); }
     }
+    // Unescape RFC 2822 quoted-pair sequences (e.g. \" -> ") so that
+    // names like Joseph "Jody" Hill render with their intended quotes.
+    if (name.contains(QLatin1Char('\\'))) {
+        QString unescaped;
+        unescaped.reserve(name.size());
+        bool esc = false;
+        for (const QChar ch : std::as_const(name)) {
+            if (esc) { unescaped.append(ch); esc = false; }
+            else if (ch == QLatin1Char('\\')) { esc = true; }
+            else { unescaped.append(ch); }
+        }
+        name = unescaped.trimmed();
+    }
     if (name.isEmpty() || name.compare(email, Qt::CaseInsensitive) == 0) return email;
     return QStringLiteral("%1 <%2>").arg(name, email);
 }

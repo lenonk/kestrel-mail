@@ -233,6 +233,17 @@ Item {
 
                 target: root
             }
+
+            // Workaround: Chromium/Wayland loses its GPU surface when the
+            // compositor hides the window.  Re-load the current HTML so the
+            // view doesn't stay black.
+            Connections {
+                target: root.appRoot
+                function onWebViewRefreshNeeded() {
+                    if (root.renderedHtml.length)
+                        htmlView.loadHtml(root.renderedHtml, "file:///");
+                }
+            }
         }
     }
 

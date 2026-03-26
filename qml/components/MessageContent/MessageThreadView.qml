@@ -1078,6 +1078,18 @@ Item {
 
                                 target: threadCard
                             }
+
+                            // Workaround: Chromium/Wayland surface-loss fix.
+                            Connections {
+                                target: root.appRoot
+                                function onWebViewRefreshNeeded() {
+                                    if (!threadCard.isExpanded)
+                                        return;
+                                    const html = threadCard.cardBodyHtml;
+                                    if (html.length && bodyLoader.item && bodyLoader.item.loadHtmlDoc)
+                                        bodyLoader.item.loadHtmlDoc(html);
+                                }
+                            }
                         }
                     }
                 }

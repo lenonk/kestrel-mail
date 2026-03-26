@@ -14,6 +14,7 @@
 #include <QPainter>
 #include <QThread>
 #include <QRandomGenerator>
+#include <QEvent>
 #include <cmath>
 #include <KLocalizedContext>
 #include <KLocalizedString>
@@ -51,6 +52,41 @@ public:
         nam->setCache(diskCache);
         return nam;
     }
+};
+
+// Watches QExposeEvent on a QWindow and emits windowReExposed() whenever the
+// surface transitions from hidden → visible.  On Wayland the compositor
+// destroys the surface when the window moves off-screen (minimize, desktop
+// switch, activity switch); Chromium's GPU compositor never recovers, so QML
+// WebEngineViews listen for this signal to force-reload their content.
+class WindowExposeWatcher : public QObject
+{
+    Q_OBJECT
+public:
+    explicit WindowExposeWatcher(QWindow *window, QObject *parent = nullptr)
+        : QObject(parent), m_window(window), m_wasExposed(window->isExposed())
+    {
+        window->installEventFilter(this);
+    }
+
+Q_SIGNALS:
+    void windowReExposed();
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override
+    {
+        if (obj == m_window && event->type() == QEvent::Expose) {
+            const bool exposed = m_window->isExposed();
+            if (exposed && !m_wasExposed)
+                Q_EMIT windowReExposed();
+            m_wasExposed = exposed;
+        }
+        return false;
+    }
+
+private:
+    QWindow *m_window;
+    bool m_wasExposed;
 };
 
 int main(int argc, char *argv[])
@@ -283,6 +319,14 @@ QSplashScreen *splash = nullptr;
         }
     }
 
+    // Expose-event watcher: emits windowReExposed() when the Wayland compositor
+    // shows the surface again after hiding it (desktop/activity switch, minimize).
+    WindowExposeWatcher *exposeWatcher = nullptr;
+    if (mainWindow) {
+        exposeWatcher = new WindowExposeWatcher(mainWindow, &app);
+        engine.rootContext()->setContextProperty(QStringLiteral("windowExposeWatcher"), exposeWatcher);
+    }
+
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
         auto *trayMenu = new QMenu();
         auto *showHideAction = trayMenu->addAction(QStringLiteral("Show / Hide"));
@@ -325,3 +369,5 @@ QSplashScreen *splash = nullptr;
 
     return app.exec();
 }
+
+#include "main.moc"

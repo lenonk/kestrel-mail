@@ -42,6 +42,13 @@ Window {
     property double pendingSendStartedMs: 0
     property var attachmentProgress: ({})
 
+    // Chromium/Wayland surface-loss workaround (see Main.qml).
+    signal webViewRefreshNeeded()
+    Connections {
+        target: typeof windowExposeWatcher !== "undefined" ? windowExposeWatcher : null
+        function onWindowReExposed() { root.webViewRefreshNeeded() }
+    }
+
     signal sendRequested
 
     function _accountDisplayText(account) {
@@ -1247,6 +1254,10 @@ Window {
                                         composeWebView.loadHtml(root._renderedHtml(), "file:///");
                                 }
                                 function on_RawBodyChanged() {
+                                    if (root._isHtmlBody)
+                                        composeWebView.loadHtml(root._renderedHtml(), "file:///");
+                                }
+                                function onWebViewRefreshNeeded() {
                                     if (root._isHtmlBody)
                                         composeWebView.loadHtml(root._renderedHtml(), "file:///");
                                 }

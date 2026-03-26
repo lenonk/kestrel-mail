@@ -51,6 +51,16 @@ Kirigami.ApplicationWindow {
         Component.onCompleted: forceActiveFocus()
     }
 
+    // Emitted when the Wayland compositor re-exposes the window surface
+    // after hiding it (minimize, desktop switch, activity switch).
+    // WebEngineView instances listen to this to force-reload their content —
+    // works around a Chromium/Wayland bug where the GPU surface goes black.
+    signal webViewRefreshNeeded()
+    Connections {
+        target: typeof windowExposeWatcher !== "undefined" ? windowExposeWatcher : null
+        function onWindowReExposed() { root.webViewRefreshNeeded() }
+    }
+
     property string syncStatus: ""
     property bool syncStatusIsError: false
     property bool refreshInProgress: false
