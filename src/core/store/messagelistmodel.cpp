@@ -221,6 +221,11 @@ void MessageListModel::setBucketExpanded(const QString &bucketKey, bool expanded
     }
     if (!changed) return;
     refreshView();
+
+    // Collapsing a bucket shrinks the visible list. Load more messages from
+    // the DB to fill the gap so the user doesn't see an unexpectedly short list.
+    if (!expanded && m_hasMore)
+        loadMore();
 }
 
 void MessageListModel::setExpansionState(bool todayExpanded,
@@ -639,6 +644,16 @@ void MessageListModel::applyRows(QVector<Row> &&nextRows)
 
     const int oldMid = oldSize - prefix - suffix;
     const int newMid = newSize - prefix - suffix;
+
+    // Update prefix rows in-place and emit dataChanged so QML sees the new
+    // values (e.g. a header's expanded state) before the structural change.
+    for (int i = 0; i < prefix; ++i) {
+        if (!rowEquals(m_rows.at(i), nextRows.at(i))) {
+            const QList<int> roles = changedRoles(m_rows.at(i), nextRows.at(i));
+            m_rows[i] = nextRows.at(i);
+            emit dataChanged(index(i), index(i), roles);
+        }
+    }
 
     if (oldMid == 0 && newMid > 0) {
         beginInsertRows(QModelIndex(), prefix, prefix + newMid - 1);

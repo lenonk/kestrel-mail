@@ -224,7 +224,7 @@ buildCategoryHints(SyncContext &ctx, IngestState &state, qint64 minUid, qint64 m
 
 void
 ingestMessage(const QString &fetchResp, const QString &uid, const QString &debugPrefix, const QString &messageFolder,
-                   qint64 rawFetchMs, qint64 enrichMs, qint64 totalFetchMs, const SyncContext &ctx, IngestState &state) {
+                   const SyncContext &ctx, IngestState &state) {
     const auto headerFieldsBlock = extractHeaderFieldsLiteral(fetchResp.toUtf8());
     const auto &headerSource = headerFieldsBlock.isEmpty() ? fetchResp : headerFieldsBlock;
 
@@ -645,8 +645,7 @@ fetchUidBatch(SyncContext &ctx,
         "BODY.PEEK[]<0.%2>)"
     ).arg(uidSpec).arg(kInitialBodyPeekBytes).arg(gmailItems);
 
-    QElapsedTimer fetchTimer;
-    fetchTimer.start();
+
     const QString batchResp = ctx.cxn->execute(fetchCmd);
 
     if (!batchResp.contains(" OK"_L1, Qt::CaseInsensitive)) {
@@ -658,10 +657,7 @@ fetchUidBatch(SyncContext &ctx,
         throttleBackoffMs = qMax(0, throttleBackoffMs - 100);
     }
 
-    const qint64     rawFetchMs     = fetchTimer.elapsed();
     const QStringList fetchParts    = splitFetchResponses(batchResp);
-    const int         fetchedParts  = qMax(1, fetchParts.size());
-    const qint64      rawFetchMsPerMsg = qMax<qint64>(1, rawFetchMs / fetchedParts);
 
     for (const QString &part : fetchParts) {
         const QString uid = parseUidFromFetch(part);
@@ -692,16 +688,12 @@ fetchUidBatch(SyncContext &ctx,
             }
         }
 
-        QElapsedTimer enrichTimer;
-        enrichTimer.start();
-        const qint64 enrichMs = enrichTimer.elapsed();
-
         ++state.fetchedCount;
         state.visibleUids.push_back(uid);
         if (extractGmailCategoryFolder(fetchResp).isEmpty()) ++state.categoryMissCount;
 
         ingestMessage(fetchResp, uid, debugPrefix, ctx.cxn->selectedFolder(),
-                      rawFetchMsPerMsg, enrichMs, rawFetchMsPerMsg + enrichMs, ctx, state);
+                      ctx, state);
     }
 }
 
@@ -864,7 +856,6 @@ executeIncremental(SyncContext &ctx) {
     }
 
     // Filter: only UIDs strictly greater than minUidExclusive.
-    const auto rawReturned = newUids.size();
     QStringList filtered;
     filtered.reserve(newUids.size());
     for (const auto &u : newUids) {
@@ -979,6 +970,17 @@ executeIncremental(SyncContext &ctx) {
         }
 
         if (!backfillCandidates.empty()) {
+            // Build Gmail category hints for backfill UIDs so they get the correct
+            // category folder edge (Social, Promotions, etc.) instead of bare INBOX.
+            if (!backfillCandidates.empty()) {
+                qint32 minBf = backfillCandidates.front(), maxBf = backfillCandidates.front();
+                for (const qint32 u : backfillCandidates) {
+                    if (u < minBf) minBf = u;
+                    if (u > maxBf) maxBf = u;
+                }
+                buildCategoryHints(ctx, state, minBf, maxBf);
+            }
+
             const auto prepass = prepassMessageIds(ctx, backfillCandidates, state);
             if (prepass.edgesInserted > 0) {
                 qInfo().noquote() << "[dedup] backfill folder=" << ctx.folderName

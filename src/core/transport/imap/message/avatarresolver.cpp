@@ -91,149 +91,6 @@ namespace {
         return globe;
     }
 
-    // Fetches the HTML at `url`, following safe redirects, capped at 48 KB.
-    // We only need the <head> section, so there's no reason to pull full pages.
-    QString fetchHtml(const QUrl &url, int timeoutMs = 2000) {
-        QNetworkRequest req(url);
-        req.setHeader(QNetworkRequest::UserAgentHeader,
-                      "Mozilla/5.0 (compatible; kestrel-mail/1.0)"_L1);
-        req.setRawHeader("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8");
-        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                         QNetworkRequest::NoLessSafeRedirectPolicy);
-
-        QNetworkReply *reply = sharedNam().get(req);
-        QEventLoop loop;
-        QTimer timeout;
-        timeout.setSingleShot(true);
-        QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        timeout.start(timeoutMs);
-        loop.exec();
-
-        QString html;
-        if (reply->isFinished() && reply->error() == QNetworkReply::NoError) {
-            const auto ct = reply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
-            if (ct.contains("text/html"_L1) || ct.contains("text/xhtml"_L1) || ct.isEmpty()) {
-                constexpr qint64 kMaxBytes = 48 * 1024;
-                html = QString::fromUtf8(reply->read(kMaxBytes));
-            }
-        }
-
-        if (!reply->isFinished()) reply->abort();
-        reply->deleteLater();
-        return html;
-    }
-
-    struct IconCandidate {
-        QUrl    url;
-        QString sizes;       // from sizes="..." (e.g. "192x192", "any")
-        int     relPriority; // apple-touch-icon=3, icon=2, *icon*=1
-    };
-
-    // Parses <link rel="icon|apple-touch-icon|..."> tags from the HTML <head>
-    // and returns candidates sorted best-first by rel priority.
-    QList<IconCandidate> extractIconCandidates(const QString &html, const QUrl &base) {
-        // Restrict to <head> to avoid false positives in body content.
-        const int headEnd = html.indexOf("</head>"_L1, 0, Qt::CaseInsensitive);
-        const QStringView head = headEnd > 0
-            ? QStringView(html).left(headEnd)
-            : QStringView(html).left(8192);
-
-        static const QRegularExpression linkTagRe(
-            QStringLiteral("<link\\b[^>]*>"),
-            QRegularExpression::CaseInsensitiveOption);
-        // Matches: name="value", name='value', or name=bare
-        static const QRegularExpression attrRe(
-            QStringLiteral(R"re(\b(rel|href|sizes)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))re"),
-            QRegularExpression::CaseInsensitiveOption);
-
-        QList<IconCandidate> result;
-
-        auto tagIt = linkTagRe.globalMatch(head);
-        while (tagIt.hasNext()) {
-            const QString tag = tagIt.next().captured(0);
-
-            QString rel, href, sizes;
-            auto attrIt = attrRe.globalMatch(tag);
-            while (attrIt.hasNext()) {
-                const auto am = attrIt.next();
-                const QString name = am.captured(1).toLower();
-                // Pick whichever capture group matched (double-quote, single-quote, or bare).
-                const QString value = !am.captured(2).isEmpty() ? am.captured(2)
-                                    : !am.captured(3).isEmpty() ? am.captured(3)
-                                    :                             am.captured(4);
-                if      (name == "rel"_L1)   rel   = value.trimmed().toLower();
-                else if (name == "href"_L1)  href  = value.trimmed();
-                else if (name == "sizes"_L1) sizes = value.trimmed().toLower();
-            }
-
-            if (href.isEmpty() || href.startsWith('#'))
-                continue;
-
-            int priority = -1;
-            if      (rel.contains("apple-touch-icon"_L1)) priority = 3;
-            else if (rel == "icon"_L1)                    priority = 2;
-            else if (rel.contains("icon"_L1))             priority = 1; // "shortcut icon" etc.
-            else                                          continue;
-
-            const QUrl resolved = base.resolved(QUrl(href));
-            if (!resolved.isValid() || resolved.scheme().isEmpty())
-                continue;
-
-            result.push_back({resolved, sizes, priority});
-        }
-
-        std::sort(result.begin(), result.end(), [](const IconCandidate &a, const IconCandidate &b) {
-            return a.relPriority > b.relPriority;
-        });
-        return result;
-    }
-
-    // Scores a fetched icon: higher = better. Combines format quality, actual pixel
-    // dimensions (already decoded into `f.width`/`f.height`), the <link sizes=> hint,
-    // and URL path clues as a tiebreaker. Never re-decodes the image.
-    int scoreIcon(const QUrl &url, const ImageFetch &f, const QString &sizeHint) {
-        int score = 0;
-
-        // Format quality: SVG > PNG/WebP > GIF > ICO.
-        const QString mime = f.mime.toLower();
-        if      (mime.contains("svg"_L1))                                     score += 100;
-        else if (mime.contains("png"_L1) || mime.contains("webp"_L1))         score +=  60;
-        else if (mime.contains("gif"_L1))                                      score +=  30;
-        else if (mime.contains("ico"_L1) || mime.contains("x-icon"_L1))       score +=  20;
-        else                                                                    score +=  10;
-
-        // Actual pixel dimensions from the already-decoded ImageFetch.
-        const int dim = qMin(f.width, f.height);
-        if      (dim >= 192) score += 80;
-        else if (dim >= 128) score += 60;
-        else if (dim >= 64)  score += 40;
-        else if (dim >= 32)  score += 20;
-        else if (dim >  0)   score +=  5;
-
-        // <link sizes="WxH"> hint as a secondary signal.
-        if (!sizeHint.isEmpty() && sizeHint != "any"_L1) {
-            static const QRegularExpression sizeRe(QStringLiteral(R"((\d+)\s*[xX]\s*(\d+))"));
-            if (const auto m = sizeRe.match(sizeHint); m.hasMatch()) {
-                const int w = m.captured(1).toInt();
-                if      (w >= 192) score += 40;
-                else if (w >= 128) score += 30;
-                else if (w >= 64)  score += 20;
-            }
-        } else if (sizeHint == "any"_L1) {
-            score += 30; // SVG declares sizes="any" by convention.
-        }
-
-        // URL path as a light tiebreaker.
-        const QString path = url.path().toLower();
-        if      (path.contains("apple-touch"_L1))                  score += 30;
-        else if (path.contains("touch"_L1))                        score += 20;
-        else if (path.endsWith(".svg"_L1))                         score += 15;
-        else if (path.contains("192"_L1) || path.contains("180"_L1)) score += 10;
-
-        return score;
-    }
-
 } // namespace
 
 QString
@@ -560,7 +417,7 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
 
     static const QSet bimiSkip = {
         QStringLiteral("gmail.com"), QStringLiteral("google.com"), QStringLiteral("googlemail.com"),
-        QStringLiteral("twitter.com"), QStringLiteral("youtube.com"), QStringLiteral("icloud.com"), QStringLiteral("outlook.com"),
+        QStringLiteral("icloud.com"), QStringLiteral("outlook.com"),
         QStringLiteral("mail.com"),
     };
 
@@ -806,7 +663,7 @@ QString resolveFaviconLogoUrl(const QString &domain) {
         QStringLiteral("outlook.com"), QStringLiteral("hotmail.com"), QStringLiteral("live.com"),
         QStringLiteral("icloud.com"), QStringLiteral("me.com"),
         QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk"),
-        QStringLiteral("google.com"), QStringLiteral("twitter.com"), QStringLiteral("youtube.com"),
+        QStringLiteral("google.com"),
         QStringLiteral("mail.com")
     };
 

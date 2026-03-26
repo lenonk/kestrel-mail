@@ -57,9 +57,6 @@ void appendImapLog(const qint64 connId, const QString &owner,
     f.write(block);
 }
 
-void appendImapLog(const QString &email, const QString &command, const QString &response) {
-    appendImapLog(-1, QString(), email, command, response);
-}
 
 QByteArray buildXOAuth2Command(const QString &tag, const QString &email, const QString &accessToken) {
     const QByteArray authRaw = QStringLiteral("user=%1\u0001auth=Bearer %2\u0001\u0001").arg(email, accessToken).toUtf8();

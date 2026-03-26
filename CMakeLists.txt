@@ -59,6 +59,7 @@ foreach(_kirigami_qml_plugin_target IN ITEMS
     KF6KirigamiDialogsplugin
     KF6KirigamiLayoutsplugin
     KF6KirigamiLayoutsPrivateplugin
+    KF6KirigamiControlsplugin
 )
     if(NOT TARGET ${_kirigami_qml_plugin_target})
         add_library(${_kirigami_qml_plugin_target} INTERFACE IMPORTED)
@@ -70,9 +71,9 @@ set(MAILIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(MAILIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/mailio)
 if (TARGET mailio)
-    target_compile_options(mailio PRIVATE -fexceptions)
+    target_compile_options(mailio PRIVATE -fexceptions -w)
 endif()
-set_source_files_properties(src/core/mime/mailioparser.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
+set_source_files_properties(src/core/mime/mailioparser.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions;-Wno-overloaded-virtual")
 
 qt_standard_project_setup()
 

@@ -222,7 +222,7 @@ SmtpService::SmtpService(AccountRepository *accounts, TokenVault *vault, QObject
 {}
 
 void SmtpService::sendEmail(const QVariantMap &params) {
-    QtConcurrent::run([this, params]() {
+    (void)QtConcurrent::run([this, params]() {
         const auto result = doSend(params);
         QMetaObject::invokeMethod(this, [this, result]() {
             emit sendFinished(result.ok, result.message);
