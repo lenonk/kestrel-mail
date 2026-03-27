@@ -46,7 +46,8 @@ Kirigami.ApplicationWindow {
             }
         }
         onActiveFocusChanged: {
-            if (!activeFocus) forceActiveFocus()
+            if (!activeFocus && !(typeof searchBar !== "undefined" && searchBar.editing))
+                forceActiveFocus()
         }
         Component.onCompleted: forceActiveFocus()
     }
@@ -59,6 +60,14 @@ Kirigami.ApplicationWindow {
     Connections {
         target: typeof windowExposeWatcher !== "undefined" ? windowExposeWatcher : null
         function onWindowReExposed() { root.webViewRefreshNeeded() }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+F"
+        onActivated: {
+            if (typeof searchBar !== "undefined" && searchBar.enterEditing)
+                searchBar.enterEditing()
+        }
     }
 
     property string syncStatus: ""
@@ -1808,44 +1817,23 @@ Kirigami.ApplicationWindow {
                     font.pointSize: 14 // 18
                 }
 
-                Rectangle {
+                Components.SearchBar {
+                    id: searchBar
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 5
-                    width: root.titleSearchWidth
-                    height: Kirigami.Units.gridUnit + 10
-                    radius: height / 2
-                    color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.06)
-                    border.color: Kirigami.Theme.disabledTextColor
+                    appRoot: root
+                    inactiveWidth: root.titleSearchWidth
+                    activeWidth: root.titleSearchWidth + Kirigami.Units.gridUnit * 8
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: Kirigami.Units.smallSpacing + 1
-                        anchors.rightMargin: Kirigami.Units.smallSpacing + 1
-                        spacing: 2
-
-                        Kirigami.Icon {
-                            source: "edit-find"
-                            Layout.preferredWidth: 20
-                            Layout.preferredHeight: 20
-                            Layout.alignment: Qt.AlignVCenter
-                            color: Kirigami.Theme.disabledTextColor
-                        }
-                        QQC2.TextField {
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignVCenter
-                            placeholderText: i18n("Search (type '?' for help)")
-                            font.pixelSize: 12
-                            font.italic: true
-                            horizontalAlignment: Text.AlignLeft
-                            verticalAlignment: Text.AlignVCenter
-                            leftPadding: 0
-                            rightPadding: 0
-                            topPadding: 0
-                            bottomPadding: 0
-                            implicitHeight: parent.height - 2
-                            background: Item {}
-                        }
+                    onSearchRequested: function(query) {
+                        if (root.messageListModelObj)
+                            root.messageListModelObj.setSearchQuery(query)
+                    }
+                    onSearchCleared: {
+                        if (root.messageListModelObj)
+                            root.messageListModelObj.setSearchQuery("")
+                        root.syncMessageListModelSelection()
                     }
                 }
 

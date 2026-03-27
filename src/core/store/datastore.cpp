@@ -1116,6 +1116,16 @@ bool DataStore::init()
         return false;
     }
 
+    if (!q.exec(QStringLiteral(R"(
+        CREATE TABLE IF NOT EXISTS search_history (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          query       TEXT    NOT NULL UNIQUE,
+          searched_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+    )"))) {
+        return false;
+    }
+
     // Paging/list performance indexes.
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_received_at_id ON messages(received_at DESC, id DESC)"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_mfm_folder_message ON message_folder_map(folder, message_id)"));
@@ -5166,4 +5176,255 @@ bool DataStore::deleteUserFolder(const QString &name)
     if (!q.exec() || q.numRowsAffected() < 1) return false;
     emit userFoldersChanged();
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+QVariantList DataStore::searchMessages(const QString &query, int limit, int offset, bool *hasMore) const
+{
+    if (hasMore) *hasMore = false;
+    const QString term = query.trimmed();
+    if (term.isEmpty()) return {};
+
+    const QSqlDatabase database = db();
+    if (!database.isValid() || !database.isOpen()) return {};
+
+    const QString pattern = "%"_L1 + term + "%"_L1;
+
+    auto annotateMessageFlags = [&](QVariantList &list) {
+        if (list.isEmpty())
+            return;
+
+        QStringList messageIds;
+        messageIds.reserve(list.size());
+        for (const QVariant &v : list) {
+            const QString mid = v.toMap().value("messageId"_L1).toString();
+            if (!mid.isEmpty())
+                messageIds.push_back(mid);
+        }
+
+        QSet<QString> importantMessageIds;
+        if (!messageIds.isEmpty()) {
+            QStringList ph;
+            ph.reserve(messageIds.size());
+            for (int i = 0; i < messageIds.size(); ++i)
+                ph << QStringLiteral(":m%1").arg(i);
+            const QString inClause = ph.join(QLatin1Char(','));
+
+            QSqlQuery qImp(database);
+            qImp.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_folder_map WHERE lower(folder) LIKE '%/important' AND message_id IN (%1)").arg(inClause));
+            for (int i = 0; i < messageIds.size(); ++i)
+                qImp.bindValue(QStringLiteral(":m%1").arg(i), messageIds.at(i));
+            if (qImp.exec()) {
+                while (qImp.next()) importantMessageIds.insert(qImp.value(0).toString());
+            }
+
+            QSqlQuery qImpL(database);
+            qImpL.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_labels WHERE lower(label)='important' AND message_id IN (%1)").arg(inClause));
+            for (int i = 0; i < messageIds.size(); ++i)
+                qImpL.bindValue(QStringLiteral(":m%1").arg(i), messageIds.at(i));
+            if (qImpL.exec()) {
+                while (qImpL.next()) importantMessageIds.insert(qImpL.value(0).toString());
+            }
+        }
+
+        QSet<QString> withAttachments;
+        if (!messageIds.isEmpty()) {
+            QStringList ph;
+            ph.reserve(messageIds.size());
+            for (int i = 0; i < messageIds.size(); ++i)
+                ph << QStringLiteral(":m%1").arg(i);
+
+            QSqlQuery qa(database);
+            qa.prepare(QStringLiteral("SELECT DISTINCT message_id FROM message_attachments WHERE message_id IN (%1)").arg(ph.join(QLatin1Char(','))));
+            for (int i = 0; i < messageIds.size(); ++i)
+                qa.bindValue(QStringLiteral(":m%1").arg(i), messageIds.at(i));
+            if (qa.exec()) {
+                while (qa.next()) withAttachments.insert(qa.value(0).toString());
+            }
+        }
+
+        for (int i = 0; i < list.size(); ++i) {
+            QVariantMap row = list.at(i).toMap();
+            const QString mid = row.value("messageId"_L1).toString();
+            row.insert("hasAttachments"_L1,   withAttachments.contains(mid));
+            row.insert("isImportant"_L1,      importantMessageIds.contains(mid));
+            row.insert("hasTrackingPixel"_L1, row.value("hasTrackingPixel"_L1).toBool());
+            list[i] = row;
+        }
+    };
+
+    const int safeOffset = qMax(0, offset);
+    const int chunkSize = (limit > 0) ? qMax(200, limit * 4) : 5000;
+    const int targetCount = (limit > 0) ? (safeOffset + limit + 1) : -1;
+
+    QSet<QString> seenKeys;
+    QVariantList out;
+    int rawOffset = 0;
+    bool exhausted = false;
+
+    while (!exhausted) {
+        QSqlQuery q(database);
+        q.prepare(R"(
+            SELECT mfm.account_email,
+                   mfm.folder,
+                   mfm.uid,
+                   cm.id,
+                   cm.sender,
+                   cm.subject,
+                   cm.recipient,
+                   '' as recipient_avatar_url,
+                   cm.received_at,
+                   cm.snippet,
+                   COALESCE(cm.has_tracking_pixel, 0) as has_tracking_pixel,
+                   '' as avatar_domain,
+                   '' as avatar_url,
+                   '' as avatar_source,
+                   mfm.unread,
+                   COALESCE(cm.thread_id, '') as thread_id,
+                   COALESCE((SELECT COUNT(DISTINCT m2.id) FROM messages m2
+                             WHERE m2.account_email = cm.account_email
+                               AND m2.thread_id = cm.thread_id
+                               AND cm.thread_id IS NOT NULL
+                               AND length(trim(COALESCE(cm.thread_id, ''))) > 0), 1) as thread_count,
+                   COALESCE(cm.gm_thr_id, '') as gm_thr_id,
+                   COALESCE((SELECT GROUP_CONCAT(m2.sender, char(31))
+                             FROM messages m2
+                             WHERE m2.account_email = cm.account_email
+                               AND m2.thread_id = cm.thread_id
+                               AND cm.thread_id IS NOT NULL
+                               AND length(trim(COALESCE(cm.thread_id, ''))) > 0), '') as all_senders,
+                   COALESCE(cm.flagged, 0) as flagged
+            FROM message_folder_map mfm
+            JOIN messages cm ON cm.id = mfm.message_id
+            WHERE cm.account_email = mfm.account_email
+              AND (cm.sender LIKE :p1 OR cm.subject LIKE :p2 OR cm.snippet LIKE :p3)
+            ORDER BY cm.received_at DESC
+            LIMIT :limit OFFSET :offset
+        )"_L1);
+        q.bindValue(":p1"_L1, pattern);
+        q.bindValue(":p2"_L1, pattern);
+        q.bindValue(":p3"_L1, pattern);
+        q.bindValue(":limit"_L1, chunkSize);
+        q.bindValue(":offset"_L1, rawOffset);
+
+        int fetchedRaw = 0;
+        if (q.exec()) {
+            while (q.next()) {
+                ++fetchedRaw;
+
+                const QString tid  = q.value(15).toString().trimmed();
+                QString gtid       = q.value(17).toString().trimmed();
+                const QString acct = q.value(0).toString();
+                const QString mid  = q.value(3).toString();
+                if (gtid.isEmpty() && tid.startsWith("gm:"_L1, Qt::CaseInsensitive))
+                    gtid = tid.mid(3).trimmed();
+                const QString tkey = !gtid.isEmpty()
+                    ? acct + "|gtid:"_L1 + gtid
+                    : (tid.isEmpty()
+                        ? acct + "|msg:"_L1 + mid
+                        : acct + "|tid:"_L1 + tid);
+                if (seenKeys.contains(tkey)) continue;
+                seenKeys.insert(tkey);
+
+                QVariantMap row;
+                row.insert("accountEmail"_L1,     q.value(0));
+                row.insert("folder"_L1,           q.value(1));
+                row.insert("uid"_L1,              q.value(2));
+                row.insert("messageId"_L1,        mid);
+                row.insert("sender"_L1,           q.value(4));
+                row.insert("subject"_L1,          q.value(5));
+                row.insert("recipient"_L1,        q.value(6));
+                row.insert("recipientAvatarUrl"_L1, q.value(7));
+                row.insert("receivedAt"_L1,       q.value(8));
+                row.insert("snippet"_L1,          q.value(9));
+                row.insert("hasTrackingPixel"_L1, q.value(10).toInt() == 1);
+                row.insert("avatarDomain"_L1,     q.value(11));
+                row.insert("avatarUrl"_L1,        q.value(12));
+                row.insert("avatarSource"_L1,     q.value(13));
+                row.insert("unread"_L1,           q.value(14).toInt() == 1);
+                row.insert("threadId"_L1,         tid);
+                row.insert("threadCount"_L1,      q.value(16).toInt());
+                row.insert("gmThrId"_L1,          gtid);
+                row.insert("allSenders"_L1,       q.value(18));
+                row.insert("flagged"_L1,          q.value(19).toInt() == 1);
+                row.insert("isSearchResult"_L1,   true);
+                out.push_back(row);
+
+                if (targetCount > 0 && out.size() >= targetCount)
+                    break;
+            }
+        }
+
+        if (targetCount > 0 && out.size() >= targetCount)
+            break;
+        if (fetchedRaw < chunkSize)
+            exhausted = true;
+        rawOffset += fetchedRaw;
+        if (fetchedRaw == 0)
+            exhausted = true;
+    }
+
+    if (limit > 0) {
+        if (safeOffset >= out.size()) {
+            if (hasMore) *hasMore = false;
+            return {};
+        }
+        const int end = qMin(out.size(), safeOffset + limit);
+        if (hasMore) *hasMore = (out.size() > safeOffset + limit);
+        out = out.mid(safeOffset, end - safeOffset);
+    } else {
+        if (hasMore) *hasMore = false;
+    }
+
+    annotateMessageFlags(out);
+    return out;
+}
+
+QVariantList DataStore::recentSearches(int limit) const
+{
+    const QSqlDatabase database = db();
+    if (!database.isValid() || !database.isOpen()) return {};
+
+    QSqlQuery q(database);
+    q.prepare("SELECT query, searched_at FROM search_history ORDER BY searched_at DESC LIMIT :limit"_L1);
+    q.bindValue(":limit"_L1, limit);
+
+    QVariantList out;
+    if (q.exec()) {
+        while (q.next()) {
+            QVariantMap row;
+            row.insert("query"_L1,      q.value(0).toString());
+            row.insert("searchedAt"_L1, q.value(1).toString());
+            out.push_back(row);
+        }
+    }
+    return out;
+}
+
+void DataStore::addRecentSearch(const QString &query)
+{
+    const QString term = query.trimmed();
+    if (term.isEmpty()) return;
+
+    const QSqlDatabase database = db();
+    if (!database.isValid() || !database.isOpen()) return;
+
+    QSqlQuery q(database);
+    q.prepare("INSERT INTO search_history (query, searched_at) VALUES (:q, datetime('now')) ON CONFLICT(query) DO UPDATE SET searched_at = datetime('now')"_L1);
+    q.bindValue(":q"_L1, term);
+    q.exec();
+}
+
+void DataStore::removeRecentSearch(const QString &query)
+{
+    const QSqlDatabase database = db();
+    if (!database.isValid() || !database.isOpen()) return;
+
+    QSqlQuery q(database);
+    q.prepare("DELETE FROM search_history WHERE query = :q"_L1);
+    q.bindValue(":q"_L1, query.trimmed());
+    q.exec();
 }

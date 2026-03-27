@@ -46,6 +46,8 @@ Rectangle {
     property bool modelUnread
     property var modelAllSenders
     property bool modelFlagged
+    property bool modelIsSearchResult: false
+    property string modelResultFolder: ""
     readonly property string nameLabel: {
         if (!appRoot)
             return "";
@@ -301,6 +303,48 @@ Rectangle {
                     font.pixelSize: 13
                     text: (modelSubject || i18n("(No subject)"))
                     wrapMode: Text.NoWrap
+                }
+
+                // Search result: folder badge
+                Rectangle {
+                    Layout.alignment: Qt.AlignVCenter
+                    implicitHeight: 18
+                    implicitWidth: Math.min(140, folderBadgeText.implicitWidth + 16)
+                    radius: 3
+                    color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
+                    border.width: 2
+                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 2.2)
+                    visible: !!messageCard.modelIsSearchResult && messageCard.modelResultFolder.length > 0
+
+                    QQC2.Label {
+                        id: folderBadgeText
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        horizontalAlignment: Text.AlignHCenter
+                        color: Kirigami.Theme.textColor
+                        elide: Text.ElideRight
+                        font.pixelSize: 10
+                        font.bold: true
+                        maximumLineCount: 1
+                        text: (messageCard.appRoot && messageCard.appRoot.displayFolderName)
+                              ? messageCard.appRoot.displayFolderName(messageCard.modelResultFolder)
+                              : messageCard.modelResultFolder
+                        wrapMode: Text.NoWrap
+                    }
+                }
+
+                // Search result: account icon
+                Image {
+                    Layout.preferredWidth: 16
+                    Layout.preferredHeight: 16
+                    Layout.alignment: Qt.AlignVCenter
+                    fillMode: Image.PreserveAspectFit
+                    source: "qrc:/qml/gmail_account_icon.svg"
+                    sourceSize: Qt.size(16, 16)
+                    visible: !!messageCard.modelIsSearchResult
                 }
 
                 MessageCardIndicators {

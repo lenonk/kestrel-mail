@@ -86,7 +86,9 @@ Rectangle {
     property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
         const html = (root.messageBodyHtml || "").toString();
-        return /src\s*=\s*["']https?:\/\//i.test(html);
+        return /src\s*=\s*["']https?:\/\//i.test(html)
+            || /srcset\s*=\s*["']https?:\/\//i.test(html)
+            || /background(-image)?\s*:\s*[^;]*url\s*\(\s*['"]?https?:\/\//i.test(html);
     }
     readonly property bool hasTrackingPixel: root._trackerInfo.found
     readonly property bool hasUsableBodyHtml: {
@@ -756,6 +758,7 @@ Rectangle {
     onHasUsableBodyHtmlChanged: {
         const len = (root.messageBodyHtml || "").toString().length;
         console.log("[hydrate-html-db] pane-usable-changed", "key=", root.renderMessageKey, "usable=", root.hasUsableBodyHtml, "bodyLen=", len);
+
     }
     onMessageDataChanged: {
         root.selectedAttachmentKey = "";
@@ -817,6 +820,8 @@ Rectangle {
             imagesAllowed = false;
         }
 
+        const bodyLen = (root.messageBodyHtml || "").toString().length
+        const extImg = root.hasExternalImages
         trackingAllowed = false;
 
         root.rebuildTagsFromDbForCurrentMessage();

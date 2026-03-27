@@ -351,7 +351,8 @@ QString HtmlProcessor::neutralizeExternalImages(const QString &html) const
     static const QRegularExpression localSrcRe(R"(^(file:|data:|cid:))", QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression httpSrcRe(R"(^https?:)", QRegularExpression::CaseInsensitiveOption);
 
-    return applyToEachMatch(html, imgRe, [&](const QRegularExpressionMatch &m) -> QString {
+    // Step 1: neutralize <img src="http..."> tags
+    QString result = applyToEachMatch(html, imgRe, [&](const QRegularExpressionMatch &m) -> QString {
         QString tag = m.captured(0);
         const auto srcM = srcRe.match(tag);
         if (!srcM.hasMatch())
@@ -361,10 +362,17 @@ QString HtmlProcessor::neutralizeExternalImages(const QString &html) const
             return tag;
         if (!httpSrcRe.match(src).hasMatch())
             return tag;
-        // Replace src="..." with src="blank"
         const QChar q = srcM.captured(1).at(0);
         return tag.left(srcM.capturedStart()) + "src="_L1 + q + blank + q + tag.mid(srcM.capturedEnd());
     });
+
+    // Step 2: neutralize CSS background-image: url(http...) and background: ... url(http...)
+    static const QRegularExpression bgUrlRe(
+        R"(url\s*\(\s*(['"]?)(https?://[^)'"]*)\1\s*\))",
+        QRegularExpression::CaseInsensitiveOption);
+    result.replace(bgUrlRe, "url("_L1 + blank + ")"_L1);
+
+    return result;
 }
 
 QString HtmlProcessor::neutralizeTrackingPixels(const QString &html,

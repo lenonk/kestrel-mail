@@ -125,6 +125,8 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/InviteCard.qml
         qml/components/PaneIconStrip.qml
         qml/components/CollapsedPaneRail.qml
+        qml/components/SearchBar.qml
+        qml/components/SearchFilterPopup.qml
         qml/components/MessageList/MessageListPane.qml
         qml/components/MessageList/MessageCard.qml
         qml/components/MessageList/MessageCardAvatar.qml
@@ -149,6 +151,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/important.svg
         qml/flag.svg
         qml/trash.svg
+        qml/gmail_account_icon.svg
 )
 
 set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json")

@@ -113,7 +113,9 @@ QVariant MessageListModel::data(const QModelIndex &index, int role) const
     case ThreadCountRole: return row.message.value(QStringLiteral("threadCount"));
     case IsImportantRole: return row.message.value(QStringLiteral("isImportant"));
     case AllSendersRole:  return row.message.value(QStringLiteral("allSenders"));
-    case FlaggedRole:     return row.message.value(QStringLiteral("flagged"));
+    case FlaggedRole:          return row.message.value(QStringLiteral("flagged"));
+    case IsSearchResultRole:   return row.message.value(QStringLiteral("isSearchResult"));
+    case ResultFolderRole:     return row.message.value(QStringLiteral("folder"));
     default: return {};
     }
 }
@@ -145,7 +147,9 @@ QHash<int, QByteArray> MessageListModel::roleNames() const
         { ThreadCountRole, QByteArrayLiteral("threadCount") },
         { IsImportantRole, QByteArrayLiteral("isImportant") },
         { AllSendersRole,  QByteArrayLiteral("allSenders") },
-        { FlaggedRole,     QByteArrayLiteral("flagged") }
+        { FlaggedRole,          QByteArrayLiteral("flagged") },
+        { IsSearchResultRole,   QByteArrayLiteral("isSearchResult") },
+        { ResultFolderRole,     QByteArrayLiteral("resultFolder") }
     };
 }
 
@@ -191,6 +195,23 @@ void MessageListModel::setSelection(const QString &folderKey, const QStringList 
         m_hasMore = false;
         emit pagingChanged();
     }
+    if (!m_searchQuery.isEmpty()) return; // search takes priority over folder selection
+    refresh();
+}
+
+void MessageListModel::setSearchQuery(const QString &query)
+{
+    const QString trimmed = query.trimmed();
+    if (m_searchQuery == trimmed) return;
+    m_searchQuery = trimmed;
+    m_windowStart = 0;
+    m_loadedSourceRows.clear();
+    m_nextOffset = 0;
+    if (m_hasMore) {
+        m_hasMore = false;
+        emit pagingChanged();
+    }
+    emit searchQueryChanged();
     refresh();
 }
 
@@ -298,12 +319,18 @@ void MessageListModel::refresh()
         }
     });
 
+    const QString searchQuery = m_searchQuery;
     watcher->setFuture(QtConcurrent::run(
-        [store, folderKey, selectedCategories, selectedCategoryIndex, preserveLimit]() -> Result {
+        [store, folderKey, selectedCategories, selectedCategoryIndex, preserveLimit, searchQuery]() -> Result {
             QElapsedTimer t; t.start();
             bool hasMore = false;
-            auto rows = store->messagesForSelection(
-                folderKey, selectedCategories, selectedCategoryIndex, preserveLimit, 0, &hasMore);
+            QVariantList rows;
+            if (!searchQuery.isEmpty()) {
+                rows = store->searchMessages(searchQuery, preserveLimit, 0, &hasMore);
+            } else {
+                rows = store->messagesForSelection(
+                    folderKey, selectedCategories, selectedCategoryIndex, preserveLimit, 0, &hasMore);
+            }
             return {std::move(rows), hasMore};
         }));
 }

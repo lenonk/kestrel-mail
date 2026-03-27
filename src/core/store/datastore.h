@@ -109,6 +109,10 @@ public:
     Q_INVOKABLE void setTrustedSenderDomain(const QString &domain);
     Q_INVOKABLE QVariantList attachmentsForMessage(const QString &accountEmail, const QString &folder, const QString &uid) const;
     Q_INVOKABLE QVariantList searchContacts(const QString &prefix, int limit = 10) const;
+    Q_INVOKABLE QVariantList searchMessages(const QString &query, int limit = 50, int offset = 0, bool *hasMore = nullptr) const;
+    Q_INVOKABLE QVariantList recentSearches(int limit = 5) const;
+    Q_INVOKABLE void addRecentSearch(const QString &query);
+    Q_INVOKABLE void removeRecentSearch(const QString &query);
     void upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments);
 
     // Favorites sidebar config — which items are visible.

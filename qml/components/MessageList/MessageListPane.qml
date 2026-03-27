@@ -22,6 +22,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             visible: (root.appRoot && root.appRoot.selectedFolderCategories && root.appRoot.selectedFolderCategories.length > 0)
+                     && !(root.appRoot.messageListModelObj && root.appRoot.messageListModelObj.isSearchActive)
             spacing: Kirigami.Units.smallSpacing
 
             Repeater {
@@ -320,6 +321,8 @@ Rectangle {
                         modelHasAttachments: (typeof model !== "undefined" && typeof model.hasAttachments !== "undefined") ? model.hasAttachments : false
                         modelIsImportant: (typeof model !== "undefined" && typeof model.isImportant !== "undefined") ? model.isImportant : false
                         modelFlagged: (typeof model !== "undefined" && typeof model.flagged !== "undefined") ? !!model.flagged : false
+                        modelIsSearchResult: (typeof model !== "undefined" && typeof model.isSearchResult !== "undefined") ? !!model.isSearchResult : false
+                        modelResultFolder: (typeof model !== "undefined" && typeof model.resultFolder !== "undefined") ? model.resultFolder : ""
                         modelSnippet: (typeof model !== "undefined" && typeof model.snippet !== "undefined") ? model.snippet : ""
                         modelAccountEmail: (typeof model !== "undefined" && typeof model.accountEmail !== "undefined") ? model.accountEmail : ""
                         modelFolder: (typeof model !== "undefined" && typeof model.folder !== "undefined") ? model.folder : ""

@@ -22,6 +22,8 @@ public:
     Q_PROPERTY(int visibleMessageCount READ visibleMessageCount NOTIFY visibleCountsChanged)
     Q_PROPERTY(bool hasMore READ hasMore NOTIFY pagingChanged)
     Q_PROPERTY(int pageSize READ pageSize CONSTANT)
+    Q_PROPERTY(QString searchQuery READ searchQuery NOTIFY searchQueryChanged)
+    Q_PROPERTY(bool isSearchActive READ isSearchActive NOTIFY searchQueryChanged)
 
     enum RowType {
         HeaderRow = 0,
@@ -54,7 +56,9 @@ public:
         ThreadCountRole,
         IsImportantRole,
         AllSendersRole,
-        FlaggedRole
+        FlaggedRole,
+        IsSearchResultRole,
+        ResultFolderRole
     };
 
     explicit MessageListModel(QObject *parent = nullptr);
@@ -67,6 +71,7 @@ public:
     void setDataStore(DataStore *store);
 
     Q_INVOKABLE void setSelection(const QString &folderKey, const QStringList &selectedCategories, int selectedCategoryIndex);
+    Q_INVOKABLE void setSearchQuery(const QString &query);
     Q_INVOKABLE void setBucketExpanded(const QString &bucketKey, bool expanded);
     Q_INVOKABLE void setExpansionState(bool todayExpanded,
                                        bool yesterdayExpanded,
@@ -86,6 +91,8 @@ public:
     int visibleMessageCount() const;
     bool hasMore() const { return m_hasMore; }
     int pageSize() const { return m_pageSize; }
+    QString searchQuery() const { return m_searchQuery; }
+    bool isSearchActive() const { return !m_searchQuery.isEmpty(); }
 
 signals:
     void dataStoreChanged();
@@ -93,6 +100,7 @@ signals:
     void totalRowCountChanged();
     void visibleCountsChanged();
     void pagingChanged();
+    void searchQueryChanged();
 
 private:
     struct Row {
@@ -109,6 +117,7 @@ private:
     QVector<Row> m_rows;
     QVector<Row> m_allRows;
     QString m_folderKey;
+    QString m_searchQuery;
     QStringList m_selectedCategories;
     int m_selectedCategoryIndex = 0;
     bool m_todayExpanded = true;
