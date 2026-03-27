@@ -194,6 +194,17 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     appendImapLog(m_logConnId, m_logOwner, email, authCommand, imapResp);
 
     if (!imapResp.contains(authTag + " OK"_L1, Qt::CaseInsensitive)) {
+        // Auth failed — if we have a token refresher, get a fresh token and retry once.
+        if (m_tokenRefresher && !m_authRetried) {
+            m_authRetried = true;
+            const QString freshToken = m_tokenRefresher(email);
+            if (!freshToken.isEmpty() && freshToken != accessToken) {
+                auto retry = connectAndAuth(host, port, email, freshToken);
+                m_authRetried = false;
+                return retry;
+            }
+            m_authRetried = false;
+        }
         result.message = "Authentication failed: %1"_L1.arg(imapResp.simplified().left(200));
         return result;
     }
@@ -533,10 +544,11 @@ Connection::isConnected() const {
 }
 
 bool
-Connection::tryReconnect() {
-    if (m_host.isEmpty() || m_email.isEmpty() || m_accessToken.isEmpty())
+Connection::tryReconnect(const QString &freshToken) {
+    const QString token = freshToken.isEmpty() ? m_accessToken : freshToken;
+    if (m_host.isEmpty() || m_email.isEmpty() || token.isEmpty())
         return false;
-    return connectAndAuth(m_host, m_port, m_email, m_accessToken).success;
+    return connectAndAuth(m_host, m_port, m_email, token).success;
 }
 
 QString

@@ -132,6 +132,14 @@ IdleWatcher::start() {
         QVariantList accounts;
         emit requestAccounts(&accounts);
 
+        // If auth is suspended (refresh token revoked), sleep long and skip.
+        if (authSuspended.load()) {
+            cxn.reset();
+            inboxSelected = false;
+            SyncUtils::sleepInterruptible(m_running, 60);
+            continue;
+        }
+
         const auto [accountOk, accountErr, target] = SyncUtils::selectOAuthAccount(accounts);
         if (!accountOk) {
             cxn.reset();

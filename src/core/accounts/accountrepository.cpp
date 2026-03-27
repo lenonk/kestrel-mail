@@ -34,6 +34,8 @@ AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
     for (auto & m_account : m_accounts) {
         if (auto existing = m_account.toMap(); existing.value("email").toString().trimmed().toLower() == email) {
             for (auto it = account.constBegin(); it != account.constEnd(); ++it) {
+                // Don't overwrite existing non-null values with null/empty
+                if (it.value().isNull()) continue;
                 existing.insert(it.key(), it.value());
             }
 

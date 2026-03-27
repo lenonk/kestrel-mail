@@ -28,9 +28,14 @@ struct ConnectResult {
 class Connection {
 public:
     using ThrottleObserver = std::function<void(const QString &accountEmail, bool throttled, const QString &response)>;
+    using TokenRefresher = std::function<QString(const QString &email)>;
 
     Connection();
     ~Connection();
+
+    // Set a callback that obtains a fresh access token for the given email.
+    // Used internally to retry authentication when the token has expired.
+    void setTokenRefresher(TokenRefresher refresher) { m_tokenRefresher = std::move(refresher); }
 
     /**
      * Connect to IMAP server with TLS and authenticate via XOAUTH2.
@@ -63,7 +68,7 @@ public:
 
     // Re-authenticate using credentials saved from the last connectAndAuth() call.
     // Returns true on success. Does nothing and returns false if no credentials are stored.
-    bool tryReconnect();
+    bool tryReconnect(const QString &freshToken = {});
 
     // Execute a generic IMAP command (tag managed internally). Returns response as QString.
     [[nodiscard]] QString execute(const QString &command);
@@ -137,6 +142,8 @@ private:
     bool m_throttled = false;
     qint64 m_logConnId = -1;
     QString m_logOwner;
+    TokenRefresher m_tokenRefresher;
+    bool m_authRetried = false;
 };
 
 } // namespace Imap

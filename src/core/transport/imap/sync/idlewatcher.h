@@ -22,6 +22,10 @@ public:
     std::atomic<qint64> minUidHint{0};
     std::atomic<qint64> maxUidWatermark{0};
 
+    // Set to true when the account's refresh token is revoked — makes the
+    // IDLE loop sleep long instead of hammering the token endpoint.
+    std::atomic_bool authSuspended{false};
+
 public slots:
     void start();
     void stop() { m_running.store(false); }

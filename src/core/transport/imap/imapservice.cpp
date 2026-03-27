@@ -147,6 +147,7 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
             QMutexLocker rl(&g_poolMutex);
             refresher = g_poolTokenRefresher;
         }
+        raw->setTokenRefresher(refresher);
         const QString token = refresher ? refresher(slotEmail) : QString{};
         if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token).success) {
             QMutexLocker rl(&g_poolMutex);
@@ -197,6 +198,7 @@ ImapService::getDedicatedHydrateConnection(const QString &email) {
             QMutexLocker rl(&g_poolMutex);
             refresher = g_poolTokenRefresher;
         }
+        raw->setTokenRefresher(refresher);
         const QString token = refresher ? refresher(slotEmail) : QString{};
         if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token).success) {
             QMutexLocker lock(&g_hydrateMutex);
@@ -1370,15 +1372,8 @@ ImapService::refreshAccessToken(const QVariantMap &account, const QString &email
 
     const auto tokenUrl = account.value("oauthTokenUrl"_L1).toString();
 
-    auto clientId = account.value("oauthClientId"_L1).toString().trimmed();
-    auto clientSecret = account.value("oauthClientSecret"_L1).toString();
-
-    if (clientId.isEmpty() && account.value("providerId"_L1).toString() == "gmail"_L1) {
-        clientId = QString("");
-        if (clientSecret.isEmpty()) {
-            clientSecret = QString("");
-        }
-    }
+    const auto clientId = account.value("oauthClientId"_L1).toString().trimmed();
+    const auto clientSecret = account.value("oauthClientSecret"_L1).toString();
 
     if (tokenUrl.isEmpty() || clientId.isEmpty()) return {};
 
@@ -1404,8 +1399,18 @@ ImapService::refreshAccessToken(const QVariantMap &account, const QString &email
     const bool ok = reply->error() == QNetworkReply::NoError;
     reply->deleteLater();
 
-    if (!ok)
+    if (!ok) {
+        // Detect revoked/expired refresh token — needs user re-authentication
+        if (payload.contains("invalid_grant")) {
+            qWarning() << "[token-refresh] Refresh token revoked for" << email;
+            if (m_idleWatcher)
+                m_idleWatcher->authSuspended.store(true);
+            QMetaObject::invokeMethod(this, [this, email]() {
+                emit accountNeedsReauth(email);
+            }, Qt::QueuedConnection);
+        }
         return {};
+    }
 
     const auto obj = QJsonDocument::fromJson(payload).object();
     return obj.value("access_token"_L1).toString();
@@ -2596,6 +2601,10 @@ void
 ImapService::syncAll(bool announce) {
     if (m_destroying)
         return;
+
+    // Clear auth suspension — if we're syncing, the user may have re-authenticated.
+    if (m_idleWatcher)
+        m_idleWatcher->authSuspended.store(false);
 
     if (m_offlineMode) {
         if (announce)

@@ -79,6 +79,8 @@ Kirigami.ApplicationWindow {
     property bool accountConnected: true
     property bool accountThrottled: false
     property string accountThrottleMessage: ""
+    property bool accountNeedsReauth: false
+    property string accountNeedsReauthEmail: ""
     property var inlineStatusQueue: []
     property int inlineStatusSeq: 0
     property bool folderPaneVisible: true
@@ -880,6 +882,12 @@ Kirigami.ApplicationWindow {
         function onAccountUnthrottled(accountEmail) {
             root.accountThrottled = false
             root.accountThrottleMessage = ""
+        }
+
+        function onAccountNeedsReauth(accountEmail) {
+            root.accountNeedsReauth = true
+            root.accountNeedsReauthEmail = accountEmail
+            root.showInlineStatus(i18n("Authentication expired for %1 — please re-authenticate.", accountEmail), true)
         }
 
         function onSyncActivityChanged(active) {
@@ -1743,6 +1751,39 @@ Kirigami.ApplicationWindow {
         root.imapServiceObj.syncFolder(folder, !silent)
     }
 
+    function reauthenticateAccount(email) {
+        if (!root.accountSetupObj) return
+        root.accountSetupObj.email = email
+        root.accountSetupObj.discoverProvider()
+        root.accountSetupObj.beginOAuth()
+        const launchUrl = root.accountSetupObj.oauthUrl ? root.accountSetupObj.oauthUrl.toString() : ""
+        if (launchUrl.length > 0) {
+            root.showInlineStatus(i18n("Re-authenticating %1 — check your browser.", email), false)
+            Qt.openUrlExternally(launchUrl)
+        } else {
+            root.showInlineStatus(i18n("Failed to start re-authentication for %1.", email), true)
+        }
+    }
+
+    // When OAuth completes after a re-auth, clear the flag and reinitialize IMAP.
+    Connections {
+        target: root.accountSetupObj || null
+        ignoreUnknownSignals: true
+        function onOauthReadyChanged() {
+            if (!root.accountNeedsReauth) return
+            if (!root.accountSetupObj || !root.accountSetupObj.oauthReady) return
+            root.accountNeedsReauth = false
+            root.accountNeedsReauthEmail = ""
+            root.showInlineStatus(i18n("Re-authentication successful. Reconnecting..."), false)
+            // The new refresh token is already in the vault. Don't call
+            // saveCurrentAccount — it would overwrite account fields with
+            // nulls if provider discovery hasn't completed. Just sync.
+            if (root.imapServiceObj) {
+                root.imapServiceObj.syncAll(false)
+            }
+        }
+    }
+
     function syncMessageListModelSelection() {
         if (!root.messageListModelObj || !root.messageListModelObj.setSelection) return
         const cats = root.categorySelectionExplicit ? (root.selectedFolderCategories || []) : []
@@ -2122,12 +2163,20 @@ Kirigami.ApplicationWindow {
                         sectionIconSize: root.folderListSectionIconSize
                         rightActivityIcon: root.accountRefreshing ? "view-refresh" : ""
                         rightActivitySpinning: root.accountRefreshing
-                        rightStatusIcon: root.accountConnected ? "network-connect" : "network-disconnect"
+                        rightStatusIcon: root.accountNeedsReauth ? "dialog-password" : (root.accountConnected ? "network-connect" : "network-disconnect")
                         rightThrottleIcon: root.accountThrottled ? "dialog-warning" : ""
-                        rightThrottleTooltip: root.accountThrottled
-                            ? i18n("Account is being throttled. Sync and body hydration are slowed by provider/pool limits. Wait a few minutes, reduce concurrent refreshes, or pause heavy background tasks.")
-                            : ""
-                        onActivated: root.accountExpanded = !root.accountExpanded
+                        rightThrottleTooltip: root.accountNeedsReauth
+                            ? i18n("Authentication expired. Click to re-authenticate.")
+                            : root.accountThrottled
+                              ? i18n("Account is being throttled. Sync and body hydration are slowed by provider/pool limits. Wait a few minutes, reduce concurrent refreshes, or pause heavy background tasks.")
+                              : ""
+                        onActivated: {
+                            if (root.accountNeedsReauth) {
+                                root.reauthenticateAccount(root.accountNeedsReauthEmail)
+                            } else {
+                                root.accountExpanded = !root.accountExpanded
+                            }
+                        }
                     }
 
                     Repeater {
