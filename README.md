@@ -1,6 +1,6 @@
 # Kestrel Mail
 
-> ⚠️ **Alpha / heavy development:** Kestrel Mail is currently under heavy development and is **usable for normal day-to-day email**, but not yet feature complete.  Things like search are still missing, and it may or may not work with IMAP servers other than Gmail.  That is untested so far!
+> **Alpha / active development:** Kestrel Mail is under heavy development and is **usable for day-to-day email**, but not yet feature complete. It currently targets Gmail via OAuth2; other IMAP providers are untested.
 
 Kestrel Mail is a KDE-native email client focused on modern UX, reliable IMAP sync, and OAuth2-first account setup.
 
@@ -10,33 +10,53 @@ Kestrel Mail is a KDE-native email client focused on modern UX, reliable IMAP sy
 - KDE-first UX with Kirigami
 - Reliable IMAP core with incremental sync and local persistence
 - OAuth2-driven account setup for major providers
+- Integrated Google Calendar week view
 
 ## Current Status
 
-Kestrel is now past pure scaffold stage and has active end-to-end mail plumbing in place:
+Kestrel has active end-to-end mail and calendar plumbing in place:
 
+**Mail**
 - Qt 6 + Kirigami app shell with split-pane mail layout
-- Real Gmail OAuth2 flow (XOAUTH2 over IMAP)
-- Folder discovery + persistence in SQLite
-- Background folder refresh worker
-- Folder-scoped sync path for message headers and flags
-- Local folders + sidebar hierarchy (including collapsible **More** subtree)
-- Message list and detail panes under active iteration
+- Gmail OAuth2 flow (XOAUTH2 over IMAP) with automatic token refresh and re-authentication
+- IMAP IDLE for real-time inbox updates
+- CONDSTORE-based incremental sync for efficient folder updates
+- Folder discovery + persistence in SQLite (WAL mode, per-thread connections)
+- Background folder refresh worker with connection pooling (hydrate + operational slots)
+- Full message body hydration with HTML rendering (WebEngineView)
+- Inline image loading with sender trust controls and tracking pixel detection
+- Attachment viewing, saving, and prefetching (BODYSTRUCTURE-based)
+- Message actions: mark read/flagged, move, archive, delete
+- Contact avatars with multi-source resolution and caching
+- Threading via Message-ID / In-Reply-To / References headers
+- Gmail category tabs (Primary, Social, Promotions, Updates, Forums)
+- Local folders and sidebar hierarchy (collapsible sections, favorites bar)
+- Search bar with full-text message search and contact lookup
+- Compose window with rich text editing and SMTP send
+- System tray integration
 
-Still pre-alpha: expect rough edges, missing flows, and frequent schema/UI changes.
+**Calendar**
+- Google Calendar integration (read/write scope)
+- Week view with overlap-aware event layout (side-by-side sub-columns)
+- Event cards with calendar-colored backgrounds, time, location, recurrence, and privacy indicators
+- All-day event gutter
+- Calendar sidebar with per-calendar visibility toggles
+- Mini month calendar
+
+**Infrastructure**
+- Startup splash screen with real initialization (DB integrity check, connection pool establishment)
+- OAuth2 with PKCE, automatic re-authentication on token expiry
+- SQLite with WAL mode, per-thread connections, and forward-compatible schema migrations
+- Privacy policy for Google API compliance
 
 ## Tech Stack
 
 - Qt 6 + QML
 - KDE Kirigami
 - C++20 backend
-- SQLite
+- SQLite (WAL)
 - OAuth2 (PKCE)
-
-## OAuth Setup (Gmail / Microsoft 365)
-
-Configure provider OAuth client credentials in provider profile/account settings.
-Environment-variable based OAuth client configuration is intentionally not supported.
+- QtWebEngine (message rendering)
 
 ## Build
 
@@ -46,6 +66,8 @@ cmake --build build
 ./build/kestrel-mail
 ```
 
+Requires Qt 6, KDE Frameworks 6 (Kirigami, KI18n, KCoreAddons), and QtWebEngine.
+
 ## Screenshots
 
 ### Mail workspace
@@ -54,11 +76,11 @@ cmake --build build
 
 ### Calendar workspace
 
-![Calendar Workspace](Screenshots/Screenshot_20260319_025536.png)
+![Calendar workspace](Screenshots/Screenshot_20260319_025536.png)
 
-### Sidebar / folders view
+### Inline images and attachments
 
-![Inline Images and Attachments](Screenshots/Screenshot_20260319_025622.png)
+![Inline images and attachments](Screenshots/Screenshot_20260319_025622.png)
 
 ### Demo screencast
 
