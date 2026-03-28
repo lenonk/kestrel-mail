@@ -5,11 +5,11 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    property var dayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    property var dayNames: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     property var dayNumbers: [9, 10, 11, 12, 13, 14, 15]
-    property int todayNumber: 15
+    property int todayIndex: -1   // 0-6 for Mon-Sun, -1 if today is not in this week
 
-    implicitHeight: 44
+    implicitHeight: 36
 
     RowLayout {
         anchors.fill: parent
@@ -20,6 +20,8 @@ Item {
 
             delegate: Rectangle {
                 required property int index
+                readonly property bool isToday: index === root.todayIndex
+
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.height
                 color: "transparent"
@@ -30,15 +32,28 @@ Item {
                     anchors.centerIn: parent
                     spacing: 6
 
-                    QQC2.Label {
-                        text: String(root.dayNumbers[index])
-                        font.bold: root.dayNumbers[index] === root.todayNumber
-                        color: root.dayNumbers[index] === root.todayNumber ? "#fff" : Qt.rgba(1, 1, 1, 0.85)
+                    // Day number — circled blue if today
+                    Rectangle {
+                        width: 28
+                        height: 28
+                        radius: 14
+                        color: isToday ? "#2979ff" : "transparent"
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        QQC2.Label {
+                            anchors.centerIn: parent
+                            text: String(root.dayNumbers[index] || "")
+                            font.pixelSize: 14
+                            font.bold: true
+                            color: isToday ? "#ffffff" : Qt.rgba(1, 1, 1, 0.85)
+                        }
                     }
+
                     QQC2.Label {
-                        text: root.dayNames[index]
-                        color: Qt.rgba(1, 1, 1, 0.85)
-                        font.bold: true
+                        text: root.dayNames[index] || ""
+                        font.pixelSize: 13
+                        color: isToday ? "#2979ff" : Qt.rgba(1, 1, 1, 0.85)
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                 }
             }

@@ -48,6 +48,9 @@ public:
                                              const QString &uid, const QString &targetFolder);
 
     Q_INVOKABLE void initialize();
+    void initializeConnectionPool();
+    int expectedPoolConnections() const;
+    int poolConnectionsReady() const;
     Q_INVOKABLE void shutdown();
     Q_INVOKABLE void openAttachmentUrl(const QString &url);
     Q_INVOKABLE bool saveAttachmentUrl(const QString &url, const QString &suggestedFileName = QString());
@@ -129,6 +132,7 @@ private:
 
     QHash<QString, bool>      m_accountThrottleState;
     bool                       m_offlineMode = false;
+    int                        m_expectedPoolSize = 0;
 
     struct AttachmentCacheEntry { QString localPath; qint64 expiresAt = 0; };
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;

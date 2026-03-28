@@ -62,6 +62,20 @@ Kirigami.ApplicationWindow {
         function onWindowReExposed() { root.webViewRefreshNeeded() }
     }
 
+    onVisibilityChanged: {
+        if (visibility === Window.Windowed && root._needsAccountWizard) {
+            root._needsAccountWizard = false
+            _accountWizardTimer.start()
+        }
+    }
+
+    Timer {
+        id: _accountWizardTimer
+        interval: 0
+        repeat: false
+        onTriggered: accountWizard.open()
+    }
+
     Shortcut {
         sequence: "Ctrl+F"
         onActivated: {
@@ -81,6 +95,7 @@ Kirigami.ApplicationWindow {
     property string accountThrottleMessage: ""
     property bool accountNeedsReauth: false
     property string accountNeedsReauthEmail: ""
+    property bool _needsAccountWizard: false
     property var inlineStatusQueue: []
     property int inlineStatusSeq: 0
     property bool folderPaneVisible: true
@@ -135,12 +150,7 @@ Kirigami.ApplicationWindow {
         { account: "gmail", id: "sandra", name: i18n("sandrmarshall1953@gmail.com"), checked: true, color: "" }
     ]
 
-    property var calendarEvents: [
-        { calendarId: "calendar", dayIndex: 2, startHour: 10, durationHours: 1.0, title: "Lenon's Workout", subtitle: "Occurs every 1 week" },
-        { calendarId: "raven", dayIndex: 4, startHour: 10, durationHours: 0.7, title: "Lenon's Workout", subtitle: "Private" },
-        { calendarId: "sebastian", dayIndex: 1, startHour: 13, durationHours: 1.0, title: "Sebastian Meeting", subtitle: "1:00pm - 2:00pm" },
-        { calendarId: "sandra", dayIndex: 3, startHour: 15, durationHours: 0.5, title: "Sandra Call", subtitle: "3:00pm - 3:30pm" }
-    ]
+    property var calendarEvents: []
 
     function visibleCalendarSourceIds() {
         const out = []
@@ -198,18 +208,33 @@ Kirigami.ApplicationWindow {
             checkedMap[String(c.id || "")] = !!c.checked
         }
 
+        // Determine the primary account email for sorting.
+        const accs = root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
+        const primaryEmail = (accs.length > 0 ? String(accs[0].email || "").toLowerCase() : "")
+
         const next = []
         for (let i = 0; i < incoming.length; ++i) {
             const g = incoming[i]
             const id = String(g.id || "")
+            const rawName = String(g.name || g.summary || id)
+            const displayName = (id.toLowerCase() === primaryEmail) ? i18n("Calendar") : rawName
             next.push({
                 account: "gmail",
                 id: id,
-                name: String(g.name || g.summary || id),
+                name: displayName,
                 checked: checkedMap.hasOwnProperty(id) ? checkedMap[id] : true,
                 color: String(g.color || g.backgroundColor || "")
             })
         }
+
+        // Sort: account-matching calendar first, then alphabetical.
+        next.sort(function(a, b) {
+            const aIsAccount = (a.id.toLowerCase() === primaryEmail) ? 0 : 1
+            const bIsAccount = (b.id.toLowerCase() === primaryEmail) ? 0 : 1
+            if (aIsAccount !== bIsAccount) return aIsAccount - bIsAccount
+            return a.name.localeCompare(b.name)
+        })
+
         root.calendarSources = next
         root.refreshVisibleGoogleWeekEvents()
     }
@@ -829,7 +854,7 @@ Kirigami.ApplicationWindow {
                                                        root.olderExpanded)
         }
         if (root.accountRepositoryObj && root.accountRepositoryObj.accounts.length === 0) {
-            accountWizard.open()
+            root._needsAccountWizard = true
         }
         Qt.callLater(function() {
             root.paneAutoToggleEnabled = true
@@ -898,6 +923,10 @@ Kirigami.ApplicationWindow {
         function onGoogleCalendarListChanged() {
             root.rebuildCalendarSourcesFromGoogle()
         }
+
+        function onGoogleWeekEventsChanged() {
+            root.calendarEvents = root.imapServiceObj ? root.imapServiceObj.googleWeekEvents : []
+        }
     }
 
     Connections {
@@ -946,6 +975,10 @@ Kirigami.ApplicationWindow {
         ignoreUnknownSignals: true
         function onAccountsChanged() {
             // New/updated account (e.g., OAuth just completed + save) should trigger discovery + fetch immediately.
+            // Re-initialize to populate the connection pool for the new account.
+            if (root.imapServiceObj && root.imapServiceObj.initialize)
+                root.imapServiceObj.initialize()
+
             root.bootstrapFolderSyncRequested = false
             const hadFolders = root.hasFetchedFolders()
             root.bootstrapSyncIfNeeded()
@@ -1777,8 +1810,10 @@ Kirigami.ApplicationWindow {
             root.showInlineStatus(i18n("Re-authentication successful. Reconnecting..."), false)
             // The new refresh token is already in the vault. Don't call
             // saveCurrentAccount — it would overwrite account fields with
-            // nulls if provider discovery hasn't completed. Just sync.
+            // nulls if provider discovery hasn't completed. Re-initialize
+            // to populate the connection pool (idempotent for workers), then sync.
             if (root.imapServiceObj) {
+                root.imapServiceObj.initialize()
                 root.imapServiceObj.syncAll(false)
             }
         }
@@ -2403,9 +2438,7 @@ Kirigami.ApplicationWindow {
                 QQC2.SplitView.preferredWidth: visible ? 980 : 0
                 QQC2.SplitView.fillWidth: root.activeWorkspace === "calendar"
                 systemPalette: systemPalette
-                allEvents: (root.imapServiceObj && root.imapServiceObj.googleWeekEvents)
-                           ? root.imapServiceObj.googleWeekEvents
-                           : []
+                allEvents: root.calendarEvents
                 visibleCalendarIds: root.visibleCalendarSourceIds()
             }
 

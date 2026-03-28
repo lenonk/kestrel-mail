@@ -1228,6 +1228,32 @@ bool DataStore::init()
     return true;
 }
 
+bool DataStore::quickCheck() const
+{
+    QSqlDatabase database = db();
+    if (!database.isOpen())
+        return false;
+
+    QSqlQuery q(database);
+    if (!q.exec(QStringLiteral("PRAGMA quick_check"))) {
+        qWarning() << "[DataStore] quick_check failed to execute:" << q.lastError().text();
+        return false;
+    }
+
+    if (q.next()) {
+        const QString result = q.value(0).toString().trimmed().toLower();
+        if (result == QStringLiteral("ok")) {
+            qInfo() << "[DataStore] quick_check passed";
+            return true;
+        }
+        qWarning() << "[DataStore] quick_check FAILED:" << q.value(0).toString();
+        return false;
+    }
+
+    qWarning() << "[DataStore] quick_check returned no rows";
+    return false;
+}
+
 void DataStore::upsertHeaders(const QVariantList &headers)
 {
     if (headers.isEmpty()) return;

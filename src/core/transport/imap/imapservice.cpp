@@ -255,7 +255,7 @@ ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVau
 ImapService::~ImapService() { shutdown(); }
 
 void
-ImapService::initialize() {
+ImapService::initializeConnectionPool() {
     {
         QMutexLocker lock(&g_poolMutex);
         g_poolTokenRefresher = [this](const QString &email) -> QString {
@@ -270,14 +270,24 @@ ImapService::initialize() {
     }
 
     if (m_offlineMode) {
-        emit realtimeStatus(true, QStringLiteral("Offline mode is enabled (KESTREL_OFFLINE_MODE=1). IMAP sync is paused."));
+        m_expectedPoolSize = 0;
         return;
     }
 
     if (!g_poolInitialized.exchange(true)) {
 
-        if (!m_accounts) return;
+        if (!m_accounts) {
+            m_expectedPoolSize = 0;
+            g_poolInitialized.store(false);
+            return;
+        }
         const auto accounts = resolveAccounts(m_accounts->accounts());
+        if (accounts.empty()) {
+            m_expectedPoolSize = 0;
+            g_poolInitialized.store(false);
+            return;
+        }
+        m_expectedPoolSize = static_cast<int>(accounts.size()) * (1 + kOperationalPoolMax);
 
         // Establish dedicated hydration connections FIRST (one per account).
         // These are reserved for user-click-initiated hydration to guarantee availability.
@@ -319,6 +329,35 @@ ImapService::initialize() {
                 });
             }
         }
+    }
+}
+
+int
+ImapService::expectedPoolConnections() const {
+    return m_expectedPoolSize;
+}
+
+int
+ImapService::poolConnectionsReady() const {
+    int count = 0;
+    {
+        QMutexLocker lock(&g_hydrateMutex);
+        count += static_cast<int>(g_hydrateSlots.size());
+    }
+    {
+        QMutexLocker lock(&g_poolMutex);
+        count += static_cast<int>(g_poolSlots.size());
+    }
+    return count;
+}
+
+void
+ImapService::initialize() {
+    initializeConnectionPool();
+
+    if (m_offlineMode) {
+        emit realtimeStatus(true, QStringLiteral("Offline mode is enabled (KESTREL_OFFLINE_MODE=1). IMAP sync is paused."));
+        return;
     }
 
     startBackgroundWorker();
@@ -1786,7 +1825,15 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
         return;
     }
 
-    runBackgroundTask([this, accounts, calendarIds, weekStartIso, weekEndIso]() {
+    // Build calendarId → backgroundColor map from the cached calendar list.
+    QHash<QString, QString> calendarColorMap;
+    for (const auto &entry : m_googleCalendarList) {
+        const auto m = entry.toMap();
+        calendarColorMap.insert(m.value("id"_L1).toString(),
+                                m.value("color"_L1).toString());
+    }
+
+    runBackgroundTask([this, accounts, calendarIds, weekStartIso, weekEndIso, calendarColorMap]() {
         QString accessToken;
         for (const auto &info : resolveAccounts(accounts)) {
             if (info.host.contains("gmail", Qt::CaseInsensitive)) {
@@ -1889,17 +1936,34 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                                       ? (24 * 60)
                                       : qMax(15, static_cast<int>(startDt.secsTo(endDt) / 60));
 
+                // Per-event color: use event's own backgroundColor if present, else the calendar's color.
+                QString eventColor = o.value("backgroundColor").toString();
+                if (eventColor.isEmpty())
+                    eventColor = calendarColorMap.value(calendarId);
+
+                // Recurrence description (from the expanded instance's recurringEventId).
+                const QString recurrence = o.contains("recurringEventId")
+                                           ? o.value("recurrence").toArray().isEmpty()
+                                             ? QStringLiteral("Recurring")
+                                             : o.value("recurrence").toArray().first().toString()
+                                           : QString();
+
                 QVariantMap row;
                 row.insert("calendarId", calendarId);
                 row.insert("dayIndex", static_cast<int>(dayIndex));
                 row.insert("startHour", static_cast<double>(minutes) / 60.0);
                 row.insert("durationHours", static_cast<double>(durMinutes) / 60.0);
+                row.insert("isAllDay", isAllDay);
                 row.insert("title", o.value("summary").toString());
                 row.insert("subtitle", isAllDay
                            ? QStringLiteral("All day")
                            : QStringLiteral("%1 - %2")
                                  .arg(startDt.time().toString("h:mmap").toLower())
                                  .arg(endDt.time().toString("h:mmap").toLower()));
+                row.insert("color", eventColor);
+                row.insert("location", o.value("location").toString());
+                row.insert("visibility", o.value("visibility").toString());
+                row.insert("recurrence", recurrence);
                 out.push_back(row);
             }
         }

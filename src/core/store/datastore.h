@@ -23,6 +23,7 @@ public:
     QVariantList folders() const;
 
     Q_INVOKABLE bool init();
+    bool quickCheck() const;
     Q_INVOKABLE void upsertHeader(const QVariantMap &header);
     Q_INVOKABLE void upsertHeaders(const QVariantList &headers);
     Q_INVOKABLE void upsertFolder(const QVariantMap &folder);

@@ -15,10 +15,61 @@ Item {
     property var visibleCalendarIds: []
 
     readonly property var filteredEvents: {
-        const ev = Array.isArray(allEvents) ? allEvents : []
-        const visible = Array.isArray(visibleCalendarIds) ? visibleCalendarIds : []
+        const ev = allEvents && allEvents.length ? Array.from(allEvents) : []
+        const visible = visibleCalendarIds && visibleCalendarIds.length ? Array.from(visibleCalendarIds) : []
         if (visible.length === 0) return []
         return ev.filter(e => visible.indexOf(String(e.calendarId || "")) >= 0)
+    }
+
+    readonly property var allDayEvents: {
+        const ev = filteredEvents && filteredEvents.length ? filteredEvents : []
+        return ev.filter(e => !!e.isAllDay)
+    }
+
+    readonly property var timedEvents: {
+        const ev = filteredEvents && filteredEvents.length ? filteredEvents : []
+        return ev.filter(e => !e.isAllDay)
+    }
+
+    // Week date computation — derive from current week offset (TODO: wire to nav buttons).
+    property int weekOffset: 0
+    readonly property date _weekMonday: {
+        const now = new Date()
+        const day = now.getDay()
+        const diff = (day === 0 ? -6 : 1 - day) + weekOffset * 7
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff)
+    }
+    readonly property var _dayNumbers: {
+        var nums = []
+        for (var i = 0; i < 7; ++i) {
+            var d = new Date(_weekMonday)
+            d.setDate(d.getDate() + i)
+            nums.push(d.getDate())
+        }
+        return nums
+    }
+    readonly property int _todayIndex: {
+        const now = new Date()
+        for (var i = 0; i < 7; ++i) {
+            var d = new Date(_weekMonday)
+            d.setDate(d.getDate() + i)
+            if (d.getFullYear() === now.getFullYear() &&
+                d.getMonth() === now.getMonth() &&
+                d.getDate() === now.getDate())
+                return i
+        }
+        return -1
+    }
+    readonly property string _rangeLabel: {
+        const mon = _weekMonday
+        const sun = new Date(mon)
+        sun.setDate(sun.getDate() + 6)
+        const opts = { month: "long" }
+        const monMonth = mon.toLocaleDateString(Qt.locale(), "MMMM")
+        const sunMonth = sun.toLocaleDateString(Qt.locale(), "MMMM")
+        if (monMonth === sunMonth)
+            return monMonth + " " + mon.getDate() + " - " + sun.getDate() + ", " + mon.getFullYear()
+        return monMonth + " " + mon.getDate() + " - " + sunMonth + " " + sun.getDate() + ", " + sun.getFullYear()
     }
 
     function scrollToEightAm() {
@@ -47,6 +98,7 @@ Item {
             Layout.fillWidth: true
             Layout.leftMargin: 8
             Layout.rightMargin: 8
+            rangeLabel: root._rangeLabel
         }
 
         Rectangle {
@@ -64,7 +116,15 @@ Item {
                 Layout.fillWidth: true
                 Layout.leftMargin: 58
                 Layout.rightMargin: 0
-                Layout.preferredHeight: 44
+                Layout.preferredHeight: 36
+                dayNumbers: root._dayNumbers
+                todayIndex: root._todayIndex
+            }
+
+            Calendar.CalendarAllDayRow {
+                Layout.fillWidth: true
+                dayCount: 7
+                allDayEvents: root.allDayEvents
             }
 
             Flickable {

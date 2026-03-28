@@ -79,6 +79,7 @@ qt_standard_project_setup()
 
 qt_add_executable(kestrel-mail
     src/main.cpp
+    src/ui/splashscreen.cpp
     src/core/accounts/providerprofileservice.cpp
     src/core/accounts/accountrepository.cpp
     src/core/accounts/accountsetupcontroller.cpp
@@ -145,6 +146,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/Calendar/CalendarTimeGutter.qml
         qml/components/Calendar/CalendarWeekGrid.qml
         qml/components/Calendar/CalendarEventCard.qml
+        qml/components/Calendar/CalendarAllDayRow.qml
         qml/components/Calendar/CalendarSidebarPane.qml
         qml/components/Attachments/AttachmentCard.qml
         qml/components/Attachments/AttachmentHoverPopup.qml
