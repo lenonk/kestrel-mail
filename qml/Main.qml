@@ -1000,12 +1000,20 @@ Kirigami.ApplicationWindow {
     }
 
     onSelectedFolderKeyChanged: {
+        if (root.dataStoreObj)
+            root.dataStoreObj.clearNewMessageCounts(root.selectedFolderKey)
         root.selectedCategoryIndex = 0
         root.categorySelectionExplicit = (root.selectedFolderCategories && root.selectedFolderCategories.length > 0)
         root.lastClickedMessageIndex = -1
         root.syncMessageListModelSelection()
     }
     onSelectedCategoryIndexChanged: {
+        // Clear the category's new-message count when its tab is clicked.
+        if (root.dataStoreObj && root.selectedFolderCategories && root.selectedFolderCategories.length > 0) {
+            const catName = root.selectedFolderCategories[root.selectedCategoryIndex]
+            if (catName)
+                root.dataStoreObj.clearNewMessageCounts("[gmail]/categories/" + catName.toLowerCase())
+        }
         root.syncMessageListModelSelection()
     }
     onSelectedMessageKeyChanged: {
@@ -2149,6 +2157,7 @@ Kirigami.ApplicationWindow {
                             folderName: modelData.name
                             folderIcon: modelData.icon
                             unreadCount: folderStats.unread
+                            newMessageCount: folderStats.newMessages || 0
                             selected: root.selectedFolderKey === modelData.key
                             tooltipText: root.folderTooltipText(modelData.name, modelData.key, "")
                             onActivated: root.selectedFolderKey = modelData.key
@@ -2172,6 +2181,7 @@ Kirigami.ApplicationWindow {
                         model: (root.activeWorkspace === "mail" && root.tagsExpanded) ? root.tagFolderItems() : []
                         delegate: Components.FolderItemDelegate {
                             property string rawFolderName: (modelData.rawName || modelData.name || "")
+                            property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
                             indentLevel: 1
@@ -2180,6 +2190,7 @@ Kirigami.ApplicationWindow {
                             folderIcon: modelData.icon
                             iconColor: (modelData.accentColor || "transparent")
                             unreadCount: Number(modelData.unread || 0)
+                            newMessageCount: folderStats.newMessages || 0
                             selected: root.selectedFolderKey === modelData.key
                             tooltipText: root.folderTooltipText(modelData.name, modelData.key, rawFolderName)
                             onActivated: root.selectedFolderKey = modelData.key
@@ -2226,6 +2237,7 @@ Kirigami.ApplicationWindow {
                             folderName: modelData.name
                             folderIcon: modelData.icon
                             unreadCount: folderStats.unread
+                            newMessageCount: folderStats.newMessages || 0
                             selected: root.selectedFolderKey === modelData.key
                             tooltipText: root.folderTooltipText(modelData.name, modelData.key, rawFolderName)
                             onActivated: root.selectedFolderKey = modelData.key
@@ -2260,6 +2272,7 @@ Kirigami.ApplicationWindow {
                             hasChildren: !!modelData.hasChildren
                             expanded: !!modelData.expanded
                             unreadCount: modelData.noselect ? 0 : folderStats.unread
+                            newMessageCount: modelData.noselect ? 0 : (folderStats.newMessages || 0)
                             selected: root.selectedFolderKey === modelData.key
                             tooltipText: root.folderTooltipText(modelData.name, modelData.key, rawFolderName)
                             onToggleRequested: root.toggleMoreFolderExpanded(rawFolderName)
@@ -2295,6 +2308,7 @@ Kirigami.ApplicationWindow {
                             folderName: modelData.name
                             folderIcon: modelData.icon
                             unreadCount: folderStats.unread
+                            newMessageCount: folderStats.newMessages || 0
                             selected: root.selectedFolderKey === modelData.key
                             tooltipText: root.folderTooltipText(modelData.name, modelData.key, "")
                             onActivated: root.selectedFolderKey = modelData.key

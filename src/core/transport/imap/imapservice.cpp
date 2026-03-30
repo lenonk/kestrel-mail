@@ -2225,8 +2225,13 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         auto cxn = getPooledConnection(accountEmail, "move-message");
         if (!cxn) return;
 
-        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(folder);
+        // Category folders (e.g. [Gmail]/Categories/Primary) are synthetic labels,
+        // not real IMAP mailboxes. The underlying messages live in INBOX.
+        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
+                                         ? "INBOX"_L1 : folder;
+
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(sourceFolder);
             if (!ok) return;
         }
 
@@ -2274,8 +2279,11 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
         auto cxn = getPooledConnection(accountEmail, "mark-read");
         if (!cxn) return;
 
-        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(folder);
+        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
+                                         ? "INBOX"_L1 : folder;
+
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(sourceFolder);
             if (!ok) return;
         }
 
@@ -2301,8 +2309,11 @@ ImapService::markMessageFlagged(const QString &accountEmail, const QString &fold
         auto cxn = getPooledConnection(accountEmail, "flag-message");
         if (!cxn) return;
 
-        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(folder);
+        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
+                                         ? "INBOX"_L1 : folder;
+
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(sourceFolder);
             if (!ok) return;
         }
 
@@ -2371,8 +2382,11 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
         auto cxn = getPooledConnection(accountEmail, "add-folder-membership");
         if (!cxn) return;
 
-        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(folder);
+        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
+                                         ? "INBOX"_L1 : folder;
+
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
+            const auto [ok, _] = cxn->select(sourceFolder);
             if (!ok) return;
         }
 

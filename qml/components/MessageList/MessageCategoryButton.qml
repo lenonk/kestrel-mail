@@ -12,6 +12,7 @@ Item {
     required property var systemPalette
     required property int index
     required property var modelData
+    property int newMessageCount: 0
 
     MouseArea {
         anchors.fill: parent
@@ -22,13 +23,24 @@ Item {
         }
     }
 
-    QQC2.Label {
-        id: categoryLabel
+    Row {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        text: root.modelData
-        font.bold: root.index === root.appRoot.selectedCategoryIndex
-        opacity: root.index === root.appRoot.selectedCategoryIndex ? 1 : 0.75
+        spacing: 4
+
+        QQC2.Label {
+            id: categoryLabel
+            text: root.modelData
+            font.bold: root.index === root.appRoot.selectedCategoryIndex
+            opacity: root.index === root.appRoot.selectedCategoryIndex ? 1 : 0.75
+        }
+
+        QQC2.Label {
+            visible: root.newMessageCount > 0
+            text: "+" + root.newMessageCount
+            color: Kirigami.Theme.positiveTextColor
+            font.bold: true
+        }
     }
 
     Rectangle {

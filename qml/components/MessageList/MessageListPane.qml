@@ -31,6 +31,11 @@ Rectangle {
                 delegate: MessageCategoryButton {
                     appRoot: root.appRoot
                     systemPalette: root.systemPalette
+                    newMessageCount: {
+                        if (!root.appRoot || !root.appRoot.dataStoreObj) return 0
+                        const _dep = root.appRoot.dataStoreObj.inboxCategoryTabs
+                        return root.appRoot.dataStoreObj.newMessageCount("[gmail]/categories/" + modelData.toLowerCase()) || 0
+                    }
                 }
             }
 
@@ -150,6 +155,14 @@ Rectangle {
 
                 function onModelAboutToBeReset() {
                     if (!groupedMessageList.restoreTargetLocked) {
+                        // Already at the top — pin to index 0 so new messages stay visible.
+                        if (groupedMessageList.contentY < 1) {
+                            groupedMessageList.preservedContentY = 0
+                            groupedMessageList.pendingRestoreIndex = 0
+                            groupedMessageList.pendingRestoreStableKey = ""
+                            groupedMessageList.restorePending = true
+                            return
+                        }
                         groupedMessageList.preservedContentY = groupedMessageList.contentY
                         // Capture a stable anchor so positionViewAtIndex can restore the
                         // correct visual position even when rows shift during a model reset.
@@ -177,6 +190,14 @@ Rectangle {
                     // item, so the viewport is completely unaffected — no restore needed.
                     if (first >= groupedMessageList.count)
                         return
+                    // Already at the top and new rows inserted at or near the top —
+                    // pin to index 0 so the user sees new messages immediately.
+                    if (first === 0 && groupedMessageList.contentY < 1) {
+                        groupedMessageList.pendingRestoreIndex = 0
+                        groupedMessageList.pendingRestoreStableKey = ""
+                        groupedMessageList.restorePending = true
+                        return
+                    }
                     if (!groupedMessageList.restoreTargetLocked) {
                         groupedMessageList.preservedContentY = groupedMessageList.contentY
                         // If rows are inserted before the current top-visible item, the item

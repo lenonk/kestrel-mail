@@ -570,13 +570,22 @@ int allMailOverlapCount(QSqlDatabase &database,
     return q.value(0).toInt();
 }
 
-void upsertFolderEdge(QSqlDatabase &database,
+// Returns true if a new row was inserted (not just updated).
+bool upsertFolderEdge(QSqlDatabase &database,
                       const QString &accountEmail,
                       int messageId,
                       const QString &folder,
                       const QString &uid,
                       const QVariant &unread)
 {
+    QSqlQuery qCheck(database);
+    qCheck.prepare(QStringLiteral("SELECT 1 FROM message_folder_map WHERE account_email=:a AND folder=:f AND uid=:u"));
+    qCheck.bindValue(QStringLiteral(":a"), accountEmail);
+    qCheck.bindValue(QStringLiteral(":f"), folder);
+    qCheck.bindValue(QStringLiteral(":u"), uid);
+    qCheck.exec();
+    const bool isNew = !qCheck.next();
+
     QSqlQuery qMapAuth(database);
     qMapAuth.prepare(QStringLiteral(R"(
         INSERT INTO message_folder_map (account_email, message_id, folder, uid, unread, source, confidence, observed_at)
@@ -595,6 +604,7 @@ void upsertFolderEdge(QSqlDatabase &database,
     qMapAuth.bindValue(QStringLiteral(":unread"), unread);
     qMapAuth.exec();
 
+    return isNew;
 }
 
 int deleteFolderEdge(QSqlDatabase &database,
@@ -1504,7 +1514,8 @@ void DataStore::upsertHeader(const QVariantMap &header)
                 qBody.exec();
             }
 
-            upsertFolderEdge(database, accountEmail, existingMessageId, folderValue, uidValue, unreadValue);
+            if (upsertFolderEdge(database, accountEmail, existingMessageId, folderValue, uidValue, unreadValue))
+                incrementNewMessageCount(folderValue);
             scheduleDataChangedSignal();
             return;
         }
@@ -1670,8 +1681,18 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
     const bool isCategoryFolder = folderValue.contains(QStringLiteral("/Categories/"), Qt::CaseInsensitive);
     if (!isCategoryFolder) {
-        upsertFolderEdge(database, accountEmail, messageId, folderValue, uidValue, unreadValue);
+        if (upsertFolderEdge(database, accountEmail, messageId, folderValue, uidValue, unreadValue))
+            incrementNewMessageCount(folderValue);
     } else {
+        // Check if this category label is new before upserting.
+        QSqlQuery qCheckLabel(database);
+        qCheckLabel.prepare(QStringLiteral("SELECT 1 FROM message_labels WHERE account_email=:a AND message_id=:m AND label=:l"));
+        qCheckLabel.bindValue(QStringLiteral(":a"), accountEmail);
+        qCheckLabel.bindValue(QStringLiteral(":m"), messageId);
+        qCheckLabel.bindValue(QStringLiteral(":l"), folderValue);
+        qCheckLabel.exec();
+        const bool isNewLabel = !qCheckLabel.next();
+
         QSqlQuery qLabel(database);
         qLabel.prepare(QStringLiteral(R"(
             INSERT INTO message_labels (account_email, message_id, label, source, confidence, observed_at)
@@ -1685,6 +1706,9 @@ void DataStore::upsertHeader(const QVariantMap &header)
         qLabel.bindValue(QStringLiteral(":message_id"), messageId);
         qLabel.bindValue(QStringLiteral(":label"), folderValue);
         qLabel.exec();
+
+        if (isNewLabel)
+            incrementNewMessageCount(folderValue);
 
         QSqlQuery qTag(database);
         qTag.prepare(QStringLiteral(R"(
@@ -4985,6 +5009,7 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
 
     out.insert(QStringLiteral("total"), total);
     out.insert(QStringLiteral("unread"), unread);
+    out.insert(QStringLiteral("newMessages"), newMessageCount(folderKey));
 
     // Cache for future calls (e.g. after pre-warm, subsequent delegate creations are instant).
     {
@@ -4992,6 +5017,91 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
         m_folderStatsCache.insert(key, out);
     }
     return out;
+}
+
+void DataStore::incrementNewMessageCount(const QString &rawFolder)
+{
+    const QString key = rawFolder.trimmed().toLower();
+    QMutexLocker lock(&m_newCountMutex);
+    m_newMessageCounts[key] += 1;
+}
+
+int DataStore::newMessageCount(const QString &folderKey) const
+{
+    QMutexLocker lock(&m_newCountMutex);
+    const QString key = folderKey.trimmed().toLower();
+
+    if (key == QStringLiteral("account:inbox") || key == QStringLiteral("favorites:all-inboxes")) {
+        int sum = m_newMessageCounts.value(QStringLiteral("inbox"), 0);
+        for (auto it = m_newMessageCounts.cbegin(); it != m_newMessageCounts.cend(); ++it) {
+            if (it.key().contains(QStringLiteral("/categories/")))
+                sum += it.value();
+        }
+        return sum;
+    }
+
+    if (key.startsWith(QStringLiteral("account:")))
+        return m_newMessageCounts.value(key.mid(8), 0);
+
+    if (key.startsWith(QStringLiteral("tag:"))) {
+        const QString tag = key.mid(4);
+        // For tag:important, sum all /important folder entries
+        if (tag == QStringLiteral("important")) {
+            int sum = 0;
+            for (auto it = m_newMessageCounts.cbegin(); it != m_newMessageCounts.cend(); ++it) {
+                if (it.key().endsWith(QStringLiteral("/important")))
+                    sum += it.value();
+            }
+            return sum;
+        }
+        return m_newMessageCounts.value(tag, 0);
+    }
+
+    // Direct lookup for category keys like "[gmail]/categories/primary"
+    return m_newMessageCounts.value(key, 0);
+}
+
+void DataStore::clearNewMessageCounts(const QString &folderKey)
+{
+    {
+        QMutexLocker lock(&m_newCountMutex);
+        const QString key = folderKey.trimmed().toLower();
+
+        if (key == QStringLiteral("account:inbox") || key == QStringLiteral("favorites:all-inboxes")) {
+            m_newMessageCounts.remove(QStringLiteral("inbox"));
+            auto it = m_newMessageCounts.begin();
+            while (it != m_newMessageCounts.end()) {
+                if (it.key().contains(QStringLiteral("/categories/")))
+                    it = m_newMessageCounts.erase(it);
+                else
+                    ++it;
+            }
+        } else if (key.startsWith(QStringLiteral("account:"))) {
+            m_newMessageCounts.remove(key.mid(8));
+        } else if (key.startsWith(QStringLiteral("tag:"))) {
+            const QString tag = key.mid(4);
+            if (tag == QStringLiteral("important")) {
+                auto it = m_newMessageCounts.begin();
+                while (it != m_newMessageCounts.end()) {
+                    if (it.key().endsWith(QStringLiteral("/important")))
+                        it = m_newMessageCounts.erase(it);
+                    else
+                        ++it;
+                }
+            } else {
+                m_newMessageCounts.remove(tag);
+            }
+        } else {
+            m_newMessageCounts.remove(key);
+        }
+    }
+
+    // Invalidate stats cache so QML picks up the zeroed count.
+    {
+        QMutexLocker lock(&m_folderStatsCacheMutex);
+        m_folderStatsCache.clear();
+    }
+    emit dataChanged();
 }
 
 void DataStore::reloadFolders()

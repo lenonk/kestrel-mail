@@ -70,6 +70,10 @@ public:
     // Returns true on success. Does nothing and returns false if no credentials are stored.
     bool tryReconnect(const QString &freshToken = {});
 
+    // Reconnect and re-select the previously active folder (if any).
+    // Used by execute()/executeRaw() to transparently recover from dead sockets.
+    bool reconnectAndReselect();
+
     // Execute a generic IMAP command (tag managed internally). Returns response as QString.
     [[nodiscard]] QString execute(const QString &command);
 

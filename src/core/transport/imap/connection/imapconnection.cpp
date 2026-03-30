@@ -295,14 +295,31 @@ Connection::observeThrottleState(const QString &response) {
 
 QString
 Connection::execute(const QString &command) {
-    const QString tag = nextTag();
-    m_socket->write(buildSimpleCommand(tag, command));
+    QString expectedTag = nextTag();
+    m_socket->write(buildSimpleCommand(expectedTag, command));
     m_socket->flush();
 
-    QString imapResp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    QString imapResp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
     observeThrottleState(imapResp);
     appendImapLog(m_logConnId, m_logOwner, m_email, command, imapResp);
-    if (!imapResp.contains(tag + " OK"_L1, Qt::CaseInsensitive)) {
+
+    // Empty response means the socket is dead (network change, server dropped us).
+    // Reconnect, restore folder context, and retry the command once.
+    if (imapResp.isEmpty()) {
+        m_authenticated = false;
+        if (reconnectAndReselect()) {
+            expectedTag = nextTag();
+            m_socket->write(buildSimpleCommand(expectedTag, command));
+            m_socket->flush();
+            imapResp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
+            observeThrottleState(imapResp);
+            appendImapLog(m_logConnId, m_logOwner, m_email, command, imapResp);
+            if (imapResp.isEmpty())
+                m_authenticated = false;
+        }
+    }
+
+    if (!imapResp.contains(expectedTag + " OK"_L1, Qt::CaseInsensitive)) {
         return "%1 failed: %2"_L1.arg(command).arg(imapResp.simplified().left(200));
     }
 
@@ -311,13 +328,29 @@ Connection::execute(const QString &command) {
 
 QByteArray
 Connection::executeRaw(const QString &command) {
-    const QString tag = nextTag();
-    m_socket->write(buildSimpleCommand(tag, command));
+    QString expectedTag = nextTag();
+    m_socket->write(buildSimpleCommand(expectedTag, command));
     m_socket->flush();
-    const QByteArray raw = IO::readUntilTaggedRaw(*m_socket, tag, IO::kFetchReadTimeoutMs);
-    const QString respText = QString::fromUtf8(raw);
+    QByteArray raw = IO::readUntilTaggedRaw(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
+    QString respText = QString::fromUtf8(raw);
     observeThrottleState(respText);
     appendImapLog(m_logConnId, m_logOwner, m_email, command, respText);
+
+    if (raw.isEmpty()) {
+        m_authenticated = false;
+        if (reconnectAndReselect()) {
+            expectedTag = nextTag();
+            m_socket->write(buildSimpleCommand(expectedTag, command));
+            m_socket->flush();
+            raw = IO::readUntilTaggedRaw(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
+            respText = QString::fromUtf8(raw);
+            observeThrottleState(respText);
+            appendImapLog(m_logConnId, m_logOwner, m_email, command, respText);
+            if (raw.isEmpty())
+                m_authenticated = false;
+        }
+    }
+
     return raw;
 }
 
@@ -431,16 +464,30 @@ Connection::list() {
 
 std::tuple<bool, QString>
 Connection::select(const QString &mailbox) {
-    const QString tag = nextTag();
-    m_socket->write(buildSelectCommand(tag, mailbox));
+    QString expectedTag = nextTag();
+    m_socket->write(buildSelectCommand(expectedTag, mailbox));
     m_socket->flush();
 
-    const QString resp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    QString resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
     observeThrottleState(resp);
     appendImapLog(m_logConnId, m_logOwner, m_email, QStringLiteral("SELECT \"%1\"").arg(mailbox), resp);
-    if (const bool ok = resp.contains(tag + " OK"_L1, Qt::CaseInsensitive); !ok) {
-        return {false, resp};
+
+    if (resp.isEmpty()) {
+        m_authenticated = false;
+        if (tryReconnect()) {
+            expectedTag = nextTag();
+            m_socket->write(buildSelectCommand(expectedTag, mailbox));
+            m_socket->flush();
+            resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
+            observeThrottleState(resp);
+            appendImapLog(m_logConnId, m_logOwner, m_email, QStringLiteral("SELECT \"%1\"").arg(mailbox), resp);
+            if (resp.isEmpty())
+                m_authenticated = false;
+        }
     }
+
+    if (!resp.contains(expectedTag + " OK"_L1, Qt::CaseInsensitive))
+        return {false, resp};
 
     m_selectedFolder    = mailbox;
     m_selectedReadOnly  = false;
@@ -449,15 +496,30 @@ Connection::select(const QString &mailbox) {
 
 std::tuple<bool, QString>
 Connection::examine(const QString &mailbox) {
-    const QString tag = nextTag();
+    QString expectedTag = nextTag();
     const QString cmd = QStringLiteral("EXAMINE \"%1\"").arg(mailbox);
-    m_socket->write(buildSimpleCommand(tag, cmd));
+    m_socket->write(buildSimpleCommand(expectedTag, cmd));
     m_socket->flush();
 
-    const QString resp = IO::readUntilTagged(*m_socket, tag, IO::kFetchReadTimeoutMs);
+    QString resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
     observeThrottleState(resp);
     appendImapLog(m_logConnId, m_logOwner, m_email, cmd, resp);
-    if (!resp.contains(tag + " OK"_L1, Qt::CaseInsensitive))
+
+    if (resp.isEmpty()) {
+        m_authenticated = false;
+        if (tryReconnect()) {
+            expectedTag = nextTag();
+            m_socket->write(buildSimpleCommand(expectedTag, cmd));
+            m_socket->flush();
+            resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
+            observeThrottleState(resp);
+            appendImapLog(m_logConnId, m_logOwner, m_email, cmd, resp);
+            if (resp.isEmpty())
+                m_authenticated = false;
+        }
+    }
+
+    if (!resp.contains(expectedTag + " OK"_L1, Qt::CaseInsensitive))
         return {false, resp};
 
     m_selectedFolder    = mailbox;
@@ -549,6 +611,44 @@ Connection::tryReconnect(const QString &freshToken) {
     if (m_host.isEmpty() || m_email.isEmpty() || token.isEmpty())
         return false;
     return connectAndAuth(m_host, m_port, m_email, token).success;
+}
+
+bool
+Connection::reconnectAndReselect() {
+    const QString prevFolder   = m_selectedFolder;
+    const bool    prevReadOnly = m_selectedReadOnly;
+
+    if (!tryReconnect())
+        return false;
+
+    if (prevFolder.isEmpty())
+        return true;
+
+    auto doSelect = [&](const QString &folder) {
+        return prevReadOnly ? examine(folder) : select(folder);
+    };
+
+    if (const auto [ok, _] = doSelect(prevFolder); ok)
+        return true;
+
+    // After reconnect we may land on a different Google server that uses
+    // [Google Mail] instead of [Gmail] (or vice-versa). Try the alias.
+    const QString lower = prevFolder.toLower();
+    QString alias;
+    if (lower.startsWith("[gmail]"_L1)) {
+        alias = prevFolder;
+        alias.replace(0, 7, "[Google Mail]"_L1);
+    } else if (lower.startsWith("[google mail]"_L1)) {
+        alias = prevFolder;
+        alias.replace(0, 13, "[Gmail]"_L1);
+    }
+
+    if (!alias.isEmpty()) {
+        const auto [ok, _] = doSelect(alias);
+        return ok;
+    }
+
+    return false;
 }
 
 QString

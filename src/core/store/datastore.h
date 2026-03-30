@@ -96,6 +96,8 @@ public:
                                                          bool twoWeeksAgoExpanded,
                                                          bool olderExpanded) const;
     Q_INVOKABLE QVariantMap statsForFolder(const QString &folderKey, const QString &rawFolderName) const;
+    Q_INVOKABLE int newMessageCount(const QString &folderKey) const;
+    Q_INVOKABLE void clearNewMessageCounts(const QString &folderKey);
     Q_INVOKABLE bool hasCachedHeadersForFolder(const QString &rawFolderName, int minCount = 60) const;
     Q_INVOKABLE QStringList inboxCategoryTabs() const;
     Q_INVOKABLE QVariantList tagItems() const;
@@ -163,6 +165,11 @@ private:
     mutable QMutex m_connMutex;
     mutable QHash<quintptr, QString> m_threadConnections;
 
+    // In-memory counters for new (unseen-by-user) messages per folder.
+    // Keyed by lowercase raw folder name (e.g. "inbox", "[gmail]/categories/primary").
+    mutable QMutex m_newCountMutex;
+    QHash<QString, int> m_newMessageCounts;
+
     // In-memory cache for contact_avatars lookups — keyed by normalised email.
     // Populated on first DB hit; invalidated/updated on upsert. Eliminates
     // repeated SQL queries during list-scroll delegate creation.
@@ -171,6 +178,7 @@ private:
 
     QSqlDatabase db() const;
     void scheduleDataChangedSignal();
+    void incrementNewMessageCount(const QString &rawFolder);
     // Returns the set of keys to pass to statsForFolder() pre-warm, derived from m_folders.
     QStringList statsKeysFromFolders() const;
     // Pre-warms m_folderStatsCache on a worker thread, then invokes callback on the UI thread.

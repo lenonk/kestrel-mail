@@ -10,6 +10,7 @@ QQC2.ItemDelegate {
     property string folderName: ""
     property string folderIcon: "folder"
     property int unreadCount: 0
+    property int newMessageCount: 0
     property color accentColor: "transparent"
     property color iconColor: "transparent"
     property bool selected: false
@@ -77,8 +78,11 @@ QQC2.ItemDelegate {
         }
 
         QQC2.Label {
-            text: root.unreadCount > 0 ? root.unreadCount : ""
-            opacity: 0.75
+            text: root.newMessageCount > 0 ? ("+" + root.newMessageCount)
+                : root.unreadCount > 0 ? root.unreadCount : ""
+            color: root.newMessageCount > 0 ? Kirigami.Theme.positiveTextColor
+                                            : Kirigami.Theme.textColor
+            opacity: root.newMessageCount > 0 ? 1.0 : 0.75
             horizontalAlignment: Text.AlignRight
             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
         }
