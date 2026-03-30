@@ -13,6 +13,7 @@ Item {
     property var systemPalette
     property var allEvents: []
     property var visibleCalendarIds: []
+    readonly property real gutterWidth: gutter.implicitWidth
 
     readonly property var filteredEvents: {
         const ev = allEvents && allEvents.length ? Array.from(allEvents) : []
@@ -23,7 +24,14 @@ Item {
 
     readonly property var allDayEvents: {
         const ev = filteredEvents && filteredEvents.length ? filteredEvents : []
-        return ev.filter(e => !!e.isAllDay)
+        const allDay = ev.filter(e => !!e.isAllDay)
+        // Sort by dayIndex first, then wider spans before narrower (stable stacking).
+        allDay.sort((a, b) => {
+            const da = a.dayIndex || 0, db = b.dayIndex || 0
+            if (da !== db) return da - db
+            return (b.spanDays || 1) - (a.spanDays || 1)
+        })
+        return allDay
     }
 
     readonly property var timedEvents: {
@@ -104,7 +112,7 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             height: 1
-            color: Qt.rgba(1, 1, 1, 0.10)
+            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.10)
         }
 
         ColumnLayout {
@@ -114,17 +122,20 @@ Item {
 
             Calendar.CalendarWeekHeader {
                 Layout.fillWidth: true
-                Layout.leftMargin: 58
+                Layout.leftMargin: root.gutterWidth
                 Layout.rightMargin: 0
                 Layout.preferredHeight: 36
                 dayNumbers: root._dayNumbers
                 todayIndex: root._todayIndex
+                systemPalette: root.systemPalette
             }
 
             Calendar.CalendarAllDayRow {
                 Layout.fillWidth: true
                 dayCount: 7
                 allDayEvents: root.allDayEvents
+                systemPalette: root.systemPalette
+                gutterWidth: root.gutterWidth
             }
 
             Flickable {
@@ -142,7 +153,7 @@ Item {
 
                     Calendar.CalendarTimeGutter {
                         id: gutter
-                        width: 58
+                        width: gutter.implicitWidth
                         startHour: root.startHour
                         endHour: root.endHour
                         hourHeight: root.hourHeight
@@ -159,7 +170,16 @@ Item {
                     }
                 }
 
-                QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
+                QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                    width: 5
+                    policy: QQC2.ScrollBar.AsNeeded
+                    background: Item {}
+                    contentItem: Rectangle {
+                        implicitWidth: 5
+                        property color sColor: Kirigami.Theme.textColor
+                        color: Qt.rgba(sColor.r, sColor.g, sColor.b, 0.75)
+                    }
+                }
             }
         }
     }

@@ -11,7 +11,31 @@ Item {
 
     readonly property int totalSlots: (endHour - startHour) * 2   // every 30 min
 
-    implicitWidth: 58
+    // Measure the widest possible time string to size the gutter dynamically.
+    Text {
+        id: gutterMetric
+        visible: false
+        text: "00"
+        font.pixelSize: 19
+        font.family: condensedFontFamily
+    }
+    Text {
+        id: minuteMetric
+        visible: false
+        text: "00"
+        font.pixelSize: 13
+        font.family: condensedFontFamily
+    }
+    Text {
+        id: allDayMetric
+        visible: false
+        text: "All-day"
+        font.pixelSize: 12
+    }
+
+    readonly property real timeWidth: gutterMetric.implicitWidth + minuteMetric.implicitWidth
+                                      + Kirigami.Units.smallSpacing + 12
+    implicitWidth: Math.max(timeWidth, allDayMetric.implicitWidth + 12)
     implicitHeight: (endHour - startHour) * hourHeight
 
     Rectangle {
@@ -33,33 +57,31 @@ Item {
                 readonly property string minStr: isHalf ? "30" : "00"
 
                 x: 0
-                y: index * (root.hourHeight / 2) - 10
+                y: index * (root.hourHeight / 2)
                 width: root.implicitWidth
                 height: 20
 
                 Row {
                     anchors.right: parent.right
                     anchors.rightMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.top: parent.top
                     spacing: Kirigami.Units.smallSpacing
 
                     // Hour digits
                     Text {
                         text: hourStr
                         font.pixelSize: 19
-                        font.bold: true
-                        color: Qt.rgba(1, 1, 1, 0.60)
-                        anchors.baseline: parent.verticalCenter
-                        anchors.baselineOffset: 6
+                        font.family: condensedFontFamily
+                        color: Kirigami.Theme.textColor
                     }
 
                     // Minute digits (superscript style)
                     Text {
                         text: minStr
                         font.pixelSize: 13
-                        color: Qt.rgba(1, 1, 1, 0.45)
-                        anchors.baseline: parent.verticalCenter
-                        anchors.baselineOffset: 1
+                        font.family: condensedFontFamily
+                        color: Kirigami.Theme.textColor
+                        anchors.top: parent.top
                     }
                 }
             }

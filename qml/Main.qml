@@ -820,6 +820,7 @@ Kirigami.ApplicationWindow {
     readonly property string primaryAccountName: (root.accountRepositoryObj && root.accountRepositoryObj.accounts.length > 0 && root.accountRepositoryObj.accounts[0].accountName)
                                                ? root.accountRepositoryObj.accounts[0].accountName
                                                : i18n("Account")
+    readonly property string primaryAccountIcon: "qrc:/qml/gmail_account_icon.svg"
 
     Components.AccountWizardDialog {
         id: accountWizard
@@ -2201,7 +2202,7 @@ Kirigami.ApplicationWindow {
                         visible: root.activeWorkspace === "mail"
                         Layout.topMargin: 6
                         expanded: root.accountExpanded
-                        sectionIcon: "internet-mail"
+                        sectionIcon: root.primaryAccountIcon
                         title: root.primaryAccountName
                         titleOpacity: 0.85
                         rowHeight: root.folderRowHeight
@@ -2320,6 +2321,7 @@ Kirigami.ApplicationWindow {
                         visibleInCalendar: root.activeWorkspace === "calendar"
                         gmailCalendarsExpanded: root.gmailCalendarsExpanded
                         calendarSources: root.calendarSources
+                        accountIcon: root.primaryAccountIcon
                         onExpandedToggled: (expanded) => root.gmailCalendarsExpanded = expanded
                         onSourceToggled: (sourceId, checked) => root.setCalendarSourceChecked(sourceId, checked)
                     }

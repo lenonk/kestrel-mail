@@ -15,6 +15,8 @@
 #include <QNetworkDiskCache>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFontDatabase>
+#include <QFontInfo>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
 #include "ui/splashscreen.h"
@@ -135,6 +137,34 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("htmlProcessor", &htmlProcessor);
     engine.rootContext()->setContextProperty("imapService", &imapService);
     engine.rootContext()->setContextProperty("smtpService", &smtpService);
+
+    // Find a condensed sans-serif font, preferring specific families.
+    {
+        const QStringList preferred = {
+            QStringLiteral("Open Sans Condensed"),
+            QStringLiteral("DejaVu Sans Condensed"),
+            QStringLiteral("Roboto Condensed"),
+            QStringLiteral("Fira Sans Condensed"),
+        };
+        const auto allFamilies = QFontDatabase::families();
+        const QSet<QString> installed(allFamilies.cbegin(), allFamilies.cend());
+        QString condensed;
+        for (const auto &pref : preferred) {
+            if (installed.contains(pref)) { condensed = pref; break; }
+        }
+        // Fallback: any installed condensed sans font.
+        if (condensed.isEmpty()) {
+            for (const auto &f : allFamilies) {
+                if (f.endsWith(QStringLiteral("Condensed"), Qt::CaseInsensitive)
+                    && !QFontDatabase::isFixedPitch(f)) {
+                    condensed = f;
+                    break;
+                }
+            }
+        }
+        engine.rootContext()->setContextProperty("condensedFontFamily",
+            condensed.isEmpty() ? QFontInfo(QFont()).family() : condensed);
+    }
 #if defined(NDEBUG)
     engine.rootContext()->setContextProperty("kestrelDebugBuild", false);
 #else

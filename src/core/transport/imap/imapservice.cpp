@@ -1927,15 +1927,6 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                 if (!startDt.isValid() || !endDt.isValid())
                     continue;
 
-                const qint64 dayIndex = weekStart.date().daysTo(startDt.date());
-                if (dayIndex < 0 || dayIndex > 6)
-                    continue;
-
-                const int minutes = isAllDay ? 0 : (startDt.time().hour() * 60 + startDt.time().minute());
-                const int durMinutes = isAllDay
-                                      ? (24 * 60)
-                                      : qMax(15, static_cast<int>(startDt.secsTo(endDt) / 60));
-
                 // Per-event color: use event's own backgroundColor if present, else the calendar's color.
                 QString eventColor = o.value("backgroundColor").toString();
                 if (eventColor.isEmpty())
@@ -1948,23 +1939,53 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                                              : o.value("recurrence").toArray().first().toString()
                                            : QString();
 
-                QVariantMap row;
-                row.insert("calendarId", calendarId);
-                row.insert("dayIndex", static_cast<int>(dayIndex));
-                row.insert("startHour", static_cast<double>(minutes) / 60.0);
-                row.insert("durationHours", static_cast<double>(durMinutes) / 60.0);
-                row.insert("isAllDay", isAllDay);
-                row.insert("title", o.value("summary").toString());
-                row.insert("subtitle", isAllDay
-                           ? QStringLiteral("All day")
-                           : QStringLiteral("%1 - %2")
-                                 .arg(startDt.time().toString("h:mmap").toLower())
-                                 .arg(endDt.time().toString("h:mmap").toLower()));
-                row.insert("color", eventColor);
-                row.insert("location", o.value("location").toString());
-                row.insert("visibility", o.value("visibility").toString());
-                row.insert("recurrence", recurrence);
-                out.push_back(row);
+                if (isAllDay) {
+                    const qint64 rawStart = weekStart.date().daysTo(startDt.date());
+                    const qint64 rawEnd   = weekStart.date().daysTo(endDt.date().addDays(-1));
+                    const int visStart = qMax(0, static_cast<int>(rawStart));
+                    const int visEnd   = qMin(6, static_cast<int>(rawEnd));
+                    if (visStart > 6 || visEnd < 0)
+                        continue;
+
+                    QVariantMap row;
+                    row.insert("calendarId"_L1, calendarId);
+                    row.insert("dayIndex"_L1, visStart);
+                    row.insert("spanDays"_L1, visEnd - visStart + 1);
+                    row.insert("startHour"_L1, 0.0);
+                    row.insert("durationHours"_L1, 24.0);
+                    row.insert("isAllDay"_L1, true);
+                    row.insert("title"_L1, o.value("summary"_L1).toString());
+                    row.insert("subtitle"_L1, QStringLiteral("All day"));
+                    row.insert("color"_L1, eventColor);
+                    row.insert("location"_L1, o.value("location"_L1).toString());
+                    row.insert("visibility"_L1, o.value("visibility"_L1).toString());
+                    row.insert("recurrence"_L1, recurrence);
+                    out.push_back(row);
+                } else {
+                    const qint64 dayIndex = weekStart.date().daysTo(startDt.date());
+                    if (dayIndex < 0 || dayIndex > 6)
+                        continue;
+
+                    const int minutes = startDt.time().hour() * 60 + startDt.time().minute();
+                    const int durMinutes = qMax(15, static_cast<int>(startDt.secsTo(endDt) / 60));
+
+                    QVariantMap row;
+                    row.insert("calendarId"_L1, calendarId);
+                    row.insert("dayIndex"_L1, static_cast<int>(dayIndex));
+                    row.insert("spanDays"_L1, 1);
+                    row.insert("startHour"_L1, static_cast<double>(minutes) / 60.0);
+                    row.insert("durationHours"_L1, static_cast<double>(durMinutes) / 60.0);
+                    row.insert("isAllDay"_L1, false);
+                    row.insert("title"_L1, o.value("summary"_L1).toString());
+                    row.insert("subtitle"_L1, QStringLiteral("%1 - %2")
+                                     .arg(startDt.time().toString("h:mmap"_L1).toLower())
+                                     .arg(endDt.time().toString("h:mmap"_L1).toLower()));
+                    row.insert("color"_L1, eventColor);
+                    row.insert("location"_L1, o.value("location"_L1).toString());
+                    row.insert("visibility"_L1, o.value("visibility"_L1).toString());
+                    row.insert("recurrence"_L1, recurrence);
+                    out.push_back(row);
+                }
             }
         }
 

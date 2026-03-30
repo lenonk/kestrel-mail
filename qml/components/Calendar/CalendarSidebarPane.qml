@@ -10,6 +10,7 @@ ColumnLayout {
     property bool visibleInCalendar: false
     property bool gmailCalendarsExpanded: true
     property var calendarSources: []
+    property string accountIcon: "internet-mail"
 
     signal expandedToggled(bool expanded)
     signal sourceToggled(string sourceId, bool checked)
@@ -23,7 +24,7 @@ ColumnLayout {
 
     Components.FolderSectionButton {
         expanded: root.gmailCalendarsExpanded
-        sectionIcon: "internet-mail"
+        sectionIcon: root.accountIcon
         title: i18n("Gmail")
         titleOpacity: 0.9
         rowHeight: Kirigami.Units.gridUnit + Kirigami.Units.largeSpacing
@@ -44,7 +45,7 @@ ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
             checked: !!modelData.checked
-            leftPadding: Kirigami.Units.largeSpacing
+            leftPadding: Kirigami.Units.gridUnit * 2
             rightPadding: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.largeSpacing
             text: modelData.name
@@ -56,9 +57,9 @@ ColumnLayout {
                 x: calendarCheck.leftPadding
                 y: (calendarCheck.height - height) / 2
                 radius: 3
-                color: modelData.color || Qt.rgba(1, 1, 1, 0.12)
+                color: modelData.color || Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
                 border.width: 1
-                border.color: Qt.rgba(1, 1, 1, 0.45)
+                border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.30)
 
                 QQC2.Label {
                     anchors.centerIn: parent

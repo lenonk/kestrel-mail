@@ -1,48 +1,71 @@
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
 
 Item {
     id: root
 
     property int dayCount: 7
     property var allDayEvents: []   // filtered to isAllDay === true
+    property var systemPalette
+    property real gutterWidth: 58
 
     implicitHeight: {
         // At least one row height (28), expand if multiple events stacked on one day.
         const minH = 28
         if (!Array.isArray(allDayEvents) || allDayEvents.length === 0)
             return minH
-        // Count max events per day.
-        var maxPerDay = 0
+        // Count max events covering each day (spanning events cover multiple days).
         var counts = []
         for (var d = 0; d < dayCount; ++d) counts.push(0)
         for (var i = 0; i < allDayEvents.length; ++i) {
             var di = allDayEvents[i].dayIndex || 0
-            if (di >= 0 && di < dayCount) {
-                counts[di]++
-                if (counts[di] > maxPerDay) maxPerDay = counts[di]
-            }
+            var span = allDayEvents[i].spanDays || 1
+            for (var s = di; s < di + span && s < dayCount; ++s)
+                counts[s]++
         }
+        var maxPerDay = 0
+        for (var d2 = 0; d2 < dayCount; ++d2)
+            if (counts[d2] > maxPerDay) maxPerDay = counts[d2]
         return Math.max(minH, maxPerDay * 24 + 4)
     }
 
-    // "All-day" label on the left
+    // "All-day" label on the left (aligned with 58px time gutter)
     QQC2.Label {
-        x: 4
         anchors.verticalCenter: parent.verticalCenter
+        anchors.right: allDayColumns.left
+        anchors.rightMargin: 6
         text: "All-day"
-        font.pixelSize: 10
-        font.italic: true
-        color: Qt.rgba(1, 1, 1, 0.50)
-        width: 44
+        font.pixelSize: 12
+        // color: Qt.rgba(1, 1, 1, 0.60)
+        color: Kirigami.Theme.textColor
     }
 
     // Day columns background + dividers
     Item {
-        x: 48
-        width: parent.width - 48
+        id: allDayColumns
+        x: root.gutterWidth
+        width: parent.width - root.gutterWidth
         height: parent.height
+
+        // Day column backgrounds (match week grid)
+        Repeater {
+            model: root.dayCount
+            delegate: Rectangle {
+                required property int index
+                x: Math.round(index * (parent.width / root.dayCount))
+                y: 0
+                width: Math.ceil(parent.width / root.dayCount)
+                height: parent.height
+                color: {
+                    const c = root.systemPalette ? root.systemPalette.highlight : Qt.rgba(0.4, 0.6, 1.0, 1.0)
+                    const isWeekend = index >= 5
+                    const alpha = isWeekend ? 0.04 : 0.10
+                    return Qt.rgba(c.r, c.g, c.b, alpha)
+                }
+            }
+        }
 
         // Vertical dividers
         Repeater {
@@ -53,25 +76,27 @@ Item {
                 y: 0
                 width: 1
                 height: parent.height
-                color: Qt.rgba(1, 1, 1, 0.20)
+                color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.40)
             }
         }
 
-        // All-day event chips
+        // All-day event chips (may span multiple day columns)
         Repeater {
             model: root.allDayEvents
             delegate: Rectangle {
                 required property var modelData
                 required property int index
 
-                // Stack events in same day column.
                 readonly property real colWidth: parent.width / root.dayCount
                 readonly property int dayIdx: modelData.dayIndex || 0
-                // Count how many all-day events appear before this one on the same day.
+                readonly property int span: modelData.spanDays || 1
+                // Count how many earlier events overlap this event's first day.
                 readonly property int stackIdx: {
                     var n = 0
                     for (var i = 0; i < index; ++i) {
-                        if ((root.allDayEvents[i].dayIndex || 0) === dayIdx)
+                        var oDayIdx = root.allDayEvents[i].dayIndex || 0
+                        var oSpan = root.allDayEvents[i].spanDays || 1
+                        if (oDayIdx <= dayIdx && oDayIdx + oSpan > dayIdx)
                             n++
                     }
                     return n
@@ -79,9 +104,9 @@ Item {
 
                 x: dayIdx * colWidth + 2
                 y: stackIdx * 24 + 2
-                width: colWidth - 4
+                width: colWidth * span - 4
                 height: 22
-                radius: 3
+                radius: 0
                 color: modelData.color || "#9a8cff"
                 border.width: 1
                 border.color: Qt.darker(color, 1.3)
@@ -103,11 +128,11 @@ Item {
         }
     }
 
-    // Bottom border
+    // Bottom border (separates all-day from timed grid)
     Rectangle {
         anchors.bottom: parent.bottom
         width: parent.width
-        height: 1
-        color: Qt.rgba(1, 1, 1, 0.20)
+        height: 2
+        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.60)
     }
 }

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
 
 Item {
     id: root
@@ -8,6 +9,7 @@ Item {
     property var dayNames: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     property var dayNumbers: [9, 10, 11, 12, 13, 14, 15]
     property int todayIndex: -1   // 0-6 for Mon-Sun, -1 if today is not in this week
+    property var systemPalette
 
     implicitHeight: 36
 
@@ -26,7 +28,7 @@ Item {
                 Layout.preferredHeight: root.height
                 color: "transparent"
                 border.width: 1
-                border.color: Qt.rgba(1, 1, 1, 0.08)
+                border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.08)
 
                 Row {
                     anchors.centerIn: parent
@@ -37,7 +39,7 @@ Item {
                         width: 28
                         height: 28
                         radius: 14
-                        color: isToday ? "#2979ff" : "transparent"
+                        color: isToday ? (root.systemPalette ? root.systemPalette.highlight : "#2979ff") : "transparent"
                         anchors.verticalCenter: parent.verticalCenter
 
                         QQC2.Label {
@@ -45,14 +47,14 @@ Item {
                             text: String(root.dayNumbers[index] || "")
                             font.pixelSize: 14
                             font.bold: true
-                            color: isToday ? "#ffffff" : Qt.rgba(1, 1, 1, 0.85)
+                            color: isToday ? "#ffffff" : Kirigami.Theme.textColor
                         }
                     }
 
                     QQC2.Label {
                         text: root.dayNames[index] || ""
                         font.pixelSize: 13
-                        color: isToday ? "#2979ff" : Qt.rgba(1, 1, 1, 0.85)
+                        color: isToday ? (root.systemPalette ? root.systemPalette.highlight : "#2979ff") : Kirigami.Theme.textColor
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }

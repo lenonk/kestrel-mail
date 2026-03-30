@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
 import "." as Calendar
 
 Item {
@@ -107,7 +108,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Qt.rgba(1, 1, 1, 0.02)
+        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.02)
     }
 
     Repeater {
@@ -135,7 +136,7 @@ Item {
             y: 0
             width: 1
             height: root.height
-            color: Qt.rgba(1, 1, 1, 0.50)
+            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.40)
         }
     }
 
@@ -146,11 +147,12 @@ Item {
             x: 0
             y: Math.round(index * (root.hourHeight / 4))
             width: root.width
-            height: index % 4 === 0 ? 2 : 1
+            height: 1
             color: {
-                if (index % 4 === 0) return Qt.rgba(1, 1, 1, 0.56)   // :00 (bolder)
-                if (index % 2 === 0) return Qt.rgba(1, 1, 1, 0.16)   // :30 (fainter)
-                return Qt.rgba(1, 1, 1, 0.09)                        // :15/:45 (faintest)
+                const t = Kirigami.Theme.textColor
+                if (index % 4 === 0) return Qt.rgba(t.r, t.g, t.b, 0.40)  // :00
+                if (index % 2 === 0) return Qt.rgba(t.r, t.g, t.b, 0.08)  // :30
+                return Qt.rgba(t.r, t.g, t.b, 0.04)                       // :15/:45
             }
         }
     }
