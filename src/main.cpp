@@ -1,3 +1,5 @@
+#include <memory>
+
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -25,6 +27,11 @@
 #include "core/accounts/accountsetupcontroller.h"
 #include "core/accounts/providerprofileservice.h"
 #include "core/auth/filetokenvault.h"
+#include "core/auth/kwallettokenvault.h"
+#ifdef HAVE_LIBSECRET
+#include "core/auth/libsecrettokenvault.h"
+#endif
+#include <KWallet>
 #include "core/auth/oauthservice.h"
 #include "core/store/datastore.h"
 #include "core/store/messagelistmodel.h"
@@ -115,8 +122,24 @@ int main(int argc, char *argv[])
 
     ProviderProfileService providerProfiles(&engine);
     AccountRepository accountRepository(&engine);
-    FileTokenVault tokenVault; // TODO: replace with KWallet-backed vault on KDE runtime.
-    OAuthService oauthService(&tokenVault, &engine);
+    // Token storage: prefer KWallet, then libsecret (GNOME Keyring), then plaintext file.
+    std::unique_ptr<TokenVault> tokenVault;
+    if (KWallet::Wallet::isEnabled()) {
+        tokenVault = std::make_unique<KWalletTokenVault>();
+        qInfo() << "[token-vault] Using KWallet backend";
+    }
+#ifdef HAVE_LIBSECRET
+    else {
+        tokenVault = std::make_unique<LibSecretTokenVault>();
+        qInfo() << "[token-vault] Using libsecret (GNOME Keyring) backend";
+    }
+#else
+    else {
+        tokenVault = std::make_unique<FileTokenVault>();
+        qInfo() << "[token-vault] Using plaintext file backend";
+    }
+#endif
+    OAuthService oauthService(tokenVault.get(), &engine);
     AccountSetupController accountSetup(&providerProfiles, &oauthService, &accountRepository, &engine);
     DataStore dataStore(&engine);
     dataStore.init();
@@ -124,10 +147,10 @@ int main(int argc, char *argv[])
     MessageListModel messageListModel(&engine);
     messageListModel.setDataStore(&dataStore);
     HtmlProcessor htmlProcessor(&engine);
-    ImapService imapService(&accountRepository, &dataStore, &tokenVault, &engine);
+    ImapService imapService(&accountRepository, &dataStore, tokenVault.get(), &engine);
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &imapService, &ImapService::shutdown);
     imapService.initializeConnectionPool();
-    SmtpService smtpService(&accountRepository, &tokenVault, &engine);
+    SmtpService smtpService(&accountRepository, tokenVault.get(), &engine);
 
     engine.rootContext()->setContextProperty("providerProfiles", &providerProfiles);
     engine.rootContext()->setContextProperty("accountSetup", &accountSetup);

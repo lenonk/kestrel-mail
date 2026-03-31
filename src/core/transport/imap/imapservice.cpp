@@ -1406,8 +1406,15 @@ ImapService::refreshAccessToken(const QVariantMap &account, const QString &email
         return {};
 
     const auto refreshToken = m_vault->loadRefreshToken(email);
-    if (refreshToken.isEmpty())
+    if (refreshToken.isEmpty()) {
+        qWarning() << "[token-refresh] No stored refresh token for" << email;
+        if (m_idleWatcher)
+            m_idleWatcher->authSuspended.store(true);
+        QMetaObject::invokeMethod(this, [this, email]() {
+            emit accountNeedsReauth(email);
+        }, Qt::QueuedConnection);
         return {};
+    }
 
     const auto tokenUrl = account.value("oauthTokenUrl"_L1).toString();
 

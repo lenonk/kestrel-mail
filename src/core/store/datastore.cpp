@@ -1973,6 +1973,15 @@ void DataStore::upsertHeader(const QVariantMap &header)
     // ensure a Primary label row exists (not a folder edge - categories are labels only).
     if (primaryLabelObserved) {
         const QString primaryLabel = QStringLiteral("[Gmail]/Categories/Primary");
+
+        QSqlQuery qCheckPrimary(database);
+        qCheckPrimary.prepare(QStringLiteral("SELECT 1 FROM message_labels WHERE account_email=:a AND message_id=:m AND label=:l"));
+        qCheckPrimary.bindValue(QStringLiteral(":a"), accountEmail);
+        qCheckPrimary.bindValue(QStringLiteral(":m"), messageId);
+        qCheckPrimary.bindValue(QStringLiteral(":l"), primaryLabel);
+        qCheckPrimary.exec();
+        const bool isNewPrimary = !qCheckPrimary.next();
+
         QSqlQuery qLabel(database);
         qLabel.prepare(QStringLiteral(R"(
             INSERT INTO message_labels (account_email, message_id, label, source, confidence, observed_at)
@@ -1986,6 +1995,9 @@ void DataStore::upsertHeader(const QVariantMap &header)
         qLabel.bindValue(QStringLiteral(":message_id"), messageId);
         qLabel.bindValue(QStringLiteral(":label"), primaryLabel);
         qLabel.exec();
+
+        if (isNewPrimary)
+            incrementNewMessageCount(primaryLabel);
 
         QSqlQuery qTag(database);
         qTag.prepare(QStringLiteral(R"(
@@ -2613,6 +2625,16 @@ void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId,
 {
     auto database = db();
     if (!database.isValid() || !database.isOpen()) return;
+
+    // Check if this is a genuinely new edge.
+    QSqlQuery qCheck(database);
+    qCheck.prepare(QStringLiteral("SELECT 1 FROM message_folder_map WHERE account_email=:a AND folder=:f AND uid=:u"));
+    qCheck.bindValue(QStringLiteral(":a"), accountEmail);
+    qCheck.bindValue(QStringLiteral(":f"), folder);
+    qCheck.bindValue(QStringLiteral(":u"), uid);
+    qCheck.exec();
+    const bool isNew = !qCheck.next();
+
     QSqlQuery q(database);
     q.prepare(R"(
         INSERT INTO message_folder_map
@@ -2629,6 +2651,9 @@ void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId,
     q.bindValue(":uid"_L1,    uid);
     q.bindValue(":unread"_L1, unread);
     q.exec();
+
+    if (isNew)
+        incrementNewMessageCount(folder);
     // Clean up any orphaned messages now that this edge is committed.
     // The just-inserted edge protects its own message_id; only truly stale rows are removed.
     QSqlQuery qOrphan(database);
@@ -5031,14 +5056,8 @@ int DataStore::newMessageCount(const QString &folderKey) const
     QMutexLocker lock(&m_newCountMutex);
     const QString key = folderKey.trimmed().toLower();
 
-    if (key == QStringLiteral("account:inbox") || key == QStringLiteral("favorites:all-inboxes")) {
-        int sum = m_newMessageCounts.value(QStringLiteral("inbox"), 0);
-        for (auto it = m_newMessageCounts.cbegin(); it != m_newMessageCounts.cend(); ++it) {
-            if (it.key().contains(QStringLiteral("/categories/")))
-                sum += it.value();
-        }
-        return sum;
-    }
+    if (key == QStringLiteral("account:inbox") || key == QStringLiteral("favorites:all-inboxes"))
+        return m_newMessageCounts.value(QStringLiteral("inbox"), 0);
 
     if (key.startsWith(QStringLiteral("account:")))
         return m_newMessageCounts.value(key.mid(8), 0);

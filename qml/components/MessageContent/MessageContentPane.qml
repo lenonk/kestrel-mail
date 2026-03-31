@@ -1340,6 +1340,7 @@ Rectangle {
 
                 property bool closing: false
                 required property var modelData
+                readonly property bool hasAction: !!modelData.action
 
                 opacity: closing ? 0 : 1
                 showCloseButton: true
@@ -1347,6 +1348,17 @@ Rectangle {
                 type: modelData.isError ? Kirigami.MessageType.Error : Kirigami.MessageType.Positive
                 visible: true
                 width: inlineMessageStack.width
+
+                actions: hasAction ? [actionButton] : []
+                Kirigami.Action {
+                    id: actionButton
+                    text: inlineMsg.hasAction ? inlineMsg.modelData.action.label : ""
+                    onTriggered: {
+                        if (inlineMsg.hasAction && inlineMsg.modelData.action.callback)
+                            inlineMsg.modelData.action.callback()
+                        appRoot.dismissInlineStatus(inlineMsg.modelData.id)
+                    }
+                }
 
                 Behavior on opacity {
                     NumberAnimation {
@@ -1361,10 +1373,11 @@ Rectangle {
                     }
                 }
 
+                // Auto-dismiss after 5s, but not if there's an action button.
                 Timer {
                     interval: 5000
                     repeat: false
-                    running: true
+                    running: !inlineMsg.hasAction
 
                     onTriggered: inlineMsg.closing = true
                 }

@@ -44,10 +44,14 @@ include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick Sql Network Concurrent WebEngineQuick Widgets)
-find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n)
+find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n Wallet)
 find_package(KF6Kirigami REQUIRED)
 find_package(KF6KirigamiPlatform REQUIRED)
 find_package(Boost CONFIG REQUIRED)
+find_package(PkgConfig)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(LIBSECRET libsecret-1)
+endif()
 
 # Work around distro packaging where Kirigami QML plugin targets referenced by
 # Qt's qml import scanner are not exported as CMake targets.
@@ -84,6 +88,8 @@ qt_add_executable(kestrel-mail
     src/core/accounts/accountrepository.cpp
     src/core/accounts/accountsetupcontroller.cpp
     src/core/auth/filetokenvault.cpp
+    src/core/auth/kwallettokenvault.cpp
+    $<$<BOOL:${LIBSECRET_FOUND}>:src/core/auth/libsecrettokenvault.cpp>
     src/core/auth/oauthservice.cpp
     src/core/htmlprocessor.cpp
     src/core/store/datastore.cpp
@@ -184,10 +190,17 @@ target_link_libraries(kestrel-mail
         Qt6::Widgets
         KF6::I18n
         KF6::CoreAddons
+        KF6::Wallet
         KF6::Kirigami
         KF6::KirigamiPlatform
         mailio
 )
+
+if(LIBSECRET_FOUND)
+    target_compile_definitions(kestrel-mail PRIVATE HAVE_LIBSECRET)
+    target_include_directories(kestrel-mail PRIVATE ${LIBSECRET_INCLUDE_DIRS})
+    target_link_libraries(kestrel-mail PRIVATE ${LIBSECRET_LIBRARIES})
+endif()
 
 qt_add_executable(kestrel-imap-lab
     src/imaplab_main.cpp

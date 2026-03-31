@@ -62,7 +62,7 @@ Kirigami.ApplicationWindow {
         function onWindowReExposed() { root.webViewRefreshNeeded() }
     }
 
-    onVisibilityChanged: {
+    onVisibilityChanged: function(visibility) {
         if (visibility === Window.Windowed && root._needsAccountWizard) {
             root._needsAccountWizard = false
             _accountWizardTimer.start()
@@ -913,7 +913,10 @@ Kirigami.ApplicationWindow {
         function onAccountNeedsReauth(accountEmail) {
             root.accountNeedsReauth = true
             root.accountNeedsReauthEmail = accountEmail
-            root.showInlineStatus(i18n("Authentication expired for %1 — please re-authenticate.", accountEmail), true)
+            root.showInlineStatus(
+                i18n("Authentication expired for %1.", accountEmail),
+                true,
+                { label: i18n("Re-authenticate"), callback: function() { root.reauthenticateAccount(accountEmail) } })
         }
 
         function onSyncActivityChanged(active) {
@@ -1018,6 +1021,10 @@ Kirigami.ApplicationWindow {
         root.syncMessageListModelSelection()
     }
     onSelectedMessageKeyChanged: {
+        // Any message interaction clears the new-message badge for the current folder.
+        if (root.dataStoreObj && root.selectedMessageKey.length > 0)
+            root.dataStoreObj.clearNewMessageCounts(root.selectedFolderKey)
+
         markReadTimer.stop()
         if (root.selectedMessageKey.length > 0)
             markReadTimer.restart()
@@ -1423,7 +1430,7 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    function showInlineStatus(message, isError) {
+    function showInlineStatus(message, isError, action) {
         const text = (message || "").toString().trim()
         if (!text.length) return
 
@@ -1439,7 +1446,7 @@ Kirigami.ApplicationWindow {
 
         const id = ++root.inlineStatusSeq
         const next = root.inlineStatusQueue.slice()
-        next.push({ id: id, text: text, isError: !!isError })
+        next.push({ id: id, text: text, isError: !!isError, action: action || null })
         while (next.length > 3) {
             next.shift()
         }
@@ -1620,6 +1627,9 @@ Kirigami.ApplicationWindow {
     // Move a single message to the given IMAP target folder and update UI state.
     function moveMessageToFolder(accountEmail, folder, uid, targetFolder) {
         if (!imapServiceObj) return
+        // Any mutation clears the new-message badge for the current folder.
+        if (root.dataStoreObj)
+            root.dataStoreObj.clearNewMessageCounts(root.selectedFolderKey)
         // Deselect if this was the viewed message
         if (root.selectedMessageKey === "msg:" + accountEmail + "|" + folder + "|" + uid)
             root.selectedMessageKey = ""
