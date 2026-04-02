@@ -213,9 +213,9 @@ ArrowPopup {
                     }
                 }
                 background: Rectangle {
-                    color: searchBtn.down ? Qt.darker("#E67E22", 1.2)
-                         : (searchBtn.hovered ? Qt.lighter("#E67E22", 1.1)
-                                              : "#E67E22")
+                    color: searchBtn.down ? Qt.darker(KestrelColors.searchOrange, 1.2)
+                         : (searchBtn.hovered ? Qt.lighter(KestrelColors.searchOrange, 1.1)
+                                              : KestrelColors.searchOrange)
                     radius: 4
                 }
                 onClicked: {

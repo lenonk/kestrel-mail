@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import ".."
 
 Item {
     id: root
@@ -39,7 +40,7 @@ Item {
                         width: 28
                         height: 28
                         radius: 14
-                        color: isToday ? (root.systemPalette ? root.systemPalette.highlight : "#2979ff") : "transparent"
+                        color: isToday ? (root.systemPalette ? root.systemPalette.highlight : KestrelColors.calendarTodayFallback) : "transparent"
                         anchors.verticalCenter: parent.verticalCenter
 
                         QQC2.Label {
@@ -47,14 +48,14 @@ Item {
                             text: String(root.dayNumbers[index] || "")
                             font.pixelSize: 14
                             font.bold: true
-                            color: isToday ? "#ffffff" : Kirigami.Theme.textColor
+                            color: isToday ? KestrelColors.calendarLightText : Kirigami.Theme.textColor
                         }
                     }
 
                     QQC2.Label {
                         text: root.dayNames[index] || ""
                         font.pixelSize: 13
-                        color: isToday ? (root.systemPalette ? root.systemPalette.highlight : "#2979ff") : Kirigami.Theme.textColor
+                        color: isToday ? (root.systemPalette ? root.systemPalette.highlight : KestrelColors.calendarTodayFallback) : Kirigami.Theme.textColor
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }

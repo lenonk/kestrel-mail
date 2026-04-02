@@ -238,12 +238,12 @@ Rectangle {
     function textColorForAccent(accent) {
         const c = (accent || "").toString().trim()
         if (c.length !== 7 || c[0] !== "#")
-            return "#1E3C5A"
+            return KestrelColors.tagDarkText
         const r = parseInt(c.slice(1, 3), 16)
         const g = parseInt(c.slice(3, 5), 16)
         const b = parseInt(c.slice(5, 7), 16)
         const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000
-        return yiq >= 150 ? "#1d2433" : "#eef3ff"
+        return yiq >= 150 ? KestrelColors.tagDarkOnBright : KestrelColors.tagLightOnDark
     }
 
     function addTag(tagObj) {
@@ -633,7 +633,7 @@ Rectangle {
             const key = n.toLowerCase();
             if (seen[key]) return;
             seen[key] = true;
-            const c = (accent || "#D6E8FF").toString();
+            const c = (accent || KestrelColors.tagDefaultAccent).toString();
             const tc = (textColorOverride && textColorOverride.toString().length > 0) ? textColorOverride.toString() : root.textColorForAccent(c);
             out.push({ name: n, color: c, textColor: tc });
         }
@@ -648,13 +648,13 @@ Rectangle {
             // Product rule: Important always appears as Important tag if edge exists.
             if (lf === "important" || lf.endsWith("/important")) {
                 const imp = byRaw["important"];
-                pushTag(imp && imp.name ? imp.name : i18n("Important"), imp && imp.accentColor ? imp.accentColor : "#FFD600");
+                pushTag(imp && imp.name ? imp.name : i18n("Important"), imp && imp.accentColor ? imp.accentColor : KestrelColors.importantYellow);
                 continue;
             }
 
             const t = byRaw[lf];
             if (!t) continue;
-            pushTag(t.name || f, t.accentColor || "#D6E8FF");
+            pushTag(t.name || f, t.accentColor || KestrelColors.tagDefaultAccent);
         }
 
         // Current folder chip should always render last.
@@ -942,7 +942,7 @@ Rectangle {
                         enabled: text.length > 0
 
                         onTriggered: {
-                            const accent = (modelData && modelData.accentColor) ? modelData.accentColor : "#D6E8FF"
+                            const accent = (modelData && modelData.accentColor) ? modelData.accentColor : KestrelColors.tagDefaultAccent
                             const tagObj = {
                                 name: text,
                                 color: accent,
@@ -997,7 +997,7 @@ Rectangle {
                     id: senderLink
 
                     Layout.fillWidth: false
-                    color: "#4ea3ff"
+                    color: KestrelColors.linkBlue
                     elide: Text.ElideRight
                     font.bold: true
                     font.pixelSize: 13
@@ -1045,7 +1045,7 @@ Rectangle {
                             required property var modelData
                             readonly property bool isAddress: modelData.type === "address"
                             text: isAddress ? modelData.label : modelData.text
-                            color: isAddress ? "#4ea3ff" : Kirigami.Theme.textColor
+                            color: isAddress ? KestrelColors.linkBlue : Kirigami.Theme.textColor
                             font.bold: isAddress
                             font.pixelSize: 13
                             opacity: isAddress ? 0.95 : 0.9
@@ -1476,7 +1476,7 @@ Rectangle {
             root.addTag({
                 name: name,
                 color: "#E6EEF8",
-                textColor: "#1E3C5A"
+                textColor: KestrelColors.tagDarkText
             });
             pendingTagName = "";
         }

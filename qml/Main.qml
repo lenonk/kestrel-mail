@@ -457,7 +457,7 @@ Kirigami.ApplicationWindow {
 
     function tagColorForName(name, usedColors) {
         const lower = (name || "").toString().toLowerCase()
-        if (lower === "important") return "#FFD600"
+        if (lower === "important") return Components.KestrelColors.importantYellow
 
         const used = usedColors || []
         const minDistSq = 9500

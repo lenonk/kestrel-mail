@@ -105,8 +105,8 @@ Item {
                             Row {
                                 anchors.fill: parent
                                 spacing: 10
-                                Kirigami.Icon { source: "dialog-error"; width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter; color: "#bf3354" }
-                                QQC2.Label { anchors.verticalCenter: parent.verticalCenter; text: step1Root.accountSetupObj ? step1Root.accountSetupObj.statusMessage : ""; color: "#bf3354"; elide: Text.ElideRight; width: parent.width - 26 }
+                                Kirigami.Icon { source: "dialog-error"; width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter; color: KestrelColors.errorRed }
+                                QQC2.Label { anchors.verticalCenter: parent.verticalCenter; text: step1Root.accountSetupObj ? step1Root.accountSetupObj.statusMessage : ""; color: KestrelColors.errorRed; elide: Text.ElideRight; width: parent.width - 26 }
                             }
                         }
                         RowLayout {

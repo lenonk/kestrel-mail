@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import ".."
 
 Rectangle {
     id: root
@@ -15,14 +16,14 @@ Rectangle {
     property bool isAllDay: false
 
     radius: 0
-    color: eventColor.length > 0 ? eventColor : "#9a8cff"
+    color: eventColor.length > 0 ? eventColor : KestrelColors.calendarEventDefault
     border.width: 1
     border.color: Qt.darker(color, 1.3)
 
     // Determine whether text should be dark or light based on background luminance.
     readonly property color bgColor: root.color
     readonly property real lum: bgColor.r * 0.299 + bgColor.g * 0.587 + bgColor.b * 0.114
-    readonly property color textColor: lum > 0.55 ? "#111111" : "#ffffff"
+    readonly property color textColor: lum > 0.55 ? KestrelColors.calendarDarkText : KestrelColors.calendarLightText
     readonly property color dimTextColor: lum > 0.55 ? "#333333" : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.85)
 
     clip: true

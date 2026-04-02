@@ -295,7 +295,7 @@ Window {
                     QQC2.Label {
                         text: root.hasStatus ? (accountSetupObj ? accountSetupObj.statusMessage : "") : ""
                         visible: root.hasStatus
-                        color: root.statusIsError ? "#bf3354" : Qt.lighter(Kirigami.Theme.textColor, 1.0)
+                        color: root.statusIsError ? KestrelColors.errorRed : Qt.lighter(Kirigami.Theme.textColor, 1.0)
                         elide: Text.ElideRight
                         Layout.maximumWidth: 460
                     }

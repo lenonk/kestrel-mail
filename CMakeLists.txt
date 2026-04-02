@@ -115,6 +115,8 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
     PREFIX "/"
     FILES
         qml/Main.qml
+        qml/components/qmldir
+        qml/components/KestrelColors.qml
         qml/components/AccountWizardDialog.qml
         qml/components/AccountWizardStep1.qml
         qml/components/AccountWizardStep2.qml

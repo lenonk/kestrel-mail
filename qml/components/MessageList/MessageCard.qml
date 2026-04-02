@@ -70,12 +70,12 @@ Rectangle {
     function textColorForAccent(accent) {
         const c = (accent || "").toString().trim();
         if (c.length !== 7 || c[0] !== "#")
-            return "#1E3C5A";
+            return KestrelColors.tagDarkText;
         const r = parseInt(c.slice(1, 3), 16);
         const g = parseInt(c.slice(3, 5), 16);
         const b = parseInt(c.slice(5, 7), 16);
         const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
-        return yiq >= 150 ? "#1d2433" : "#eef3ff";
+        return yiq >= 150 ? KestrelColors.tagDarkOnBright : KestrelColors.tagLightOnDark;
     }
 
     function snippetTagItems() {
@@ -130,7 +130,7 @@ Rectangle {
                 continue;
             seen[key] = true;
 
-            const accent = (t.accentColor || "#D6E8FF").toString();
+            const accent = (t.accentColor || KestrelColors.tagDefaultAccent).toString();
             out.push({
                 name: name,
                 color: accent,
@@ -377,13 +377,13 @@ Rectangle {
                         implicitHeight: 18
                         implicitWidth: Math.min(140, tagText.implicitWidth + 12)
                         radius: Math.round(implicitHeight / 2)
-                        color: (modelData && modelData.color) ? modelData.color : "#D6E8FF"
+                        color: (modelData && modelData.color) ? modelData.color : KestrelColors.tagDefaultAccent
                         opacity: 0.92
 
                         QQC2.Label {
                             id: tagText
                             anchors.centerIn: parent
-                            color: (modelData && modelData.textColor) ? modelData.textColor : messageCard.textColorForAccent((modelData && modelData.color) ? modelData.color : "#D6E8FF")
+                            color: (modelData && modelData.textColor) ? modelData.textColor : messageCard.textColorForAccent((modelData && modelData.color) ? modelData.color : KestrelColors.tagDefaultAccent)
                             elide: Text.ElideRight
                             font.pixelSize: 10
                             maximumLineCount: 1

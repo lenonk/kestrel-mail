@@ -14,7 +14,6 @@ using namespace Qt::Literals::StringLiterals;
 AccountRepository::AccountRepository(QObject *parent)
     : QObject(parent) {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/kestrel-mail"_L1;
-    // QDir().mkpath(base);
     m_path = base + "/accounts.json"_L1;
     load();
 }
@@ -33,7 +32,7 @@ AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
     }
 
     auto updated = false;
-    for (auto & m_account : m_accounts) {
+    for (auto &m_account : m_accounts) {
         if (auto existing = m_account.toMap(); Kestrel::normalizeEmail(existing.value("email").toString()) == email) {
             for (auto it = account.constBegin(); it != account.constEnd(); ++it) {
                 // Don't overwrite existing non-null values with null/empty

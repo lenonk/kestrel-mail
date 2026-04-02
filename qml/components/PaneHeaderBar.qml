@@ -11,7 +11,7 @@ Rectangle {
     property real titlePointSizeDelta: 0
     property int headerHeight: 42
     property int utilityIconSize: 16
-    property color utilityHighlightColor: "#3daee9"
+    property color utilityHighlightColor: KestrelColors.utilityHighlight
     property string collapseIconName: "go-previous-symbolic"
     property int collapseIconSize: 24
     property int collapseButtonSize: 44

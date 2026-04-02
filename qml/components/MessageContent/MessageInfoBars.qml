@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import ".."
 
 ColumnLayout {
     id: root
@@ -38,7 +39,7 @@ ColumnLayout {
         }
         QQC2.Label {
             Layout.fillWidth: false
-            color: "#4ea3ff"
+            color: KestrelColors.linkBlue
             font.bold: true
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
             text: i18n("Unsubscribe")
@@ -73,7 +74,7 @@ ColumnLayout {
         }
         QQC2.Label {
             Layout.fillWidth: false
-            color: "#4ea3ff"
+            color: KestrelColors.linkBlue
             font.bold: true
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
             text: i18n("Allow email tracking.")
@@ -108,7 +109,7 @@ ColumnLayout {
         }
         QQC2.Label {
             Layout.fillWidth: false
-            color: "#4ea3ff"
+            color: KestrelColors.linkBlue
             font.bold: true
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
             text: i18n("Download Pictures")
@@ -129,7 +130,7 @@ ColumnLayout {
         }
         QQC2.Label {
             Layout.fillWidth: false
-            color: "#4ea3ff"
+            color: KestrelColors.linkBlue
             font.bold: true
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 2
             text: i18n("always download pictures from this sender.")

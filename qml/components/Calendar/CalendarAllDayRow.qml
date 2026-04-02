@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import ".."
 
 Item {
     id: root
@@ -106,7 +107,7 @@ Item {
                 width: colWidth * span - 4
                 height: 22
                 radius: 0
-                color: modelData.color || "#9a8cff"
+                color: modelData.color || KestrelColors.calendarEventDefault
                 border.width: 1
                 border.color: Qt.darker(color, 1.3)
 
@@ -121,7 +122,7 @@ Item {
                     verticalAlignment: Text.AlignVCenter
                     // Contrast-aware text color
                     readonly property real lum: parent.color.r * 0.299 + parent.color.g * 0.587 + parent.color.b * 0.114
-                    color: lum > 0.55 ? "#111111" : "#ffffff"
+                    color: lum > 0.55 ? KestrelColors.calendarDarkText : KestrelColors.calendarLightText
                 }
             }
         }

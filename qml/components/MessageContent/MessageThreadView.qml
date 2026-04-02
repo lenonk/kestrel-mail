@@ -703,7 +703,7 @@ Item {
                                     QQC2.Label {
                                         id: threadSenderLabel
                                         Layout.fillWidth: true
-                                        color: "#4ea3ff"
+                                        color: KestrelColors.linkBlue
                                         elide: Text.ElideRight
                                         font.bold: true
                                         font.pixelSize: 13
@@ -762,7 +762,7 @@ Item {
                                                 required property var modelData
                                                 readonly property bool isAddress: modelData.type === "address"
                                                 text: isAddress ? modelData.label : modelData.text
-                                                color: isAddress ? "#4ea3ff" : Kirigami.Theme.textColor
+                                                color: isAddress ? KestrelColors.linkBlue : Kirigami.Theme.textColor
                                                 font.bold: isAddress
                                                 font.pixelSize: 12
                                                 opacity: isAddress ? 0.95 : 0.8
