@@ -81,11 +81,13 @@ MessageListModel::MessageListModel(QObject *parent)
 int MessageListModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid()) return 0;
+    QMutexLocker locker(&m_rowsMutex);
     return m_rows.size();
 }
 
 QVariant MessageListModel::data(const QModelIndex &index, int role) const
 {
+    QMutexLocker locker(&m_rowsMutex);
     if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size()) return {};
     const Row &row = m_rows.at(index.row());
     switch (role) {
@@ -337,21 +339,28 @@ void MessageListModel::refresh()
 
 void MessageListModel::refreshView()
 {
-    m_allRows = buildRows(m_loadedSourceRows);
+    QVector<Row> built = buildRows(m_loadedSourceRows);
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        m_allRows = std::move(built);
+    }
     emit totalRowCountChanged();
     applyWindow();
 }
 
 void MessageListModel::applyWindow()
 {
-    if (m_windowStart < 0) m_windowStart = 0;
-
-    const int effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
-    if (m_windowStart >= m_allRows.size()) m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize);
-
     QVector<Row> window;
-    const int end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
-    for (int i = m_windowStart; i < end; ++i) window.push_back(m_allRows.at(i));
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        if (m_windowStart < 0) m_windowStart = 0;
+
+        const int effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
+        if (m_windowStart >= m_allRows.size()) m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize);
+
+        const int end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
+        for (int i = m_windowStart; i < end; ++i) window.push_back(m_allRows.at(i));
+    }
     applyRows(std::move(window));
 }
 
@@ -379,8 +388,10 @@ void MessageListModel::loadMore()
     m_hasMore = hasMore;
     if (oldHasMore != m_hasMore) emit pagingChanged();
 
+    QVector<Row> window;
     if (!nextRows.isEmpty()) {
         const QVector<Row> deltaRows = buildRows(nextRows);
+        QMutexLocker locker(&m_rowsMutex);
         QSet<QString> existingHeaders;
         QSet<QString> existingMessages;
         for (const Row &r : m_allRows) {
@@ -402,15 +413,18 @@ void MessageListModel::loadMore()
             }
         }
     }
+
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        if (m_windowStart < 0) m_windowStart = 0;
+        const int effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
+        if (m_windowStart >= m_allRows.size()) m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize);
+
+        const int end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
+        for (int i = m_windowStart; i < end; ++i) window.push_back(m_allRows.at(i));
+    }
+
     emit totalRowCountChanged();
-
-    if (m_windowStart < 0) m_windowStart = 0;
-    const int effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
-    if (m_windowStart >= m_allRows.size()) m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize);
-
-    QVector<Row> window;
-    const int end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
-    for (int i = m_windowStart; i < end; ++i) window.push_back(m_allRows.at(i));
     applyRows(std::move(window));
 
     m_isLoadingPage = false;
@@ -434,48 +448,60 @@ void MessageListModel::onMessageMarkedRead(const QString &accountEmail, const QS
     // Directly update the unread role for any visible row matching this account+uid.
     // This bypasses the 80ms refresh throttle so the unread dot disappears immediately.
     // The subsequent full refresh (from inboxChanged) will reconcile m_loadedSourceRows.
-    for (int i = 0; i < m_rows.size(); ++i) {
-        Row &row = m_rows[i];
-        if (row.type != MessageRow) continue;
-        if (row.message.value("accountEmail"_L1).toString() != accountEmail) continue;
-        if (row.message.value("uid"_L1).toString() != uid) continue;
-        if (row.message.value("unread"_L1).toInt() == 0) continue;
-        row.message.insert("unread"_L1, 0);
-        emit dataChanged(index(i), index(i), {UnreadRole});
-        break;
-    }
-    // Also patch m_allRows so the window doesn't restore the stale value on the next scroll.
-    for (Row &row : m_allRows) {
-        if (row.type == MessageRow
-                && row.message.value("accountEmail"_L1).toString() == accountEmail
-                && row.message.value("uid"_L1).toString() == uid) {
+    int changedIndex = -1;
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        for (int i = 0; i < m_rows.size(); ++i) {
+            Row &row = m_rows[i];
+            if (row.type != MessageRow) continue;
+            if (row.message.value("accountEmail"_L1).toString() != accountEmail) continue;
+            if (row.message.value("uid"_L1).toString() != uid) continue;
+            if (row.message.value("unread"_L1).toInt() == 0) continue;
             row.message.insert("unread"_L1, 0);
+            changedIndex = i;
             break;
         }
+        // Also patch m_allRows so the window doesn't restore the stale value on the next scroll.
+        for (Row &row : m_allRows) {
+            if (row.type == MessageRow
+                    && row.message.value("accountEmail"_L1).toString() == accountEmail
+                    && row.message.value("uid"_L1).toString() == uid) {
+                row.message.insert("unread"_L1, 0);
+                break;
+            }
+        }
     }
+    if (changedIndex >= 0)
+        emit dataChanged(index(changedIndex), index(changedIndex), {UnreadRole});
 }
 
 void MessageListModel::onMessageFlaggedChanged(const QString &accountEmail, const QString &uid, bool flagged)
 {
     const int newFlagged = flagged ? 1 : 0;
-    for (int i = 0; i < m_rows.size(); ++i) {
-        Row &row = m_rows[i];
-        if (row.type != MessageRow) continue;
-        if (row.message.value("accountEmail"_L1).toString() != accountEmail) continue;
-        if (row.message.value("uid"_L1).toString() != uid) continue;
-        if (row.message.value("flagged"_L1).toInt() == newFlagged) continue;
-        row.message.insert("flagged"_L1, newFlagged);
-        emit dataChanged(index(i), index(i), {FlaggedRole});
-        break;
-    }
-    for (Row &row : m_allRows) {
-        if (row.type == MessageRow
-                && row.message.value("accountEmail"_L1).toString() == accountEmail
-                && row.message.value("uid"_L1).toString() == uid) {
+    int changedIndex = -1;
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        for (int i = 0; i < m_rows.size(); ++i) {
+            Row &row = m_rows[i];
+            if (row.type != MessageRow) continue;
+            if (row.message.value("accountEmail"_L1).toString() != accountEmail) continue;
+            if (row.message.value("uid"_L1).toString() != uid) continue;
+            if (row.message.value("flagged"_L1).toInt() == newFlagged) continue;
             row.message.insert("flagged"_L1, newFlagged);
+            changedIndex = i;
             break;
         }
+        for (Row &row : m_allRows) {
+            if (row.type == MessageRow
+                    && row.message.value("accountEmail"_L1).toString() == accountEmail
+                    && row.message.value("uid"_L1).toString() == uid) {
+                row.message.insert("flagged"_L1, newFlagged);
+                break;
+            }
+        }
     }
+    if (changedIndex >= 0)
+        emit dataChanged(index(changedIndex), index(changedIndex), {FlaggedRole});
 }
 
 void MessageListModel::setWindowSize(int size)
@@ -490,24 +516,30 @@ void MessageListModel::setWindowSize(int size)
 
 void MessageListModel::shiftWindowDown()
 {
-    if (m_allRows.isEmpty()) return;
-    if (m_windowSize <= 0) return; // unlimited mode
-    const int step = qMax(10, m_windowSize / 2);
-    const int maxStart = qMax(0, m_allRows.size() - m_windowSize);
-    const int next = qMin(maxStart, m_windowStart + step);
-    if (next == m_windowStart) return;
-    m_windowStart = next;
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        if (m_allRows.isEmpty()) return;
+        if (m_windowSize <= 0) return; // unlimited mode
+        const int step = qMax(10, m_windowSize / 2);
+        const int maxStart = qMax(0, m_allRows.size() - m_windowSize);
+        const int next = qMin(maxStart, m_windowStart + step);
+        if (next == m_windowStart) return;
+        m_windowStart = next;
+    }
     applyWindow();
 }
 
 void MessageListModel::shiftWindowUp()
 {
-    if (m_allRows.isEmpty()) return;
-    if (m_windowSize <= 0) return; // unlimited mode
-    const int step = qMax(10, m_windowSize / 2);
-    const int next = qMax(0, m_windowStart - step);
-    if (next == m_windowStart) return;
-    m_windowStart = next;
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        if (m_allRows.isEmpty()) return;
+        if (m_windowSize <= 0) return; // unlimited mode
+        const int step = qMax(10, m_windowSize / 2);
+        const int next = qMax(0, m_windowStart - step);
+        if (next == m_windowStart) return;
+        m_windowStart = next;
+    }
     applyWindow();
 }
 
@@ -593,8 +625,21 @@ QVector<MessageListModel::Row> MessageListModel::buildRows(const QVariantList &r
     return out;
 }
 
+int MessageListModel::totalRowCount() const
+{
+    QMutexLocker locker(&m_rowsMutex);
+    return m_allRows.size();
+}
+
+int MessageListModel::visibleRowCount() const
+{
+    QMutexLocker locker(&m_rowsMutex);
+    return m_rows.size();
+}
+
 int MessageListModel::visibleMessageCount() const
 {
+    QMutexLocker locker(&m_rowsMutex);
     int count = 0;
     for (const Row &r : m_rows) {
         if (r.type == MessageRow) ++count;
@@ -604,6 +649,7 @@ int MessageListModel::visibleMessageCount() const
 
 QVariantMap MessageListModel::rowAt(int index) const
 {
+    QMutexLocker locker(&m_rowsMutex);
     if (index < 0 || index >= m_rows.size()) return {};
     const Row &r = m_rows.at(index);
     QVariantMap result;
@@ -614,12 +660,15 @@ QVariantMap MessageListModel::rowAt(int index) const
 
 void MessageListModel::applyRows(QVector<Row> &&nextRows)
 {
+    QMutexLocker locker(&m_rowsMutex);
+
     if (m_rows.isEmpty() && nextRows.isEmpty()) return;
 
     if (m_rows.isEmpty()) {
         beginInsertRows(QModelIndex(), 0, nextRows.size() - 1);
         m_rows = std::move(nextRows);
         endInsertRows();
+        locker.unlock();
         emit visibleCountsChanged();
         return;
     }
@@ -628,6 +677,7 @@ void MessageListModel::applyRows(QVector<Row> &&nextRows)
         beginRemoveRows(QModelIndex(), 0, m_rows.size() - 1);
         m_rows.clear();
         endRemoveRows();
+        locker.unlock();
         emit visibleCountsChanged();
         return;
     }
@@ -686,6 +736,7 @@ void MessageListModel::applyRows(QVector<Row> &&nextRows)
         beginInsertRows(QModelIndex(), prefix, prefix + newMid - 1);
         m_rows = std::move(nextRows);
         endInsertRows();
+        locker.unlock();
         emit visibleCountsChanged();
         return;
     }
@@ -694,6 +745,7 @@ void MessageListModel::applyRows(QVector<Row> &&nextRows)
         beginRemoveRows(QModelIndex(), prefix, prefix + oldMid - 1);
         m_rows = std::move(nextRows);
         endRemoveRows();
+        locker.unlock();
         emit visibleCountsChanged();
         return;
     }
@@ -701,6 +753,7 @@ void MessageListModel::applyRows(QVector<Row> &&nextRows)
     beginResetModel();
     m_rows = std::move(nextRows);
     endResetModel();
+    locker.unlock();
     emit visibleCountsChanged();
 }
 

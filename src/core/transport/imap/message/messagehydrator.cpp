@@ -49,8 +49,8 @@ QString MessageHydrator::execute(const Request &req) {
         QString msg;
         if (req.cxn->selectedFolder().compare(folder, Qt::CaseInsensitive) != 0) {
             const auto sel = req.cxn->examine(folder);
-            selectOk = std::get<0>(sel);
-            msg = std::get<1>(sel);
+            selectOk = sel.has_value();
+            msg = selectOk ? *sel : sel.error();
         }
         const qint64 selectMs = step.elapsed();
 
@@ -59,8 +59,8 @@ QString MessageHydrator::execute(const Request &req) {
             // Try reconnecting in-place with stored credentials and retry EXAMINE.
             if (msg.isEmpty() && req.cxn->tryReconnect()) {
                 const auto sel2 = req.cxn->examine(folder);
-                selectOk = std::get<0>(sel2);
-                msg      = std::get<1>(sel2);
+                selectOk = sel2.has_value();
+                msg      = selectOk ? *sel2 : sel2.error();
             }
 
             if (!selectOk) {

@@ -3,9 +3,9 @@
 #include <QSslSocket>
 #include <QVariantList>
 
+#include <expected>
 #include <functional>
 #include <memory>
-#include <tuple>
 
 namespace Imap {
 
@@ -93,28 +93,28 @@ public:
     [[nodiscard]] QVariantList list();
 
     // Send SELECT for mailbox (read-write); updates selectedFolder() on success.
-    // Returns {success, raw server response}.
-    [[nodiscard]] std::tuple<bool, QString> select(const QString &mailbox);
+    // Returns the raw server response on success, or an error string on failure.
+    [[nodiscard]] std::expected<QString, QString> select(const QString &mailbox);
 
     // Send EXAMINE for mailbox (read-only); updates selectedFolder() on success.
     // Use for all sync/fetch paths that never write flags. Avoids clearing \Recent.
-    // Returns {success, raw server response}.
-    [[nodiscard]] std::tuple<bool, QString> examine(const QString &mailbox);
+    // Returns the raw server response on success, or an error string on failure.
+    [[nodiscard]] std::expected<QString, QString> examine(const QString &mailbox);
 
     // True when the currently selected mailbox was opened via EXAMINE (read-only).
     // Write operations (STORE, MOVE, COPY) must re-SELECT if this returns true.
     [[nodiscard]] bool isSelectedReadOnly() const { return m_selectedReadOnly; }
 
     // Enter IMAP IDLE mode for the currently selected mailbox.
-    // Returns server continuation line (typically starts with '+').
-    // On failure, returns an error string prefixed with "IDLE failed:".
-    [[nodiscard]] std::tuple<bool, QString> enterIdle();
+    // Returns server continuation line on success, or an error string on failure.
+    [[nodiscard]] std::expected<QString, QString> enterIdle();
 
     // Wait for untagged push bytes while in IDLE. Returns empty string on timeout/no data.
     [[nodiscard]] QString waitForIdlePush(int timeoutMs) const;
 
     // Exit the active IDLE command by sending DONE and waiting for tagged completion.
-    [[nodiscard]] std::tuple<bool, QString> exitIdle();
+    // Returns the server response on success, or an error string on failure.
+    [[nodiscard]] std::expected<QString, QString> exitIdle();
 
 
     [[nodiscard]] bool isGmail() const {

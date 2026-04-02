@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QVector>
 #include <QFutureWatcher>
+#include <QMutex>
 
 class QTimer;
 class DataStore;
@@ -86,8 +87,8 @@ public:
 
     int windowSize() const { return m_windowSize; }
     Q_INVOKABLE void setWindowSize(int size);
-    int totalRowCount() const { return m_allRows.size(); }
-    int visibleRowCount() const { return m_rows.size(); }
+    int totalRowCount() const;
+    int visibleRowCount() const;
     int visibleMessageCount() const;
     bool hasMore() const { return m_hasMore; }
     int pageSize() const { return m_pageSize; }
@@ -114,6 +115,7 @@ private:
     };
 
     QPointer<DataStore> m_dataStore;
+    mutable QRecursiveMutex m_rowsMutex;
     QVector<Row> m_rows;
     QVector<Row> m_allRows;
     QString m_folderKey;

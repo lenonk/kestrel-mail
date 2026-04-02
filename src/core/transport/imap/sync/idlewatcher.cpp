@@ -189,23 +189,23 @@ IdleWatcher::start() {
         // EXAMINE (read-only) is sufficient — IDLE only monitors for push notifications,
         // it never writes flags. Using EXAMINE avoids clearing \Recent on reconnect.
         if (!inboxSelected) {
-            if (const auto [ok, resp] = cxn->examine("INBOX"_L1); !ok) {
+            if (const auto result = cxn->examine("INBOX"_L1); !result) {
                 cxn.reset();
                 SyncUtils::handleFailure([this](bool ok2, const QString &msg) { emit realtimeStatus(ok2, msg); },
                                          m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                         consecutiveFailures, resp, 10);
+                                         consecutiveFailures, result.error(), 10);
                 continue;
             }
             inboxSelected = true;
         }
 
-        if (const auto [ok, resp] = cxn->enterIdle(); !ok) {
+        if (const auto result = cxn->enterIdle(); !result) {
             // Drop the connection — it may be half-open or stale.
             cxn.reset();
             inboxSelected = false;
             SyncUtils::handleFailure([this](bool ok2, const QString &msg) { emit realtimeStatus(ok2, msg); },
                                      m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                     consecutiveFailures, resp, 3);
+                                     consecutiveFailures, result.error(), 3);
             continue;
         }
 
@@ -220,12 +220,12 @@ IdleWatcher::start() {
         const auto [mailboxChanged, existsSignals, recentSignals, expungeSignals] =
             waitForIdleSignals(*cxn, m_running);
 
-        if (const auto [doneOk, doneResp] = cxn->exitIdle(); !doneOk) {
+        if (const auto doneResult = cxn->exitIdle(); !doneResult) {
             cxn.reset();
             inboxSelected = false;
             SyncUtils::handleFailure([this](bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                      m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                     consecutiveFailures, doneResp, 3);
+                                     consecutiveFailures, doneResult.error(), 3);
             continue;
         }
 

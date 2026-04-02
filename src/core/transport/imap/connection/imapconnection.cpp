@@ -462,7 +462,7 @@ Connection::list() {
     return parseListResponse(resp);
 }
 
-std::tuple<bool, QString>
+std::expected<QString, QString>
 Connection::select(const QString &mailbox) {
     QString expectedTag = nextTag();
     m_socket->write(buildSelectCommand(expectedTag, mailbox));
@@ -487,14 +487,14 @@ Connection::select(const QString &mailbox) {
     }
 
     if (!resp.contains(expectedTag + " OK"_L1, Qt::CaseInsensitive))
-        return {false, resp};
+        return std::unexpected(resp);
 
     m_selectedFolder    = mailbox;
     m_selectedReadOnly  = false;
-    return {true, resp};
+    return resp;
 }
 
-std::tuple<bool, QString>
+std::expected<QString, QString>
 Connection::examine(const QString &mailbox) {
     QString expectedTag = nextTag();
     const QString cmd = "EXAMINE \"%1\""_L1.arg(mailbox);
@@ -520,32 +520,32 @@ Connection::examine(const QString &mailbox) {
     }
 
     if (!resp.contains(expectedTag + " OK"_L1, Qt::CaseInsensitive))
-        return {false, resp};
+        return std::unexpected(resp);
 
     m_selectedFolder    = mailbox;
     m_selectedReadOnly  = true;
-    return {true, resp};
+    return resp;
 }
 
-std::tuple<bool, QString>
+std::expected<QString, QString>
 Connection::enterIdle() {
     if (!isConnected())
-        return {false, "IDLE failed: not connected"_L1};
+        return std::unexpected("IDLE failed: not connected"_L1);
 
     const QString tag = nextTag();
     m_socket->write(buildSimpleCommand(tag, "IDLE"_L1));
     m_socket->flush();
 
     if (!m_socket->waitForReadyRead(IO::kIdleContinuationTimeoutMs))
-        return {false, "IDLE failed: timeout waiting for continuation"_L1};
+        return std::unexpected("IDLE failed: timeout waiting for continuation"_L1);
 
     const QString resp = QString::fromUtf8(m_socket->readAll());
     appendImapLog(m_logConnId, m_logOwner, m_email, "IDLE"_L1, resp);
     if (!resp.contains('+'))
-        return {false, "IDLE failed: server rejected IDLE: %1"_L1.arg(resp.simplified().left(200))};
+        return std::unexpected("IDLE failed: server rejected IDLE: %1"_L1.arg(resp.simplified().left(200)));
 
     m_idleTag = tag;
-    return {true, resp};
+    return resp;
 }
 
 QString
@@ -559,10 +559,10 @@ Connection::waitForIdlePush(const int timeoutMs) const {
     return QString::fromUtf8(m_socket->readAll());
 }
 
-std::tuple<bool, QString>
+std::expected<QString, QString>
 Connection::exitIdle() {
     if (m_idleTag.isEmpty() || !m_socket)
-        return {false, "IDLE failed: not in IDLE mode"_L1};
+        return std::unexpected("IDLE failed: not in IDLE mode"_L1);
 
     m_socket->write("DONE\r\n");
     m_socket->flush();
@@ -572,8 +572,9 @@ Connection::exitIdle() {
     const QString resp = IO::readUntilTagged(*m_socket, doneTag, IO::kTaggedReadTimeoutMs);
     observeThrottleState(resp);
     appendImapLog(m_logConnId, m_logOwner, m_email, "DONE"_L1, resp);
-    const bool ok = resp.contains(doneTag + " OK"_L1, Qt::CaseInsensitive);
-    return {ok, resp};
+    if (!resp.contains(doneTag + " OK"_L1, Qt::CaseInsensitive))
+        return std::unexpected(resp);
+    return resp;
 }
 
 void
@@ -628,7 +629,7 @@ Connection::reconnectAndReselect() {
         return prevReadOnly ? examine(folder) : select(folder);
     };
 
-    if (const auto [ok, _] = doSelect(prevFolder); ok)
+    if (doSelect(prevFolder))
         return true;
 
     // After reconnect we may land on a different Google server that uses
@@ -643,10 +644,8 @@ Connection::reconnectAndReselect() {
         alias.replace(0, 13, "[Gmail]"_L1);
     }
 
-    if (!alias.isEmpty()) {
-        const auto [ok, _] = doSelect(alias);
-        return ok;
-    }
+    if (!alias.isEmpty())
+        return doSelect(alias).has_value();
 
     return false;
 }

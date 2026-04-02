@@ -720,8 +720,7 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->examine(folderName);
-            if (!ok) {
+            if (!cxn->examine(folderName)) {
                     return;
             }
         }
@@ -822,8 +821,7 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->examine(folderName);
-            if (!ok) {
+            if (!cxn->examine(folderName)) {
                     return;
             }
         }
@@ -2300,8 +2298,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
                                          ? "INBOX"_L1 : folder;
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(sourceFolder);
-            if (!ok) return;
+            if (!cxn->select(sourceFolder)) return;
         }
 
         const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
@@ -2352,8 +2349,7 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
                                          ? "INBOX"_L1 : folder;
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(sourceFolder);
-            if (!ok) return;
+            if (!cxn->select(sourceFolder)) return;
         }
 
         const QString result = cxn->execute("UID STORE %1 +FLAGS (\\Seen)"_L1.arg(uid));
@@ -2382,8 +2378,7 @@ ImapService::markMessageFlagged(const QString &accountEmail, const QString &fold
                                          ? "INBOX"_L1 : folder;
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(sourceFolder);
-            if (!ok) return;
+            if (!cxn->select(sourceFolder)) return;
         }
 
         const QString result = cxn->execute("UID STORE %1 %2"_L1.arg(uid, flags));
@@ -2455,8 +2450,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
                                          ? "INBOX"_L1 : folder;
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
-            const auto [ok, _] = cxn->select(sourceFolder);
-            if (!ok) return;
+            if (!cxn->select(sourceFolder)) return;
         }
 
         const QString resp = cxn->execute("UID COPY %1 \"%2\""_L1.arg(uid, resolvedTarget));
@@ -2563,8 +2557,7 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
             // Standard IMAP folder removal: select the label folder, mark deleted, expunge.
             // On Gmail this removes the label without permanently deleting the message
             // (it remains in [Gmail]/All Mail and any other labeled folders).
-            const auto [ok, _] = cxn->select(resolvedTarget);
-            if (ok) {
+            if (cxn->select(resolvedTarget)) {
                 (void)cxn->execute("UID STORE %1 +FLAGS (\\Deleted)"_L1.arg(targetUid));
                 (void)cxn->execute("UID EXPUNGE %1"_L1.arg(targetUid));
             }

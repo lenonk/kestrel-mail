@@ -1213,8 +1213,8 @@ SyncEngine::execute(SyncContext &ctx) {
         // EXAMINE (read-only) the target folder — sync never writes flags, so READ-WRITE
         // access is unnecessary and would incorrectly clear \Recent flags.
         // Falls back through [Gmail]/[Google Mail] alias if the first attempt fails.
-        auto [selected, selResp] = ctx.cxn->examine(ctx.folderName);
-        if (!selected) {
+        auto selResult = ctx.cxn->examine(ctx.folderName);
+        if (!selResult) {
             QStringList aliases;
             const QString folderLower = ctx.folderName.toLower();
             if (folderLower.startsWith("[gmail]"_L1)) {
@@ -1229,8 +1229,9 @@ SyncEngine::execute(SyncContext &ctx) {
 
             bool selectedAlias = false;
             for (const QString &alt : aliases) {
-                std::tie(selectedAlias, selResp) = ctx.cxn->examine(alt);
-                if (selectedAlias) {
+                selResult = ctx.cxn->examine(alt);
+                if (selResult) {
+                    selectedAlias = true;
                     break;
                 }
             }
@@ -1242,8 +1243,8 @@ SyncEngine::execute(SyncContext &ctx) {
             }
         }
 
-        remoteMessages = parseExistsFromSelectResponse(selResp);
-        examineModSeq  = parseHighestModSeq(selResp);
+        remoteMessages = parseExistsFromSelectResponse(*selResult);
+        examineModSeq  = parseHighestModSeq(*selResult);
     }
 
     // ── Step 2: CONDSTORE — compare server modseq with our last-sync modseq ──
