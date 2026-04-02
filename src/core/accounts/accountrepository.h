@@ -2,8 +2,7 @@
 
 #include <QVariantList>
 
-class AccountRepository : public QObject
-{
+class AccountRepository : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
 public:

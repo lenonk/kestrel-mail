@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import Qt5Compat.GraphicalEffects
-import ".."
+import "../Common"
 
 Rectangle {
     id: messageCard

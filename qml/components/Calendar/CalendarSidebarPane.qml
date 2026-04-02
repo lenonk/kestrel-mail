@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import ".." as Components
+import "../Layout" as Components
 
 ColumnLayout {
     id: root

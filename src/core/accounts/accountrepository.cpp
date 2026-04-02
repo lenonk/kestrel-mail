@@ -13,7 +13,7 @@ using namespace Qt::Literals::StringLiterals;
 
 AccountRepository::AccountRepository(QObject *parent)
     : QObject(parent) {
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/kestrel-mail"_L1;
+    const auto base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/kestrel-mail"_L1;
     m_path = base + "/accounts.json"_L1;
     load();
 }
@@ -27,16 +27,14 @@ void
 AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
     const auto email = Kestrel::normalizeEmail(account.value("email").toString());
 
-    if (email.isEmpty()) {
-        return;
-    }
+    if (email.isEmpty()) { return; }
 
     auto updated = false;
     for (auto &m_account : m_accounts) {
         if (auto existing = m_account.toMap(); Kestrel::normalizeEmail(existing.value("email").toString()) == email) {
             for (auto it = account.constBegin(); it != account.constEnd(); ++it) {
                 // Don't overwrite existing non-null values with null/empty
-                if (it.value().isNull()) continue;
+                if (it.value().isNull()) { continue; }
                 existing.insert(it.key(), it.value());
             }
 
@@ -57,18 +55,16 @@ AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
 bool
 AccountRepository::removeAccount(const QString &email) {
     const auto normalized = Kestrel::normalizeEmail(email);
-    if (normalized.isEmpty()) {
-        return false;
-    }
+    if (normalized.isEmpty()) { return false; }
 
-    for (int i = 0; i < m_accounts.size(); ++i) {
-        const auto existing = m_accounts[i].toMap();
-        if (Kestrel::normalizeEmail(existing.value("email").toString()) == normalized) {
-            m_accounts.removeAt(i);
-            save();
-            emit accountsChanged();
-            return true;
-        }
+    const auto removed = m_accounts.removeIf([&](const QVariant &v) {
+        return Kestrel::normalizeEmail(v.toMap().value("email"_L1).toString()) == normalized;
+    });
+
+    if (removed > 0) {
+        save();
+        emit accountsChanged();
+        return true;
     }
 
     return false;
@@ -103,9 +99,7 @@ AccountRepository::load() {
         m_accounts.push_back(account);
     }
 
-    if (migrated) {
-        save();
-    }
+    if (migrated) { save(); }
 }
 
 void

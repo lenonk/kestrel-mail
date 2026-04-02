@@ -10,17 +10,12 @@
 using namespace Qt::Literals::StringLiterals;
 
 AccountSetupController::AccountSetupController(ProviderProfileService *profiles, OAuthService *oauth, AccountRepository *accounts, QObject *parent)
-    : QObject(parent)
-    , m_profiles(profiles)
-    , m_oauth(oauth)
-    , m_accounts(accounts)
-{
+    : QObject(parent) , m_profiles(profiles) , m_oauth(oauth) , m_accounts(accounts) {
     if (m_oauth) {
-        connect(m_oauth, &OAuthService::authorizationCompleted, this, [this](bool ok, const QString &message) {
+        connect(m_oauth, &OAuthService::authorizationCompleted, this, [this](const bool ok, const QString &message) {
             Q_UNUSED(ok)
             m_statusMessage = message;
-            const bool ready = m_oauth->hasStoredRefreshToken(m_email);
-            if (m_oauthReady != ready) {
+            if (const bool ready = m_oauth->hasStoredRefreshToken(m_email); m_oauthReady != ready) {
                 m_oauthReady = ready;
                 emit oauthReadyChanged();
             }
@@ -31,17 +26,17 @@ AccountSetupController::AccountSetupController(ProviderProfileService *profiles,
 
 QString AccountSetupController::email() const { return m_email; }
 
-void AccountSetupController::setEmail(const QString &value)
-{
-    if (m_email == value) return;
+void AccountSetupController::setEmail(const QString &value) {
+    if (m_email == value) { return; }
+
     m_email = value;
     if (m_oauth) {
-        const bool ready = m_oauth->hasStoredRefreshToken(m_email);
-        if (m_oauthReady != ready) {
+        if (const auto ready = m_oauth->hasStoredRefreshToken(m_email); m_oauthReady != ready) {
             m_oauthReady = ready;
             emit oauthReadyChanged();
         }
     }
+
     emit emailChanged();
 }
 
@@ -50,25 +45,23 @@ QString AccountSetupController::oauthUrl() const { return m_oauthUrl; }
 QString AccountSetupController::statusMessage() const { return m_statusMessage; }
 bool AccountSetupController::oauthReady() const { return m_oauthReady; }
 
-void AccountSetupController::discoverProvider()
-{
-    if (!m_profiles) return;
+void AccountSetupController::discoverProvider() {
+    if (!m_profiles) { return; }
+
     m_selectedProvider = m_profiles->discoverForEmail(m_email);
-    const bool ready = m_oauth ? m_oauth->hasStoredRefreshToken(m_email) : false;
-    if (m_oauthReady != ready) {
+    if (const auto ready = m_oauth ? m_oauth->hasStoredRefreshToken(m_email) : false; m_oauthReady != ready) {
         m_oauthReady = ready;
         emit oauthReadyChanged();
     }
+
     m_statusMessage = "Detected provider: %1"_L1.arg(m_selectedProvider.value("displayName").toString());
+
     emit selectedProviderChanged();
     emit statusMessageChanged();
 }
 
-void AccountSetupController::beginOAuth()
-{
-    if (!m_oauth) {
-        return;
-    }
+void AccountSetupController::beginOAuth() {
+    if (!m_oauth) { return; }
 
     m_oauthUrl = m_oauth->startAuthorization(m_selectedProvider, m_email);
     m_statusMessage = m_oauth->lastStatus();
@@ -77,17 +70,16 @@ void AccountSetupController::beginOAuth()
     emit statusMessageChanged();
 }
 
-void AccountSetupController::completeOAuth(const QString &callbackOrCode)
-{
-    if (!m_oauth) return;
+void AccountSetupController::completeOAuth(const QString &callbackOrCode) {
+    if (!m_oauth) { return; }
+
     m_oauth->completeAuthorization(callbackOrCode);
 }
 
-bool AccountSetupController::saveCurrentAccount(const QString &accountName, const QString &encryption)
-{
-    if (!m_accounts) return false;
+bool AccountSetupController::saveCurrentAccount(const QString &accountName, const QString &encryption) {
+    if (!m_accounts) { return false; }
 
-    const bool requiresOAuth = m_selectedProvider.value("supportsOAuth2").toBool();
+    const auto requiresOAuth = m_selectedProvider.value("supportsOAuth2").toBool();
     if (requiresOAuth && (!m_oauth || !m_oauth->hasStoredRefreshToken(m_email))) {
         m_statusMessage = "Finish sign-in first (OAuth token not found yet)."_L1;
         emit statusMessageChanged();
@@ -103,13 +95,14 @@ bool AccountSetupController::saveCurrentAccount(const QString &accountName, cons
     account.insert("smtpHost", m_selectedProvider.value("smtpHost"));
     account.insert("smtpPort", m_selectedProvider.value("smtpPort"));
     account.insert("accountName", accountName.trimmed().isEmpty() ? m_email.trimmed() : accountName.trimmed());
+
     if (m_oauth) {
-        const QVariantMap profile = m_oauth->profileForEmail(m_email);
-        const QString ownerName = profile.value("displayName").toString().trimmed();
-        if (!ownerName.isEmpty()) {
+        const auto profile = m_oauth->profileForEmail(m_email);
+        if (const auto ownerName = profile.value("displayName").toString().trimmed(); !ownerName.isEmpty()) {
             account.insert("displayName", ownerName);
         }
     }
+
     account.insert("encryption", encryption);
     account.insert("authType", m_selectedProvider.value("supportsOAuth2").toBool() ? "oauth2" : "password");
     account.insert("oauthTokenUrl", m_selectedProvider.value("oauthTokenUrl"));
@@ -119,31 +112,33 @@ bool AccountSetupController::saveCurrentAccount(const QString &accountName, cons
     m_accounts->addOrUpdateAccount(account);
     m_statusMessage = "Account saved to local repository."_L1;
     emit statusMessageChanged();
+
     return true;
 }
 
-bool AccountSetupController::hasTokenForEmail(const QString &email) const
-{
-    if (!m_oauth) return false;
+bool AccountSetupController::hasTokenForEmail(const QString &email) const {
+    if (!m_oauth) { return false; }
+
     return m_oauth->hasStoredRefreshToken(email);
 }
 
-bool AccountSetupController::removeAccount(const QString &email)
-{
-    if (!m_accounts) return false;
-    const QString normalized = Kestrel::normalizeEmail(email);
-    const bool removed = m_accounts->removeAccount(normalized);
+bool AccountSetupController::removeAccount(const QString &email) {
+    if (!m_accounts) { return false; }
+
+    const auto normalized = Kestrel::normalizeEmail(email);
+    const auto removed = m_accounts->removeAccount(normalized);
     if (removed && m_oauth) {
         m_oauth->removeStoredRefreshToken(normalized);
     }
-    const bool ready = m_oauth ? m_oauth->hasStoredRefreshToken(m_email) : false;
-    if (m_oauthReady != ready) {
+
+    if (const auto ready = m_oauth ? m_oauth->hasStoredRefreshToken(m_email) : false; m_oauthReady != ready) {
         m_oauthReady = ready;
         emit oauthReadyChanged();
     }
-    m_statusMessage = removed
-            ? "Account removed."_L1
-            : "Account not found."_L1;
+
+    m_statusMessage = removed ? "Account removed."_L1 : "Account not found."_L1;
+
     emit statusMessageChanged();
+
     return removed;
 }

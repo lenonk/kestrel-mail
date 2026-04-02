@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import QtWebEngine
 import QtQuick.Pdf
 import org.kde.kirigami as Kirigami
-import ".."
+import "../Common"
 
 ArrowPopup {
     id: root

@@ -8,19 +8,16 @@
 using namespace Qt::Literals::StringLiterals;
 
 ProviderProfileService::ProviderProfileService(QObject *parent)
-    : QObject(parent)
-{
+    : QObject(parent) {
     loadProfiles();
 }
 
-QVariantList ProviderProfileService::providers() const
-{
+QVariantList ProviderProfileService::providers() const {
     return m_providers;
 }
 
-QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const
-{
-    const QString domain = email.section('@', 1, 1).trimmed().toLower();
+QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const {
+    const auto domain = email.section('@', 1, 1).trimmed().toLower();
 
 
     for (const QVariant &entry : m_providers) {
@@ -52,20 +49,20 @@ QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const
     generic.insert("smtpHost", "smtp." + domain);
     generic.insert("smtpPort", 587);
     generic.insert("supportsOAuth2", false);
+
     return generic;
 }
 
-void ProviderProfileService::loadProfiles()
-{
+void ProviderProfileService::loadProfiles() {
     QFile f(":/data/providers.json"_L1);
+
     if (!f.open(QIODevice::ReadOnly)) {
         qWarning() << "ProviderProfileService::loadProfiles: failed to open providers.json";
         return;
     }
 
     const auto doc = QJsonDocument::fromJson(f.readAll());
-    const auto arr = doc.array();
-    for (const QJsonValue &v : arr) {
+    for (const auto arr = doc.array(); const auto &v : arr) {
         m_providers << v.toObject().toVariantMap();
     }
 }

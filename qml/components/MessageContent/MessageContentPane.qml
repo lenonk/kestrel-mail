@@ -3,7 +3,8 @@ import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import QtWebEngine
 import org.kde.kirigami as Kirigami
-import ".."
+import "../Common"
+import "../Layout"
 import "../Attachments"
 
 Rectangle {

@@ -5,7 +5,8 @@ import QtQuick.Window
 import QtQuick.Dialogs
 import QtWebEngine
 import org.kde.kirigami as Kirigami
-import ".."
+import "../Common"
+import "../Layout"
 import "../Attachments"
 
 Window {

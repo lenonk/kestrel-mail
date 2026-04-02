@@ -6,7 +6,10 @@ import Qt5Compat.GraphicalEffects
 import QtCore
 import org.kde.kirigami as Kirigami
 
-import "components" as Components
+import "components/AccountWizard" as AccountWizard
+import "components/Common" as Common
+import "components/Layout" as Layout
+import "components/Search" as Search
 import "components/MessageList" as MessageList
 import "components/MessageContent" as MessageContent
 import "components/Compose" as Compose
@@ -457,7 +460,7 @@ Kirigami.ApplicationWindow {
 
     function tagColorForName(name, usedColors) {
         const lower = (name || "").toString().toLowerCase()
-        if (lower === "important") return Components.KestrelColors.importantYellow
+        if (lower === "important") return Common.KestrelColors.importantYellow
 
         const used = usedColors || []
         const minDistSq = 9500
@@ -822,7 +825,7 @@ Kirigami.ApplicationWindow {
                                                : i18n("Account")
     readonly property string primaryAccountIcon: "qrc:/qml/gmail_account_icon.svg"
 
-    Components.AccountWizardDialog {
+    AccountWizard.AccountWizardDialog {
         id: accountWizard
         accountSetupObj: root.accountSetupObj
         accountRepositoryObj: root.accountRepositoryObj
@@ -1899,7 +1902,7 @@ Kirigami.ApplicationWindow {
             Item {
                 anchors.fill: parent
 
-                Components.TitleBarIconButton {
+                Layout.TitleBarIconButton {
                     id: menuButton
                     anchors.left: parent.left
                     anchors.leftMargin: Kirigami.Units.smallSpacing
@@ -1921,7 +1924,7 @@ Kirigami.ApplicationWindow {
                     font.pointSize: 14 // 18
                 }
 
-                Components.SearchBar {
+                Search.SearchBar {
                     id: searchBar
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.verticalCenter: parent.verticalCenter
@@ -1947,7 +1950,7 @@ Kirigami.ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 2
 
-                    Components.TitleBarIconButton {
+                    Layout.TitleBarIconButton {
                         id: minBtn
                         buttonWidth: root.titleButtonWidth
                         buttonHeight: root.titleButtonHeight
@@ -1957,7 +1960,7 @@ Kirigami.ApplicationWindow {
                         onClicked: root.showMinimized()
                     }
 
-                    Components.TitleBarIconButton {
+                    Layout.TitleBarIconButton {
                         id: maxBtn
                         buttonWidth: root.titleButtonWidth
                         buttonHeight: root.titleButtonHeight
@@ -1967,7 +1970,7 @@ Kirigami.ApplicationWindow {
                         onClicked: root.visibility === Window.Maximized ? root.showNormal() : root.showMaximized()
                     }
 
-                    Components.TitleBarIconButton {
+                    Layout.TitleBarIconButton {
                         id: closeBtn
                         buttonWidth: root.titleButtonWidth
                         buttonHeight: root.titleButtonHeight
@@ -1979,7 +1982,7 @@ Kirigami.ApplicationWindow {
                 }
             }
 
-            Components.PopupMenu {
+            Common.PopupMenu {
                 id: appMenu
                 parent: menuButton
                 QQC2.MenuItem { text: i18n("Add Account..."); onTriggered: accountWizard.open() }
@@ -2013,7 +2016,7 @@ Kirigami.ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Kirigami.Units.smallSpacing
 
-                    Components.MailActionButton {
+                    Layout.MailActionButton {
                         iconName: "list-add"
                         text: i18n("New")
                         alwaysHighlighted: true
@@ -2033,7 +2036,7 @@ Kirigami.ApplicationWindow {
                                 root.openComposeDialog()
                         }
                     }
-                    Components.MailActionButton {
+                    Layout.MailActionButton {
                         iconName: "view-refresh"
                         text: i18n("Refresh")
                         spinning: root.refreshInProgress
@@ -2051,7 +2054,7 @@ Kirigami.ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Kirigami.Units.largeSpacing
 
-                    Components.MailActionButton {
+                    Layout.MailActionButton {
                         iconName: "mail-reply-sender"
                         text: i18n("Reply")
                         menuItems: [
@@ -2063,7 +2066,7 @@ Kirigami.ApplicationWindow {
                             root.openReplyCompose(d, actionText === i18n("Reply to all"), root.contentPaneDarkModeEnabled)
                         }
                     }
-                    Components.MailActionButton {
+                    Layout.MailActionButton {
                         iconName: "mail-reply-all"
                         text: i18n("Reply All")
                         onTriggered: {
@@ -2071,7 +2074,7 @@ Kirigami.ApplicationWindow {
                             root.openReplyCompose(d, true, root.contentPaneDarkModeEnabled)
                         }
                     }
-                    Components.MailActionButton {
+                    Layout.MailActionButton {
                         iconName: "mail-forward"
                         text: i18n("Forward")
                         onTriggered: {
@@ -2084,9 +2087,9 @@ Kirigami.ApplicationWindow {
                             root.forwardMessageFromData(d, root._forwardDateText(d), a)
                         }
                     }
-                    Components.MailActionButton { iconName: "mail-mark-important"; text: i18n("Mark"); menuItems: [{ text: i18n("Read"), icon: "mail-mark-read" }, { text: i18n("Unread"), icon: "mail-mark-unread" }] }
-                    Components.MailActionButton { iconName: "archive-insert"; text: i18n("Archive") }
-                    Components.MailActionButton { iconName: "edit-delete"; text: i18n("Delete"); onTriggered: root.deleteSelectedMessages() }
+                    Layout.MailActionButton { iconName: "mail-mark-important"; text: i18n("Mark"); menuItems: [{ text: i18n("Read"), icon: "mail-mark-read" }, { text: i18n("Unread"), icon: "mail-mark-unread" }] }
+                    Layout.MailActionButton { iconName: "archive-insert"; text: i18n("Archive") }
+                    Layout.MailActionButton { iconName: "edit-delete"; text: i18n("Delete"); onTriggered: root.deleteSelectedMessages() }
                 }
             }
         }
@@ -2135,7 +2138,7 @@ Kirigami.ApplicationWindow {
                     visible: root.folderPaneVisible
                     spacing: 0
 
-                    Components.PaneHeaderBar {
+                    Layout.PaneHeaderBar {
                         title: root.activeWorkspace === "calendar" ? i18n("Calendar") : i18n("Mail")
                         titleBold: true
                         titlePointSizeDelta: 1
@@ -2152,7 +2155,7 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Components.FolderSectionButton {
+                    Layout.FolderSectionButton {
                         id: favoritesSectionBtn
                         visible: root.activeWorkspace === "mail"
                         expanded: root.favoritesExpanded
@@ -2168,7 +2171,7 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.favoritesExpanded) ? root.visibleFavoriteItems() : []
-                        delegate: Components.FolderItemDelegate {
+                        delegate: Layout.FolderItemDelegate {
                             readonly property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
@@ -2184,7 +2187,7 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Components.FolderSectionButton {
+                    Layout.FolderSectionButton {
                         visible: root.activeWorkspace === "mail"
                         Layout.topMargin: 6
                         expanded: root.tagsExpanded
@@ -2199,7 +2202,7 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.tagsExpanded) ? root.tagFolderItems() : []
-                        delegate: Components.FolderItemDelegate {
+                        delegate: Layout.FolderItemDelegate {
                             readonly property string rawFolderName: (modelData.rawName || modelData.name || "")
                             readonly property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
                             rowHeight: root.folderRowHeight
@@ -2217,7 +2220,7 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Components.FolderSectionButton {
+                    Layout.FolderSectionButton {
                         visible: root.activeWorkspace === "mail"
                         Layout.topMargin: 6
                         expanded: root.accountExpanded
@@ -2247,7 +2250,7 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.accountExpanded) ? root.accountFolderItems() : []
-                        delegate: Components.FolderItemDelegate {
+                        delegate: Layout.FolderItemDelegate {
                             readonly property string rawFolderName: (modelData.rawName || modelData.name || "")
                             readonly property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
                             rowHeight: root.folderRowHeight
@@ -2265,7 +2268,7 @@ Kirigami.ApplicationWindow {
                     }
 
                     // "More" is a collapsible row nested under the account (indentLevel 1).
-                    Components.FolderItemDelegate {
+                    Layout.FolderItemDelegate {
                         visible: root.activeWorkspace === "mail" && root.accountExpanded
                         rowHeight: root.folderRowHeight
                         iconSize: root.folderListIconSize
@@ -2280,7 +2283,7 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.accountExpanded && root.moreExpanded) ? root.moreAccountFolderItems() : []
-                        delegate: Components.FolderItemDelegate {
+                        delegate: Layout.FolderItemDelegate {
                             readonly property string rawFolderName: (modelData.rawName || modelData.name || "")
                             readonly property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
                             rowHeight: root.folderRowHeight
@@ -2302,7 +2305,7 @@ Kirigami.ApplicationWindow {
                         }
                     }
 
-                    Components.FolderSectionButton {
+                    Layout.FolderSectionButton {
                         id: localFoldersSectionBtn
                         visible: root.activeWorkspace === "mail"
                         Layout.topMargin: 6
@@ -2319,7 +2322,7 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.localFoldersExpanded) ? root.allLocalFolderItems() : []
-                        delegate: Components.FolderItemDelegate {
+                        delegate: Layout.FolderItemDelegate {
                             readonly property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
@@ -2347,11 +2350,11 @@ Kirigami.ApplicationWindow {
 
                     Item { Layout.fillHeight: true }
 
-                    Components.PaneDivider {
+                    Common.PaneDivider {
                         Layout.leftMargin: -Kirigami.Units.largeSpacing
                         Layout.rightMargin: -Kirigami.Units.largeSpacing
                     }
-                    Components.PaneIconStrip {
+                    Layout.PaneIconStrip {
                         Layout.fillWidth: true
                         vertical: false
                         showLabel: false
@@ -2381,7 +2384,7 @@ Kirigami.ApplicationWindow {
                     visible: !root.folderPaneVisible
                     spacing: 0
 
-                    Components.IconOnlyFlatButton {
+                    Layout.IconOnlyFlatButton {
                         implicitWidth: parent.width
                         implicitHeight: 44
                         iconName: "go-next-symbolic"
@@ -2403,7 +2406,7 @@ Kirigami.ApplicationWindow {
                             "internet-mail",
                             "folder"
                         ]
-                        delegate: Components.IconOnlyFlatButton {
+                        delegate: Layout.IconOnlyFlatButton {
                             implicitWidth: parent.width
                             implicitHeight: 44
                             iconName: modelData
@@ -2420,16 +2423,16 @@ Kirigami.ApplicationWindow {
 
                     Item { Layout.fillHeight: true }
 
-                    Components.PaneDivider {}
+                    Common.PaneDivider {}
 
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 0
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: root.activeWorkspace === "mail"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "mail" }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: root.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "calendar" }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "view-task"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "overflow-menu-horizontal"; label: ""; showLabel: false; hoverFeedback: true; toolTipText: i18n("More"); useHorizontalDots: true; underlineOnLeft: true; sideIndicatorInset: 4 }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: root.activeWorkspace === "mail"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "mail" }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: root.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "calendar" }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "view-task"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "overflow-menu-horizontal"; label: ""; showLabel: false; hoverFeedback: true; toolTipText: i18n("More"); useHorizontalDots: true; underlineOnLeft: true; sideIndicatorInset: 4 }
                     }
                 }
             }
@@ -2512,7 +2515,7 @@ Kirigami.ApplicationWindow {
                     spacing: root.sectionSpacing
                     visible: root.rightPaneVisible
 
-                    Components.PaneHeaderBar {
+                    Layout.PaneHeaderBar {
                         title: i18n("Invites")
                         titleBold: true
                         titlePointSizeDelta: 0
@@ -2535,7 +2538,7 @@ Kirigami.ApplicationWindow {
 
                     Item { Layout.preferredHeight: 4 }
 
-                    Components.PaneDivider {
+                    Common.PaneDivider {
                         Layout.leftMargin: -root.panelMargin
                         Layout.rightMargin: -root.panelMargin
                     }
@@ -2543,7 +2546,7 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         id: invitesRepeater
                         model: [i18n("Saturday, 4:30 PM"), i18n("Sunday, 3:30 PM")]
-                        delegate: Components.InviteCard {
+                        delegate: Calendar.InviteCard {
                             title: i18n("D&D")
                             whenText: modelData
                             fromText: i18n("from max@example.com")
@@ -2555,7 +2558,7 @@ Kirigami.ApplicationWindow {
 
                     Item { Layout.fillHeight: true }
 
-                    Components.PaneDivider {
+                    Common.PaneDivider {
                         Layout.leftMargin: -root.panelMargin
                         Layout.rightMargin: -root.panelMargin
                     }
@@ -2563,10 +2566,10 @@ Kirigami.ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 0
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: i18n("People"); toolTipText: i18n("People"); showLabel: false; hoverFeedback: true }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: i18n("Tasks"); toolTipText: i18n("Tasks"); showLabel: false; hoverFeedback: true }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: i18n("Mail"); toolTipText: i18n("Mail"); showLabel: false; active: root.activeWorkspace === "mail"; hoverFeedback: true; onClicked: root.activeWorkspace = "mail" }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: i18n("Calendar"); toolTipText: i18n("Calendar"); showLabel: false; active: root.activeWorkspace === "calendar"; hoverFeedback: true; onClicked: root.activeWorkspace = "calendar" }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: i18n("People"); toolTipText: i18n("People"); showLabel: false; hoverFeedback: true }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: i18n("Tasks"); toolTipText: i18n("Tasks"); showLabel: false; hoverFeedback: true }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: i18n("Mail"); toolTipText: i18n("Mail"); showLabel: false; active: root.activeWorkspace === "mail"; hoverFeedback: true; onClicked: root.activeWorkspace = "mail" }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: i18n("Calendar"); toolTipText: i18n("Calendar"); showLabel: false; active: root.activeWorkspace === "calendar"; hoverFeedback: true; onClicked: root.activeWorkspace = "calendar" }
                     }
                 }
 
@@ -2577,7 +2580,7 @@ Kirigami.ApplicationWindow {
                     visible: !root.rightPaneVisible
                     spacing: 0
 
-                    Components.IconOnlyFlatButton {
+                    Layout.IconOnlyFlatButton {
                         implicitWidth: parent.width
                         implicitHeight: 44
                         iconName: "go-previous-symbolic"
@@ -2593,7 +2596,7 @@ Kirigami.ApplicationWindow {
 
                     Repeater {
                         model: ["view-calendar-day", "mail-message", "user-identity", "task-complete"]
-                        delegate: Components.IconOnlyFlatButton {
+                        delegate: Layout.IconOnlyFlatButton {
                             implicitWidth: parent.width
                             implicitHeight: 44
                             iconName: modelData
@@ -2603,15 +2606,15 @@ Kirigami.ApplicationWindow {
 
                     Item { Layout.fillHeight: true }
 
-                    Components.PaneDivider {}
+                    Common.PaneDivider {}
 
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 0
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: root.activeWorkspace === "mail"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "mail" }
-                        Components.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: root.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "calendar" }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: root.activeWorkspace === "mail"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "mail" }
+                        Layout.PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: root.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: root.activeWorkspace = "calendar" }
                     }
                 }
             }

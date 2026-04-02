@@ -115,48 +115,13 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
     PREFIX "/"
     FILES
         qml/Main.qml
-        qml/components/qmldir
-        qml/components/KestrelColors.qml
-        qml/components/AccountWizardDialog.qml
-        qml/components/AccountWizardStep1.qml
-        qml/components/AccountWizardStep2.qml
-        qml/components/AccountWizardStep3.qml
-        qml/components/OAuthBrowserWindow.qml
-        qml/components/DarkLightToggleButton.qml
-        qml/components/PaneIconButton.qml
-        qml/components/TextToolTip.qml
-        qml/components/MailActionButton.qml
-        qml/components/FolderItemDelegate.qml
-        qml/components/FolderSectionButton.qml
-        qml/components/HeaderUtilityButton.qml
-        qml/components/IconOnlyFlatButton.qml
-        qml/components/PaneDivider.qml
-        qml/components/PaneHeaderBar.qml
-        qml/components/TitleBarIconButton.qml
-        qml/components/PopupMenu.qml
-        qml/components/ArrowPopup.qml
-        qml/components/AvatarBadge.qml
-        qml/components/ContactHoverPopup.qml
-        qml/components/InviteCard.qml
-        qml/components/PaneIconStrip.qml
-        qml/components/CollapsedPaneRail.qml
-        qml/components/SearchBar.qml
-        qml/components/SearchBarFolderScope.qml
-        qml/components/RecentSearchesDropdown.qml
-        qml/components/SearchFilterPopup.qml
-        qml/components/StyledButton.qml
-        qml/components/MessageList/MessageListPane.qml
-        qml/components/MessageList/MessageCard.qml
-        qml/components/MessageList/MessageCardAvatar.qml
-        qml/components/MessageList/MessageCardIndicators.qml
-        qml/components/MessageList/MessageCardStatusColumn.qml
-        qml/components/MessageList/MessageCategoryButton.qml
-        qml/components/MessageList/MessageListHeader.qml
-        qml/components/MessageContent/MessageContentPane.qml
-        qml/components/MessageContent/MessageInfoBars.qml
-        qml/components/MessageContent/MessageHtmlView.qml
-        qml/components/MessageContent/MessageThreadView.qml
-        qml/components/Compose/Compose.qml
+        qml/components/AccountWizard/AccountWizardDialog.qml
+        qml/components/AccountWizard/AccountWizardStep1.qml
+        qml/components/AccountWizard/AccountWizardStep2.qml
+        qml/components/AccountWizard/AccountWizardStep3.qml
+        qml/components/AccountWizard/OAuthBrowserWindow.qml
+        qml/components/Attachments/AttachmentCard.qml
+        qml/components/Attachments/AttachmentHoverPopup.qml
         qml/components/Calendar/CalendarPane.qml
         qml/components/Calendar/CalendarTopBar.qml
         qml/components/Calendar/CalendarWeekHeader.qml
@@ -165,8 +130,43 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/Calendar/CalendarEventCard.qml
         qml/components/Calendar/CalendarAllDayRow.qml
         qml/components/Calendar/CalendarSidebarPane.qml
-        qml/components/Attachments/AttachmentCard.qml
-        qml/components/Attachments/AttachmentHoverPopup.qml
+        qml/components/Calendar/InviteCard.qml
+        qml/components/Common/qmldir
+        qml/components/Common/KestrelColors.qml
+        qml/components/Common/ArrowPopup.qml
+        qml/components/Common/AvatarBadge.qml
+        qml/components/Common/PaneDivider.qml
+        qml/components/Common/PopupMenu.qml
+        qml/components/Common/StyledButton.qml
+        qml/components/Common/TextToolTip.qml
+        qml/components/Compose/Compose.qml
+        qml/components/Layout/CollapsedPaneRail.qml
+        qml/components/Layout/DarkLightToggleButton.qml
+        qml/components/Layout/FolderItemDelegate.qml
+        qml/components/Layout/FolderSectionButton.qml
+        qml/components/Layout/HeaderUtilityButton.qml
+        qml/components/Layout/IconOnlyFlatButton.qml
+        qml/components/Layout/MailActionButton.qml
+        qml/components/Layout/PaneHeaderBar.qml
+        qml/components/Layout/PaneIconButton.qml
+        qml/components/Layout/PaneIconStrip.qml
+        qml/components/Layout/TitleBarIconButton.qml
+        qml/components/MessageContent/ContactHoverPopup.qml
+        qml/components/MessageContent/MessageContentPane.qml
+        qml/components/MessageContent/MessageInfoBars.qml
+        qml/components/MessageContent/MessageHtmlView.qml
+        qml/components/MessageContent/MessageThreadView.qml
+        qml/components/MessageList/MessageListPane.qml
+        qml/components/MessageList/MessageCard.qml
+        qml/components/MessageList/MessageCardAvatar.qml
+        qml/components/MessageList/MessageCardIndicators.qml
+        qml/components/MessageList/MessageCardStatusColumn.qml
+        qml/components/MessageList/MessageCategoryButton.qml
+        qml/components/MessageList/MessageListHeader.qml
+        qml/components/Search/SearchBar.qml
+        qml/components/Search/SearchBarFolderScope.qml
+        qml/components/Search/RecentSearchesDropdown.qml
+        qml/components/Search/SearchFilterPopup.qml
         qml/important.svg
         qml/flag.svg
         qml/trash.svg
