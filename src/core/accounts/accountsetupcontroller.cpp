@@ -3,8 +3,11 @@
 #include "accountrepository.h"
 #include "providerprofileservice.h"
 #include "../auth/oauthservice.h"
+#include "../utils.h"
 
 #include <QDebug>
+
+using namespace Qt::Literals::StringLiterals;
 
 AccountSetupController::AccountSetupController(ProviderProfileService *profiles, OAuthService *oauth, AccountRepository *accounts, QObject *parent)
     : QObject(parent)
@@ -56,7 +59,7 @@ void AccountSetupController::discoverProvider()
         m_oauthReady = ready;
         emit oauthReadyChanged();
     }
-    m_statusMessage = QStringLiteral("Detected provider: %1").arg(m_selectedProvider.value("displayName").toString());
+    m_statusMessage = "Detected provider: %1"_L1.arg(m_selectedProvider.value("displayName").toString());
     emit selectedProviderChanged();
     emit statusMessageChanged();
 }
@@ -94,13 +97,13 @@ bool AccountSetupController::saveCurrentAccount(const QString &accountName, cons
 
     const bool requiresOAuth = m_selectedProvider.value("supportsOAuth2").toBool();
     if (requiresOAuth && (!m_oauth || !m_oauth->hasStoredRefreshToken(m_email))) {
-        m_statusMessage = QStringLiteral("Finish sign-in first (OAuth token not found yet).");
+        m_statusMessage = "Finish sign-in first (OAuth token not found yet)."_L1;
         emit statusMessageChanged();
         return false;
     }
 
     QVariantMap account;
-    account.insert("email", m_email.trimmed().toLower());
+    account.insert("email", Kestrel::normalizeEmail(m_email));
     account.insert("providerId", m_selectedProvider.value("id"));
     account.insert("providerName", m_selectedProvider.value("displayName"));
     account.insert("imapHost", m_selectedProvider.value("imapHost"));
@@ -122,7 +125,7 @@ bool AccountSetupController::saveCurrentAccount(const QString &accountName, cons
     account.insert("oauthClientSecret", m_selectedProvider.value("oauthClientSecret"));
 
     m_accounts->addOrUpdateAccount(account);
-    m_statusMessage = QStringLiteral("Account saved to local repository.");
+    m_statusMessage = "Account saved to local repository."_L1;
     emit statusMessageChanged();
     return true;
 }
@@ -136,7 +139,7 @@ bool AccountSetupController::hasTokenForEmail(const QString &email) const
 bool AccountSetupController::removeAccount(const QString &email)
 {
     if (!m_accounts) return false;
-    const QString normalized = email.trimmed().toLower();
+    const QString normalized = Kestrel::normalizeEmail(email);
     const bool removed = m_accounts->removeAccount(normalized);
     if (removed && m_oauth) {
         m_oauth->removeStoredRefreshToken(normalized);
@@ -147,8 +150,8 @@ bool AccountSetupController::removeAccount(const QString &email)
         emit oauthReadyChanged();
     }
     m_statusMessage = removed
-            ? QStringLiteral("Account removed.")
-            : QStringLiteral("Account not found.");
+            ? "Account removed."_L1
+            : "Account not found."_L1;
     emit statusMessageChanged();
     return removed;
 }

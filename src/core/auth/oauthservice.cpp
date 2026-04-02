@@ -1,6 +1,7 @@
 #include "oauthservice.h"
 
 #include "tokenvault.h"
+#include "../utils.h"
 
 #include <QByteArray>
 #include <QCryptographicHash>
@@ -18,6 +19,12 @@
 #include <QUrlQuery>
 #include <QStringList>
 
+using namespace Qt::Literals::StringLiterals;
+
+namespace {
+constexpr quint16 kOAuthCallbackPort = 53682;
+}
+
 OAuthService::OAuthService(TokenVault *vault, QObject *parent)
     : QObject(parent)
     , m_vault(vault)
@@ -31,7 +38,7 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
 {
     const QString providerId = provider.value("id").toString();
     if (!provider.value("supportsOAuth2").toBool()) {
-        m_lastStatus = QStringLiteral("This mail provider needs manual sign-in setup in this build.");
+        m_lastStatus = "This mail provider needs manual sign-in setup in this build."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return {};
@@ -44,7 +51,7 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
     m_pendingClientSecret = provider.value("oauthClientSecret").toString();
 
     if (m_pendingClientId.trimmed().isEmpty()) {
-        m_lastStatus = QStringLiteral("Sign-in is not configured yet for this provider in this build.");
+        m_lastStatus = "Sign-in is not configured yet for this provider in this build."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return {};
@@ -63,8 +70,7 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
     }
 
     m_callbackServer = new QTcpServer(this);
-    const quint16 callbackPort = 53682;
-    const bool listening = m_callbackServer->listen(QHostAddress(QStringLiteral("127.0.0.1")), callbackPort);
+    const bool listening = m_callbackServer->listen(QHostAddress("127.0.0.1"_L1), kOAuthCallbackPort);
 
     QObject::connect(m_callbackServer, &QTcpServer::newConnection, this, [this]() {
         while (m_callbackServer->hasPendingConnections()) {
@@ -80,16 +86,16 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
                     }
                 }
 
-                const QString html = QStringLiteral(
+                const QString html =
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
                     "<!doctype html><html><head><meta charset='utf-8'><title>Kestrel Mail</title></head>"
-                    "<body><h3>Sign-in complete</h3><p>You can close this tab and return to Kestrel Mail.</p></body></html>");
+                    "<body><h3>Sign-in complete</h3><p>You can close this tab and return to Kestrel Mail.</p></body></html>"_L1;
                 socket->write(html.toUtf8());
                 socket->flush();
                 socket->disconnectFromHost();
 
                 if (!path.isEmpty()) {
-                    const QString callbackUrl = QStringLiteral("http://127.0.0.1:53682") + path;
+                    const QString callbackUrl = QStringLiteral("http://127.0.0.1:%1").arg(kOAuthCallbackPort) + path;
                     QMetaObject::invokeMethod(this, [this, callbackUrl]() {
                         completeAuthorization(callbackUrl);
                     }, Qt::QueuedConnection);
@@ -102,7 +108,7 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
     if (!listening) {
         qWarning().noquote() << "[oauth] callback listener failed"
                              << "error=" << m_callbackServer->errorString();
-        m_lastStatus = QStringLiteral("OAuth callback listener failed on 127.0.0.1:53682. Close other apps using that port.");
+        m_lastStatus = QStringLiteral("OAuth callback listener failed on 127.0.0.1:%1. Close other apps using that port.").arg(kOAuthCallbackPort);
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return {};
@@ -110,23 +116,23 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
 
     QUrl url(authEndpoint);
     QUrlQuery q;
-    q.addQueryItem(QStringLiteral("client_id"), m_pendingClientId);
-    q.addQueryItem(QStringLiteral("response_type"), QStringLiteral("code"));
-    q.addQueryItem(QStringLiteral("redirect_uri"), QStringLiteral("http://127.0.0.1:53682/callback"));
-    q.addQueryItem(QStringLiteral("scope"), scope);
-    q.addQueryItem(QStringLiteral("state"), m_pendingState);
-    q.addQueryItem(QStringLiteral("access_type"), QStringLiteral("offline"));
-    q.addQueryItem(QStringLiteral("prompt"), QStringLiteral("consent"));
-    q.addQueryItem(QStringLiteral("include_granted_scopes"), QStringLiteral("true"));
-    q.addQueryItem(QStringLiteral("code_challenge"), challenge);
-    q.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("S256"));
+    q.addQueryItem("client_id"_L1, m_pendingClientId);
+    q.addQueryItem("response_type"_L1, "code"_L1);
+    q.addQueryItem("redirect_uri"_L1, QStringLiteral("http://127.0.0.1:%1/callback").arg(kOAuthCallbackPort));
+    q.addQueryItem("scope"_L1, scope);
+    q.addQueryItem("state"_L1, m_pendingState);
+    q.addQueryItem("access_type"_L1, "offline"_L1);
+    q.addQueryItem("prompt"_L1, "consent"_L1);
+    q.addQueryItem("include_granted_scopes"_L1, "true"_L1);
+    q.addQueryItem("code_challenge"_L1, challenge);
+    q.addQueryItem("code_challenge_method"_L1, "S256"_L1);
     if (!m_pendingEmail.isEmpty()) {
-        q.addQueryItem(QStringLiteral("login_hint"), m_pendingEmail);
+        q.addQueryItem("login_hint"_L1, m_pendingEmail);
     }
     url.setQuery(q);
 
     m_pendingAuthUrl = url.toString();
-    m_lastStatus = QStringLiteral("OAuth sign-in started. Complete login in browser; Kestrel will capture callback automatically.");
+    m_lastStatus = "OAuth sign-in started. Complete login in browser; Kestrel will capture callback automatically."_L1;
     emit pendingAuthUrlChanged();
     emit lastStatusChanged();
     return m_pendingAuthUrl;
@@ -138,24 +144,24 @@ bool OAuthService::completeAuthorization(const QString &callbackOrCode)
     QString state;
     const QString input = callbackOrCode.trimmed();
 
-    if (input.startsWith(QStringLiteral("http://")) || input.startsWith(QStringLiteral("https://"))) {
+    if (input.startsWith("http://"_L1) || input.startsWith("https://"_L1)) {
         const QUrl url(input);
         const QUrlQuery q(url);
-        code = q.queryItemValue(QStringLiteral("code"));
-        state = q.queryItemValue(QStringLiteral("state"));
+        code = q.queryItemValue("code"_L1);
+        state = q.queryItemValue("state"_L1);
     } else {
         code = input;
     }
 
     if (code.isEmpty()) {
-        m_lastStatus = QStringLiteral("Missing authorization code.");
+        m_lastStatus = "Missing authorization code."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return false;
     }
 
     if (!state.isEmpty() && state != m_pendingState) {
-        m_lastStatus = QStringLiteral("OAuth state mismatch.");
+        m_lastStatus = "OAuth state mismatch."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return false;
@@ -163,16 +169,16 @@ bool OAuthService::completeAuthorization(const QString &callbackOrCode)
 
     QNetworkAccessManager nam;
     QNetworkRequest req{QUrl(m_pendingTokenUrl)};
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded"_L1);
 
     QUrlQuery body;
-    body.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
-    body.addQueryItem(QStringLiteral("code"), code);
-    body.addQueryItem(QStringLiteral("redirect_uri"), QStringLiteral("http://127.0.0.1:53682/callback"));
-    body.addQueryItem(QStringLiteral("client_id"), m_pendingClientId);
-    body.addQueryItem(QStringLiteral("code_verifier"), m_pendingVerifier);
+    body.addQueryItem("grant_type"_L1, "authorization_code"_L1);
+    body.addQueryItem("code"_L1, code);
+    body.addQueryItem("redirect_uri"_L1, QStringLiteral("http://127.0.0.1:%1/callback").arg(kOAuthCallbackPort));
+    body.addQueryItem("client_id"_L1, m_pendingClientId);
+    body.addQueryItem("code_verifier"_L1, m_pendingVerifier);
     if (!m_pendingClientSecret.isEmpty()) {
-        body.addQueryItem(QStringLiteral("client_secret"), m_pendingClientSecret);
+        body.addQueryItem("client_secret"_L1, m_pendingClientSecret);
     }
 
     QNetworkReply *reply = nam.post(req, body.toString(QUrl::FullyEncoded).toUtf8());
@@ -185,33 +191,33 @@ bool OAuthService::completeAuthorization(const QString &callbackOrCode)
     reply->deleteLater();
 
     if (!ok) {
-        m_lastStatus = QStringLiteral("Token exchange failed: %1").arg(QString::fromUtf8(payload));
+        m_lastStatus = "Token exchange failed: %1"_L1.arg(QString::fromUtf8(payload));
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return false;
     }
 
     const QJsonObject obj = QJsonDocument::fromJson(payload).object();
-    const QString refreshToken = obj.value(QStringLiteral("refresh_token")).toString();
+    const QString refreshToken = obj.value("refresh_token"_L1).toString();
     if (refreshToken.isEmpty()) {
-        m_lastStatus = QStringLiteral("Token exchange succeeded but no refresh_token returned.");
+        m_lastStatus = "Token exchange succeeded but no refresh_token returned."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return false;
     }
 
     QVariantMap profile;
-    const QVariantMap claims = parseJwtPayloadClaims(obj.value(QStringLiteral("id_token")).toString());
-    const QString claimName = claims.value(QStringLiteral("name")).toString().trimmed();
-    const QString claimEmail = claims.value(QStringLiteral("email")).toString().trimmed().toLower();
+    const QVariantMap claims = parseJwtPayloadClaims(obj.value("id_token"_L1).toString());
+    const QString claimName = claims.value("name"_L1).toString().trimmed();
+    const QString claimEmail = Kestrel::normalizeEmail(claims.value("email"_L1).toString());
     if (!claimName.isEmpty()) {
-        profile.insert(QStringLiteral("displayName"), claimName);
+        profile.insert("displayName"_L1, claimName);
     }
     if (!claimEmail.isEmpty()) {
-        profile.insert(QStringLiteral("email"), claimEmail);
+        profile.insert("email"_L1, claimEmail);
     }
     if (!profile.isEmpty()) {
-        const QString key = m_pendingEmail.trimmed().toLower();
+        const QString key = Kestrel::normalizeEmail(m_pendingEmail);
         if (!key.isEmpty()) {
             m_profileByEmail.insert(key, profile);
         }
@@ -219,13 +225,13 @@ bool OAuthService::completeAuthorization(const QString &callbackOrCode)
 
     const bool stored = m_vault ? m_vault->storeRefreshToken(m_pendingEmail, refreshToken) : false;
     if (!stored) {
-        m_lastStatus = QStringLiteral("Token exchange succeeded but token vault write failed.");
+        m_lastStatus = "Token exchange succeeded but token vault write failed."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
         return false;
     }
 
-    m_lastStatus = QStringLiteral("OAuth complete. Refresh token stored.");
+    m_lastStatus = "OAuth complete. Refresh token stored."_L1;
     emit lastStatusChanged();
     emit authorizationCompleted(true, m_lastStatus);
     return true;
@@ -250,18 +256,18 @@ QString OAuthService::sha256Base64Url(const QString &value)
 bool OAuthService::hasStoredRefreshToken(const QString &email) const
 {
     if (!m_vault) return false;
-    return !m_vault->loadRefreshToken(email.trimmed().toLower()).isEmpty();
+    return !m_vault->loadRefreshToken(Kestrel::normalizeEmail(email)).isEmpty();
 }
 
 bool OAuthService::removeStoredRefreshToken(const QString &email)
 {
     if (!m_vault) return false;
-    return m_vault->removeRefreshToken(email.trimmed().toLower());
+    return m_vault->removeRefreshToken(Kestrel::normalizeEmail(email));
 }
 
 QVariantMap OAuthService::profileForEmail(const QString &email) const
 {
-    const QString key = email.trimmed().toLower();
+    const QString key = Kestrel::normalizeEmail(email);
     if (key.isEmpty()) {
         return {};
     }

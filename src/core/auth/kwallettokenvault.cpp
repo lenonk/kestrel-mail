@@ -1,5 +1,7 @@
 #include "kwallettokenvault.h"
 
+#include "../utils.h"
+
 #include <KWallet>
 #include <QEventLoop>
 
@@ -14,9 +16,9 @@ static KWallet::Wallet *openWallet()
     if (!wallet)
         return nullptr;
 
-    if (!wallet->hasFolder(QStringLiteral("kestrel-mail")))
-        wallet->createFolder(QStringLiteral("kestrel-mail"));
-    wallet->setFolder(QStringLiteral("kestrel-mail"));
+    if (!wallet->hasFolder("kestrel-mail"_L1))
+        wallet->createFolder("kestrel-mail"_L1);
+    wallet->setFolder("kestrel-mail"_L1);
     return wallet;
 }
 
@@ -25,7 +27,7 @@ bool KWalletTokenVault::storeRefreshToken(const QString &accountEmail, const QSt
     std::unique_ptr<KWallet::Wallet> wallet(openWallet());
     if (!wallet)
         return false;
-    return wallet->writePassword(accountEmail.trimmed().toLower(), refreshToken) == 0;
+    return wallet->writePassword(Kestrel::normalizeEmail(accountEmail), refreshToken) == 0;
 }
 
 QString KWalletTokenVault::loadRefreshToken(const QString &accountEmail)
@@ -34,7 +36,7 @@ QString KWalletTokenVault::loadRefreshToken(const QString &accountEmail)
     if (!wallet)
         return {};
     QString token;
-    if (wallet->readPassword(accountEmail.trimmed().toLower(), token) != 0)
+    if (wallet->readPassword(Kestrel::normalizeEmail(accountEmail), token) != 0)
         return {};
     return token;
 }
@@ -44,5 +46,5 @@ bool KWalletTokenVault::removeRefreshToken(const QString &accountEmail)
     std::unique_ptr<KWallet::Wallet> wallet(openWallet());
     if (!wallet)
         return false;
-    return wallet->removeEntry(accountEmail.trimmed().toLower()) == 0;
+    return wallet->removeEntry(Kestrel::normalizeEmail(accountEmail)) == 0;
 }

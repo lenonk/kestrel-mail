@@ -6,6 +6,7 @@
 #include "../message/messageutils.h"
 #include "../message/avatarresolver.h"
 #include "../message/bodyprocessor.h"
+#include "../../../utils.h"
 
 #include <QRegularExpression>
 #include <QDateTime>
@@ -101,7 +102,7 @@ defaultGmailFolders(const QString &accountEmail) {
 
 QString
 parseUidFromFetch(const QString &fetchResp) {
-    static const QRegularExpression uidRe(QStringLiteral("UID\\s+(\\d+)"));
+    static const QRegularExpression uidRe("UID\\s+(\\d+)"_L1);
     const auto m = uidRe.match(fetchResp);
     return m.hasMatch() ? m.captured(1) : QString();
 }
@@ -129,18 +130,18 @@ splitFetchResponses(const QString &resp) {
 QString
 categoryToFolder(const QString &c) {
     const QString k = c.trimmed().toLower();
-    if (k == "primary"_L1)    return QStringLiteral("[Gmail]/Categories/Primary");
-    if (k == "promotions"_L1) return QStringLiteral("[Gmail]/Categories/Promotions");
-    if (k == "social"_L1)     return QStringLiteral("[Gmail]/Categories/Social");
-    if (k == "updates"_L1)    return QStringLiteral("[Gmail]/Categories/Updates");
-    if (k == "forums"_L1)     return QStringLiteral("[Gmail]/Categories/Forums");
-    if (k == "purchases"_L1)  return QStringLiteral("[Gmail]/Categories/Purchases");
+    if (k == "primary"_L1)    return "[Gmail]/Categories/Primary"_L1;
+    if (k == "promotions"_L1) return "[Gmail]/Categories/Promotions"_L1;
+    if (k == "social"_L1)     return "[Gmail]/Categories/Social"_L1;
+    if (k == "updates"_L1)    return "[Gmail]/Categories/Updates"_L1;
+    if (k == "forums"_L1)     return "[Gmail]/Categories/Forums"_L1;
+    if (k == "purchases"_L1)  return "[Gmail]/Categories/Purchases"_L1;
     return {};
 }
 
 qint64
 parseHighestModSeq(const QString &resp) {
-    static const QRegularExpression re(QStringLiteral("\\[HIGHESTMODSEQ\\s+(\\d+)\\]"),
+    static const QRegularExpression re("\\[HIGHESTMODSEQ\\s+(\\d+)\\]"_L1,
                                        QRegularExpression::CaseInsensitiveOption);
     const auto m = re.match(resp);
     if (!m.hasMatch()) return 0;
@@ -151,7 +152,7 @@ parseHighestModSeq(const QString &resp) {
 
 qint64
 parseExistsFromSelectResponse(const QString &resp) {
-    static const QRegularExpression existsRe(QStringLiteral("\\*\\s+(\\d+)\\s+EXISTS"),
+    static const QRegularExpression existsRe("\\*\\s+(\\d+)\\s+EXISTS"_L1,
                                              QRegularExpression::CaseInsensitiveOption);
     const QRegularExpressionMatch m = existsRe.match(resp);
     if (!m.hasMatch())
@@ -163,7 +164,7 @@ parseExistsFromSelectResponse(const QString &resp) {
 
 qint64
 parseMessagesFromStatusResponse(const QString &resp) {
-    static const QRegularExpression messagesRe(QStringLiteral("\\bMESSAGES\\s+(\\d+)\\b"),
+    static const QRegularExpression messagesRe("\\bMESSAGES\\s+(\\d+)\\b"_L1,
                                                QRegularExpression::CaseInsensitiveOption);
     const QRegularExpressionMatch m = messagesRe.match(resp);
     if (!m.hasMatch())
@@ -207,7 +208,7 @@ buildCategoryHints(SyncContext &ctx, IngestState &state, qint64 minUid, qint64 m
     };
     const QString uidRange = QStringLiteral("%1:%2").arg(minUid).arg(maxUid);
     for (const auto &cat : kCategories) {
-        const auto hCmd = QStringLiteral("UID SEARCH UID %1 X-GM-RAW \"category:%2\"")
+        const auto hCmd = "UID SEARCH UID %1 X-GM-RAW \"category:%2\""_L1
                               .arg(uidRange).arg(cat);
         const auto hResp = ctx.cxn->execute(hCmd);
         const auto mappedFolder = categoryToFolder(cat);
@@ -250,13 +251,13 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     // Try From first, then Sender:, then Reply-To: as fallbacks.
     // Avoid Return-Path: — it is often a VERP/bounce address from an ESP, not the brand.
     const auto senderEmail = [&]() -> QString {
-        auto e = extractEmailAddress(fromHeader).trimmed().toLower();
+        auto e = Kestrel::normalizeEmail(extractEmailAddress(fromHeader));
         if (!e.isEmpty())
             return e;
-        e = extractEmailAddress(senderHeader).trimmed().toLower();
+        e = Kestrel::normalizeEmail(extractEmailAddress(senderHeader));
         if (!e.isEmpty())
             return e;
-        return extractEmailAddress(replyToHeader).trimmed().toLower();
+        return Kestrel::normalizeEmail(extractEmailAddress(replyToHeader));
     }();
 
     const auto listIdDomain = extractListIdDomain(headerSource);
@@ -274,7 +275,7 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     {
         const auto rawUnsub = extractField(headerSource, "List-Unsubscribe"_L1).trimmed();
         if (!rawUnsub.isEmpty()) {
-            static const QRegularExpression httpsRe(QStringLiteral("<(https://[^>]+)>"),
+            static const QRegularExpression httpsRe("<(https://[^>]+)>"_L1,
                                                     QRegularExpression::CaseInsensitiveOption);
 
             if (const auto m = httpsRe.match(rawUnsub); m.hasMatch())
@@ -352,7 +353,7 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
                 { ".emarsys.net",       "Emarsys"    },
             };
             static const QRegularExpression receivedFromRe(
-                QStringLiteral("\\bReceived:\\s+from\\s+(\\S+)"),
+                "\\bReceived:\\s+from\\s+(\\S+)"_L1,
                 QRegularExpression::CaseInsensitiveOption);
 
             QStringList relayHosts;
@@ -382,7 +383,7 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     const auto sentLikeFolder  = folderLower.contains("/sent"_L1) || folderLower.contains("/draft"_L1);
 
     if (sentLikeFolder) {
-        const auto recipientEmail = extractEmailAddress(toHeader).trimmed().toLower();
+        const auto recipientEmail = Kestrel::normalizeEmail(extractEmailAddress(toHeader));
         bool allowLookup = true;
 
         if (!recipientEmail.isEmpty() && ctx.avatarShouldRefresh)
@@ -559,7 +560,7 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
             for (const auto &p : attParts) {
                 QVariantMap row;
                 row.insert("partId"_L1,       p.partId);
-                row.insert("name"_L1,         p.filename.isEmpty() ? QStringLiteral("Attachment") : p.filename);
+                row.insert("name"_L1,         p.filename.isEmpty() ? "Attachment"_L1 : p.filename);
                 row.insert("mimeType"_L1,     p.type.toLower() + "/"_L1 + p.subtype.toLower());
                 row.insert("encodedBytes"_L1, p.bytes);
                 row.insert("encoding"_L1,     p.encoding);
@@ -635,7 +636,7 @@ fetchUidBatch(SyncContext &ctx,
         uidSpec = ids.join(',');
     }
 
-    const QString gmailItems = ctx.isGmail() ? QStringLiteral("X-GM-LABELS X-GM-MSGID X-GM-THRID ") : QString{};
+    const QString gmailItems = ctx.isGmail() ? "X-GM-LABELS X-GM-MSGID X-GM-THRID "_L1 : QString{};
     const QString fetchCmd = QStringLiteral(
         "UID FETCH %1 (UID FLAGS INTERNALDATE %3BODYSTRUCTURE "
         "BODY.PEEK[HEADER.FIELDS (FROM TO CC SENDER REPLY-TO RETURN-PATH SUBJECT DATE MESSAGE-ID "
@@ -682,8 +683,8 @@ fetchUidBatch(SyncContext &ctx,
                     std::ranges::sort(sortedHints);
                     QStringList quoted;
                     for (const QString &hf : sortedHints)
-                        quoted.push_back(QStringLiteral("\"%1\"").arg(hf));
-                    fetchResp += QStringLiteral("\nX-GM-LABELS (%1)\n").arg(quoted.join(' '));
+                        quoted.push_back("\"%1\""_L1.arg(hf));
+                    fetchResp += "\nX-GM-LABELS (%1)\n"_L1.arg(quoted.join(' '));
                 }
             }
         }
@@ -750,7 +751,7 @@ prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, const Inges
         for (const qint32 u : chunk) uidStrs.push_back(QString::number(u));
 
         const QString resp = ctx.cxn->execute(
-            QStringLiteral("UID FETCH %1 (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+            "UID FETCH %1 (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])"_L1
                 .arg(uidStrs.join(u',')));
 
         if (!resp.contains(" OK"_L1, Qt::CaseInsensitive)) continue;
@@ -945,7 +946,7 @@ executeIncremental(SyncContext &ctx) {
         if (ctx.hasSearchAllSnapshot) {
             allUids = ctx.searchAllUids;
         } else {
-            const auto allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
+            const auto allResp = ctx.cxn->execute("UID SEARCH ALL"_L1);
             allUids = parseUidSearchAll(allResp);
             ctx.hasSearchAllSnapshot = true;
             ctx.searchAllUids = allUids;
@@ -1058,7 +1059,7 @@ executeFull(SyncContext &ctx) {
 
     // UID SEARCH ALL to collect all remote UIDs (unless local count already matches EXISTS).
     if (!skipSearchAll) {
-        const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
+        const QString allResp = ctx.cxn->execute("UID SEARCH ALL"_L1);
         allIds = parseSearchIds(allResp);
     }
 
@@ -1188,7 +1189,7 @@ SyncEngine::execute(SyncContext &ctx) {
     if (!ctx.cxn) {
         SyncResult r;
         r.success = false;
-        r.statusMessage = QStringLiteral("No connection provided");
+        r.statusMessage = "No connection provided"_L1;
         return r;
     }
 
@@ -1203,7 +1204,7 @@ SyncEngine::execute(SyncContext &ctx) {
     const bool alreadySelected = (ctx.cxn->selectedFolder().compare(ctx.folderName, Qt::CaseInsensitive) == 0);
     if (alreadySelected) {
         const QString statusResp = ctx.cxn->execute(
-            QStringLiteral("STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)").arg(ctx.folderName));
+            "STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)"_L1.arg(ctx.folderName));
         remoteMessages = parseMessagesFromStatusResponse(statusResp);
         examineModSeq  = parseHighestModSeq(statusResp);
     }
@@ -1236,7 +1237,7 @@ SyncEngine::execute(SyncContext &ctx) {
             if (!selectedAlias) {
                 SyncResult r;
                 r.success = false;
-                r.statusMessage = QStringLiteral("SELECT failed for folder: %1").arg(ctx.folderName);
+                r.statusMessage = "SELECT failed for folder: %1"_L1.arg(ctx.folderName);
                 return r;
             }
         }
@@ -1268,7 +1269,7 @@ SyncEngine::execute(SyncContext &ctx) {
         }
         SyncResult r;
         r.success = true;
-        r.statusMessage = QStringLiteral("Fetched 0 headers.");
+        r.statusMessage = "Fetched 0 headers."_L1;
         if (examineModSeq > 0 && ctx.onSyncStateUpdated)
             ctx.onSyncStateUpdated(examineModSeq);
         return r;
@@ -1292,7 +1293,7 @@ SyncEngine::execute(SyncContext &ctx) {
         }
 
         if (!skipSearchAll) {
-            const QString allResp = ctx.cxn->execute(QStringLiteral("UID SEARCH ALL"));
+            const QString allResp = ctx.cxn->execute("UID SEARCH ALL"_L1);
             const QStringList remoteUids = parseUidSearchAll(allResp);
             ctx.hasSearchAllSnapshot = true;
             ctx.searchAllUids = remoteUids;

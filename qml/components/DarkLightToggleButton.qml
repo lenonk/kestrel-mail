@@ -9,6 +9,8 @@ QQC2.AbstractButton {
 
     signal modeToggled(bool darkMode)
 
+    Accessible.name: root.darkMode ? "Switch to light mode" : "Switch to dark mode"
+    Accessible.role: Accessible.Button
     implicitWidth: 62
     implicitHeight: 30
     hoverEnabled: true

@@ -13,20 +13,5 @@
     "oauthScopes": "openid profile email https://mail.google.com/ https://www.googleapis.com/auth/calendar",
     "oauthClientId": "838689413408-g7bpqtpc4hb3bihelaa41a7lbdo2e40r.apps.googleusercontent.com",
     "oauthClientSecret": "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"
-  },
-  {
-    "id": "microsoft365",
-    "displayName": "Microsoft 365 / Outlook",
-    "domains": ["outlook.com", "hotmail.com", "live.com", "office365.com"],
-    "imapHost": "outlook.office365.com",
-    "imapPort": 993,
-    "smtpHost": "smtp.office365.com",
-    "smtpPort": 587,
-    "supportsOAuth2": true,
-    "oauthAuthUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-    "oauthTokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-    "oauthScopes": "offline_access IMAP.AccessAsUser.All SMTP.Send",
-    "oauthClientId": "",
-    "oauthClientSecret": ""
   }
 ]

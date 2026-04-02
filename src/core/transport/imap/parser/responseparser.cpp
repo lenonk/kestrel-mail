@@ -14,8 +14,8 @@ namespace Imap::Parser {
 
 QStringList
 parseUidSearchAll(const QString &resp) {
-    static const QRegularExpression eolRe(QStringLiteral("\\r?\\n"));
-    static const QRegularExpression spacesRe(QStringLiteral("\\s+"));
+    static const QRegularExpression eolRe("\\r?\\n"_L1);
+    static const QRegularExpression spacesRe("\\s+"_L1);
 
     // ReSharper disable once CppTooWideScopeInitStatement
     const auto lines = resp.split(eolRe, Qt::SkipEmptyParts);
@@ -38,9 +38,9 @@ QStringList
 parseSearchIds(const QString &searchResp) {
     QStringList out;
 
-    static const QRegularExpression eolRe(QStringLiteral("\\r?\\n"));
-    static const QRegularExpression searchRe(QStringLiteral("^\\*\\s+SEARCH\\s*(.*)$"), QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression spaceRe(QStringLiteral("\\s+"));
+    static const QRegularExpression eolRe("\\r?\\n"_L1);
+    static const QRegularExpression searchRe("^\\*\\s+SEARCH\\s*(.*)$"_L1, QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression spaceRe("\\s+"_L1);
 
     for (const auto &lines = searchResp.split(eolRe, Qt::SkipEmptyParts); const auto &line : lines) {
         const auto m = searchRe.match(line.trimmed());
@@ -76,7 +76,7 @@ extractField(const QString &input, const QString &field) {
         if (it == s_reCache.end()) {
             it = s_reCache.insert(field,
                 QRegularExpression(
-                    QStringLiteral("(?:^|\\r?\\n)%1:\\s*([^\\r\\n]+)")
+                    "(?:^|\\r?\\n)%1:\\s*([^\\r\\n]+)"_L1
                         .arg(QRegularExpression::escape(field)),
                     QRegularExpression::CaseInsensitiveOption));
         }
@@ -123,7 +123,7 @@ extractHeaderFieldsLiteral(const QByteArray &fetchRespRaw) {
 
 QString
 extractGmailLabelsRaw(const QString &fetchResp) {
-    static const QRegularExpression labelsRe(QStringLiteral("X-GM-LABELS\\s+\\(([^\\)]*)\\)"),
+    static const QRegularExpression labelsRe("X-GM-LABELS\\s+\\(([^\\)]*)\\)"_L1,
         QRegularExpression::CaseInsensitiveOption);
 
     QRegularExpressionMatchIterator it = labelsRe.globalMatch(fetchResp);
@@ -166,18 +166,18 @@ extractGmailCategoryFolder(const QString &fetchResp) {
             });
     };
 
-    if (hasAny({"promotions", "promotion", "categorypromotions", "smartlabel_promo"})) return QStringLiteral("[Gmail]/Categories/Promotions");
-    if (hasAny({"social", "categorysocial", "smartlabel_social"})) return QStringLiteral("[Gmail]/Categories/Social");
-    if (hasAny({"purchases", "purchase", "categorypurchases", "smartlabel_receipt"})) return QStringLiteral("[Gmail]/Categories/Purchases");
-    if (hasAny({"updates", "update", "categoryupdates", "smartlabel_notification"})) return QStringLiteral("[Gmail]/Categories/Updates");
-    if (hasAny({"forums", "forum", "categoryforums", "smartlabel_group"})) return QStringLiteral("[Gmail]/Categories/Forums");
-    if (hasAny({"primary", "categorypersonal", "smartlabel_personal"})) return QStringLiteral("[Gmail]/Categories/Primary");
+    if (hasAny({"promotions", "promotion", "categorypromotions", "smartlabel_promo"})) return "[Gmail]/Categories/Promotions"_L1;
+    if (hasAny({"social", "categorysocial", "smartlabel_social"})) return "[Gmail]/Categories/Social"_L1;
+    if (hasAny({"purchases", "purchase", "categorypurchases", "smartlabel_receipt"})) return "[Gmail]/Categories/Purchases"_L1;
+    if (hasAny({"updates", "update", "categoryupdates", "smartlabel_notification"})) return "[Gmail]/Categories/Updates"_L1;
+    if (hasAny({"forums", "forum", "categoryforums", "smartlabel_group"})) return "[Gmail]/Categories/Forums"_L1;
+    if (hasAny({"primary", "categorypersonal", "smartlabel_personal"})) return "[Gmail]/Categories/Primary"_L1;
     return {};
 }
 
 QString
 extractInternalDateRaw(const QString &fetchResp) {
-    static const QRegularExpression internalDateRe(QStringLiteral("INTERNALDATE \"([^\"]+)\""));
+    static const QRegularExpression internalDateRe("INTERNALDATE \"([^\"]+)\""_L1);
 
     if (const auto im = internalDateRe.match(fetchResp); im.hasMatch()) {
         return im.captured(1);
@@ -191,21 +191,21 @@ parseBestDateTime(const QString &headerDate, const QString &fetchResp) {
     QDateTime dt;
 
     if (auto trimmedHeader = headerDate.trimmed(); !trimmedHeader.isEmpty()) {
-        static const QRegularExpression commentRe(QStringLiteral("\\s*\\([^\\)]*\\)"));
+        static const QRegularExpression commentRe("\\s*\\([^\\)]*\\)"_L1);
         trimmedHeader.remove(commentRe);
 
         dt = QDateTime::fromString(trimmedHeader, Qt::RFC2822Date);
         if (!dt.isValid()) {
-            dt = QLocale::c().toDateTime(trimmedHeader, QStringLiteral("ddd, d MMM yyyy hh:mm:ss t"));
+            dt = QLocale::c().toDateTime(trimmedHeader, "ddd, d MMM yyyy hh:mm:ss t"_L1);
         }
         if (!dt.isValid()) {
-            dt = QLocale::c().toDateTime(trimmedHeader, QStringLiteral("d MMM yyyy hh:mm:ss t"));
+            dt = QLocale::c().toDateTime(trimmedHeader, "d MMM yyyy hh:mm:ss t"_L1);
         }
     }
 
     if (!dt.isValid()) {
         if (const auto internal = extractInternalDateRaw(fetchResp); !internal.isEmpty()) {
-            dt = QLocale::c().toDateTime(internal, QStringLiteral("d-MMM-yyyy hh:mm:ss t"));
+            dt = QLocale::c().toDateTime(internal, "d-MMM-yyyy hh:mm:ss t"_L1);
         }
     }
 

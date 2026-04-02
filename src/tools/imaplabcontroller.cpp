@@ -2,6 +2,7 @@
 
 #include "../core/accounts/accountrepository.h"
 #include "../core/auth/filetokenvault.h"
+#include "../core/utils.h"
 
 #include <QByteArray>
 #include <QDateTime>
@@ -14,6 +15,8 @@
 #include <QSslSocket>
 #include <QUrlQuery>
 #include <QElapsedTimer>
+
+using namespace Qt::Literals::StringLiterals;
 
 namespace {
 constexpr int kTlsTimeoutMs = 6000;
@@ -85,7 +88,7 @@ bool ImapLabController::running() const { return m_running; }
 
 void ImapLabController::setSelectedAccountEmail(const QString &email)
 {
-    const QString normalized = email.trimmed().toLower();
+    const QString normalized = Kestrel::normalizeEmail(email);
     if (m_selectedAccountEmail == normalized) return;
     closePersistentSession();
     m_selectedAccountEmail = normalized;
@@ -118,7 +121,7 @@ QVariantMap ImapLabController::selectedAccount() const
 {
     for (const QVariant &v : m_accounts) {
         const QVariantMap a = v.toMap();
-        if (a.value("email").toString().trimmed().toLower() == m_selectedAccountEmail) {
+        if (Kestrel::normalizeEmail(a.value("email").toString()) == m_selectedAccountEmail) {
             return a;
         }
     }
@@ -139,7 +142,7 @@ QString ImapLabController::refreshAccessToken(const QVariantMap &account, const 
 
     QNetworkAccessManager nam;
     QNetworkRequest req{QUrl(tokenUrl)};
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded"_L1);
 
     QUrlQuery body;
     body.addQueryItem("grant_type", "refresh_token");
@@ -165,7 +168,7 @@ bool ImapLabController::ensurePersistentSession(const QVariantMap &account, cons
     const QString host = account.value("imapHost").toString();
     const int port = account.value("imapPort").toInt();
     if (host.isEmpty() || port <= 0) {
-        if (errorOut) *errorOut = QStringLiteral("Missing IMAP host/port");
+        if (errorOut) *errorOut = "Missing IMAP host/port"_L1;
         return false;
     }
 
@@ -178,12 +181,12 @@ bool ImapLabController::ensurePersistentSession(const QVariantMap &account, cons
     m_socket = new QSslSocket(this);
     m_socket->connectToHostEncrypted(host, static_cast<quint16>(port));
     if (!m_socket->waitForEncrypted(kTlsTimeoutMs)) {
-        if (errorOut) *errorOut = QStringLiteral("TLS connect failed: %1").arg(m_socket->errorString());
+        if (errorOut) *errorOut = "TLS connect failed: %1"_L1.arg(m_socket->errorString());
         closePersistentSession();
         return false;
     }
     if (!m_socket->waitForReadyRead(kReadTimeoutMs)) {
-        if (errorOut) *errorOut = QStringLiteral("No greeting");
+        if (errorOut) *errorOut = "No greeting"_L1;
         closePersistentSession();
         return false;
     }
@@ -191,13 +194,13 @@ bool ImapLabController::ensurePersistentSession(const QVariantMap &account, cons
     // consume greeting
     m_socket->readAll();
 
-    const QString authTag = QStringLiteral("x001");
-    const QString authCmd = QStringLiteral("%1 AUTHENTICATE XOAUTH2 %2\r\n").arg(authTag, xoauth2String(email, accessToken));
+    const QString authTag = "x001"_L1;
+    const QString authCmd = "%1 AUTHENTICATE XOAUTH2 %2\r\n"_L1.arg(authTag, xoauth2String(email, accessToken));
     m_socket->write(authCmd.toUtf8());
     m_socket->flush();
     const QString authResp = readUntilTagged(*m_socket, authTag);
-    if (!authResp.contains(authTag + QStringLiteral(" OK"), Qt::CaseInsensitive)) {
-        if (errorOut) *errorOut = QStringLiteral("AUTH failed: %1").arg(authResp.simplified());
+    if (!authResp.contains(authTag + " OK"_L1, Qt::CaseInsensitive)) {
+        if (errorOut) *errorOut = "AUTH failed: %1"_L1.arg(authResp.simplified());
         closePersistentSession();
         return false;
     }
@@ -212,7 +215,7 @@ QString ImapLabController::runImapCommand(const QString &command, qint64 *elapse
 {
     if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
         if (elapsedMsOut) *elapsedMsOut = 0;
-        return QStringLiteral("No active IMAP session.");
+        return "No active IMAP session."_L1;
     }
 
     QElapsedTimer timer;
@@ -221,12 +224,12 @@ QString ImapLabController::runImapCommand(const QString &command, qint64 *elapse
     QString userCmd = command.trimmed();
     if (userCmd.isEmpty()) {
         if (elapsedMsOut) *elapsedMsOut = timer.elapsed();
-        return QStringLiteral("No command provided.");
+        return "No command provided."_L1;
     }
 
-    const QString cmdTag = QStringLiteral("x002");
+    const QString cmdTag = "x002"_L1;
     if (!userCmd.startsWith(cmdTag + " ", Qt::CaseInsensitive)) {
-        userCmd = cmdTag + QStringLiteral(" ") + userCmd;
+        userCmd = cmdTag + " "_L1 + userCmd;
     }
     if (!userCmd.endsWith("\r\n")) userCmd += "\r\n";
 
@@ -261,7 +264,7 @@ void ImapLabController::runCurrentCommand()
 {
     if (m_running) return;
     const QVariantMap account = selectedAccount();
-    const QString email = account.value("email").toString().trimmed().toLower();
+    const QString email = Kestrel::normalizeEmail(account.value("email").toString());
     if (email.isEmpty()) {
         m_output = "No account selected";
         emit outputChanged();
@@ -288,7 +291,7 @@ void ImapLabController::runCurrentCommand()
 
         QString sessionError;
         if (!ensurePersistentSession(account, email, token, &sessionError)) {
-            m_output = sessionError.isEmpty() ? QStringLiteral("Failed to establish IMAP session") : sessionError;
+            m_output = sessionError.isEmpty() ? "Failed to establish IMAP session"_L1 : sessionError;
             m_running = false;
             emit outputChanged();
             emit runningChanged();

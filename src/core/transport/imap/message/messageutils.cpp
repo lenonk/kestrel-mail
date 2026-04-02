@@ -12,8 +12,8 @@ namespace Imap::MessageUtils {
 
 namespace {
 
-static const QRegularExpression kRfc2047Re(QStringLiteral("=\\?([^?]+)\\?([bBqQ])\\?([^?]+)\\?="));
-static const QRegularExpression kWhitespaceRe(QStringLiteral("\\s+"));
+static const QRegularExpression kRfc2047Re("=\\?([^?]+)\\?([bBqQ])\\?([^?]+)\\?="_L1);
+static const QRegularExpression kWhitespaceRe("\\s+"_L1);
 
 // Collapse all whitespace (including Unicode spaces) to single ASCII spaces,
 // trim leading/trailing. Mirrors mailcore2's MCString::stripWhitespace().
@@ -53,10 +53,10 @@ QString cleanAngle(const QString &s) {
 QString extractEmailAddress(const QString &input) {
     const auto s = input.trimmed();
     if (s.isEmpty()) return {};
-    static const QRegularExpression angleRe(QStringLiteral("<\\s*([^<>@\\s]+@[^<>@\\s]+)\\s*>"));
+    static const QRegularExpression angleRe("<\\s*([^<>@\\s]+@[^<>@\\s]+)\\s*>"_L1);
     if (const auto m = angleRe.match(s); m.hasMatch()) return m.captured(1).trimmed();
     static const QRegularExpression plainRe(
-        QStringLiteral("\\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})\\b"),
+        "\\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})\\b"_L1,
         QRegularExpression::CaseInsensitiveOption);
     if (const auto m = plainRe.match(s); m.hasMatch()) return m.captured(1).trimmed();
     return {};
@@ -69,7 +69,7 @@ QString normalizeSenderValue(const QString &fromHeader, const QString &fallbackH
     if (email.isEmpty()) return from;
 
     auto name = from;
-    static const QRegularExpression angleBracketRe(QStringLiteral("<[^>]*>"));
+    static const QRegularExpression angleBracketRe("<[^>]*>"_L1);
     name.remove(angleBracketRe);
     name = name.trimmed();
     if ((name.startsWith('"') && name.endsWith('"')) ||
@@ -93,13 +93,13 @@ QString normalizeSenderValue(const QString &fromHeader, const QString &fallbackH
         name = unescaped.trimmed();
     }
     if (name.isEmpty() || name.compare(email, Qt::CaseInsensitive) == 0) return email;
-    return QStringLiteral("%1 <%2>").arg(name, email);
+    return "%1 <%2>"_L1.arg(name, email);
 }
 
 QString sanitizeAddressHeader(QString v) {
-    static const QRegularExpression emptyRfc2047Re(QStringLiteral("=\\?[^?]+\\?[bBqQ]\\?\\?="));
+    static const QRegularExpression emptyRfc2047Re("=\\?[^?]+\\?[bBqQ]\\?\\?="_L1);
     v.replace(emptyRfc2047Re, QString());
-    v.replace(kWhitespaceRe, QStringLiteral(" "));
+    v.replace(kWhitespaceRe, " "_L1);
     return v.trimmed();
 }
 
@@ -114,7 +114,7 @@ QString decodeRfc2047(const QString &input) {
         const auto encoding = m.captured(2);
         auto payload = m.captured(3);
         QByteArray bytes;
-        if (encoding.compare(QStringLiteral("B"), Qt::CaseInsensitive) == 0) {
+        if (encoding.compare("B"_L1, Qt::CaseInsensitive) == 0) {
             bytes = QByteArray::fromBase64(payload.toUtf8());
         } else {
             payload.replace('_', ' ');

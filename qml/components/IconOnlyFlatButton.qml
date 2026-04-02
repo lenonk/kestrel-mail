@@ -8,6 +8,7 @@ QQC2.Button {
     property string iconName: ""
     property int iconSize: 24
 
+    Accessible.name: root.text.length > 0 ? root.text : root.iconName
     flat: true
     leftPadding: 0
     rightPadding: 0

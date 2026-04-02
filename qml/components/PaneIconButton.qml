@@ -22,6 +22,8 @@ QQC2.Control {
     readonly property int paneIconSize: Kirigami.Units.iconSizes.smallMedium
     readonly property int indicatorThickness: 4
 
+    Accessible.name: root.toolTipText.length > 0 ? root.toolTipText : root.label
+    Accessible.role: Accessible.Button
     implicitHeight: Kirigami.Units.gridUnit * 2 + 2
     padding: 0
 

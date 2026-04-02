@@ -2,6 +2,7 @@
 
 #include <qcache.h>
 
+#include "../../../utils.h"
 #include "../parser/responseparser.h"
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -86,8 +87,8 @@ namespace {
 
     // Fetched once per thread; used to detect Google's generic globe placeholder.
     const QByteArray &googleGlobePlaceholder() {
-        static const QByteArray globe = fetchImageBytes(QUrl(QStringLiteral(
-            "https://www.google.com/s2/favicons?domain=https://no-favicon-sentinel-kestrel.invalid&sz=128"))).bytes;
+        static const QByteArray globe = fetchImageBytes(QUrl(
+            "https://www.google.com/s2/favicons?domain=https://no-favicon-sentinel-kestrel.invalid&sz=128"_L1)).bytes;
         return globe;
     }
 
@@ -95,13 +96,13 @@ namespace {
 
 QString
 extractBimiLogoUrl(const QString &headerSource) {
-    auto bimiLocation = Parser::extractField(headerSource, QStringLiteral("BIMI-Location")).trimmed();
+    auto bimiLocation = Parser::extractField(headerSource, "BIMI-Location"_L1).trimmed();
 
     if (bimiLocation.startsWith('<') && bimiLocation.endsWith('>') && bimiLocation.size() > 2) {
         bimiLocation = bimiLocation.mid(1, bimiLocation.size() - 2).trimmed();
     }
 
-    if (bimiLocation.startsWith(QStringLiteral("https://")) || bimiLocation.startsWith(QStringLiteral("http://"))) {
+    if (bimiLocation.startsWith("https://"_L1) || bimiLocation.startsWith("http://"_L1)) {
         return bimiLocation;
     }
 
@@ -111,18 +112,18 @@ extractBimiLogoUrl(const QString &headerSource) {
 QString
 senderDomainFromHeader(const QString &fromHeader) {
     const auto s = fromHeader.trimmed();
-    static const QRegularExpression angleRe(QStringLiteral("<\\s*([^<>@\\s]+@[^<>@\\s]+)\\s*>"));
+    static const QRegularExpression angleRe("<\\s*([^<>@\\s]+@[^<>@\\s]+)\\s*>"_L1);
 
     const auto m1 = angleRe.match(s);
     QString email;
     if (m1.hasMatch()) {
-        email = m1.captured(1).trimmed().toLower();
+        email = Kestrel::normalizeEmail(m1.captured(1));
     }
     else {
-        static const QRegularExpression plainRe(QStringLiteral("\\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})\\b"),
+        static const QRegularExpression plainRe("\\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})\\b"_L1,
                                          QRegularExpression::CaseInsensitiveOption);
         if (const auto m2 = plainRe.match(s); m2.hasMatch())
-            email = m2.captured(1).trimmed().toLower();
+            email = Kestrel::normalizeEmail(m2.captured(1));
     }
 
     const auto at = email.indexOf('@');
@@ -134,7 +135,7 @@ senderDomainFromHeader(const QString &fromHeader) {
         domain = domain.mid(1);
     if (domain.endsWith('.'))
         domain.chop(1);
-    if (domain.contains(QStringLiteral(".local")) || domain.contains(QStringLiteral(".invalid")))
+    if (domain.contains(".local"_L1) || domain.contains(".invalid"_L1))
         return {};
 
     const QStringList parts = domain.split('.', Qt::SkipEmptyParts);
@@ -143,9 +144,9 @@ senderDomainFromHeader(const QString &fromHeader) {
 
     auto tail2 = parts.mid(parts.size() - 2).join('.');
 
-    static const QSet cc2 = {
-        QStringLiteral("co.uk"), QStringLiteral("org.uk"), QStringLiteral("gov.uk"), QStringLiteral("ac.uk"),
-        QStringLiteral("com.au"), QStringLiteral("co.jp"), QStringLiteral("com.br"), QStringLiteral("com.mx")
+    static const QSet<QString> cc2 = {
+        "co.uk"_L1, "org.uk"_L1, "gov.uk"_L1, "ac.uk"_L1,
+        "com.au"_L1, "co.jp"_L1, "com.br"_L1, "com.mx"_L1
     };
 
     if (cc2.contains(tail2) && parts.size() >= 3) {
@@ -161,12 +162,12 @@ parseBimiLogoFromTxtRecord(const QString &txtRaw) {
     if (txt.startsWith('"') && txt.endsWith('"') && txt.size() >= 2) {
         txt = txt.mid(1, txt.size() - 2);
     }
-    txt.replace(QStringLiteral("\""), QString());
+    txt.replace("\""_L1, QString());
 
-    if (const auto lower = txt.toLower(); !lower.contains(QStringLiteral("v=bimi1")))
+    if (const auto lower = txt.toLower(); !lower.contains("v=bimi1"_L1))
         return {};
 
-    static const QRegularExpression logoRe(QStringLiteral("(?:^|;)\\s*l\\s*=\\s*([^;\\s]+)"),
+    static const QRegularExpression logoRe("(?:^|;)\\s*l\\s*=\\s*([^;\\s]+)"_L1,
         QRegularExpression::CaseInsensitiveOption);
 
     const auto m = logoRe.match(txt);
@@ -174,7 +175,7 @@ parseBimiLogoFromTxtRecord(const QString &txtRaw) {
         return {};
 
     auto url = m.captured(1).trimmed();
-    if (url.startsWith(QStringLiteral("https://")) || url.startsWith(QStringLiteral("http://"))) {
+    if (url.startsWith("https://"_L1) || url.startsWith("http://"_L1)) {
         return url;
     }
 
@@ -187,7 +188,7 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     static QHash<QString, QString> cache;
     static bool peopleAuthUnavailable = false;
 
-    const auto e = senderEmail.trimmed().toLower();
+    const auto e = Kestrel::normalizeEmail(senderEmail);
     if (e.isEmpty() || accessToken.trimmed().isEmpty())
         return {};
 
@@ -205,11 +206,11 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     const auto local = (at > 0) ? e.left(at) : QString();
     const auto domain = (at > 0 && at + 1 < e.size()) ? e.mid(at + 1) : QString();
 
-    static const QSet likelyPersonalDomains = {
-        QStringLiteral("gmail.com"), QStringLiteral("googlemail.com"),
-        QStringLiteral("outlook.com"), QStringLiteral("hotmail.com"), QStringLiteral("live.com"),
-        QStringLiteral("icloud.com"), QStringLiteral("me.com"),
-        QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk"), QStringLiteral("mail.com"),
+    static const QSet<QString> likelyPersonalDomains = {
+        "gmail.com"_L1, "googlemail.com"_L1,
+        "outlook.com"_L1, "hotmail.com"_L1, "live.com"_L1,
+        "icloud.com"_L1, "me.com"_L1,
+        "yahoo.com"_L1, "yahoo.co.uk"_L1, "mail.com"_L1,
     };
 
     if (!likelyPersonalDomains.contains(domain)) {
@@ -219,26 +220,26 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     }
 
     // Skip automated mailbox names so they do not poison auth probing order.
-    if (local.contains(QStringLiteral("noreply"))
-            || local.contains(QStringLiteral("no-reply"))
-            || local.contains(QStringLiteral("donotreply"))
-            || local.contains(QStringLiteral("do-not-reply"))
-            || local.contains(QStringLiteral("mailer-daemon"))
-            || local.contains(QStringLiteral("postmaster"))) {
+    if (local.contains("noreply"_L1)
+            || local.contains("no-reply"_L1)
+            || local.contains("donotreply"_L1)
+            || local.contains("do-not-reply"_L1)
+            || local.contains("mailer-daemon"_L1)
+            || local.contains("postmaster"_L1)) {
         QMutexLocker lock(&mutex);
         cache.insert(e, QString());
         return {};
     }
 
-    QUrl url(QStringLiteral("https://people.googleapis.com/v1/people:searchContacts"));
+    QUrl url("https://people.googleapis.com/v1/people:searchContacts"_L1);
     QUrlQuery q;
-    q.addQueryItem(QStringLiteral("query"), e);
-    q.addQueryItem(QStringLiteral("readMask"), QStringLiteral("photos,emailAddresses"));
-    q.addQueryItem(QStringLiteral("pageSize"), QStringLiteral("1"));
+    q.addQueryItem("query"_L1, e);
+    q.addQueryItem("readMask"_L1, "photos,emailAddresses"_L1);
+    q.addQueryItem("pageSize"_L1, "1"_L1);
     url.setQuery(q);
 
     QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(accessToken).toUtf8());
+    req.setRawHeader("Authorization", "Bearer %1"_L1.arg(accessToken).toUtf8());
     req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
 
     QNetworkReply *reply = sharedNam().get(req);
@@ -251,24 +252,24 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     loop.exec();
 
     QString found;
-    auto outcome = QStringLiteral("none");
+    QString outcome = "none"_L1;
     if (!reply->isFinished()) {
-        outcome = QStringLiteral("timeout");
+        outcome = "timeout"_L1;
     }
     else if (reply->error() == QNetworkReply::NoError) {
         const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
-        const auto results = obj.value(QStringLiteral("results")).toArray();
+        const auto results = obj.value("results"_L1).toArray();
         if (!results.isEmpty()) {
-            const auto person = results.at(0).toObject().value(QStringLiteral("person")).toObject();
-            const auto photos = person.value(QStringLiteral("photos")).toArray();
+            const auto person = results.at(0).toObject().value("person"_L1).toObject();
+            const auto photos = person.value("photos"_L1).toArray();
             for (const auto &pv : photos) {
                 const auto po = pv.toObject();
-                const bool isDefault = po.value(QStringLiteral("default")).toBool(false);
+                const bool isDefault = po.value("default"_L1).toBool(false);
                 if (isDefault) continue;
-                const auto u = po.value(QStringLiteral("url")).toString().trimmed();
-                if (u.startsWith(QStringLiteral("https://")) || u.startsWith(QStringLiteral("http://"))) {
+                const auto u = po.value("url"_L1).toString().trimmed();
+                if (u.startsWith("https://"_L1) || u.startsWith("http://"_L1)) {
                     found = u;
-                    outcome = QStringLiteral("hit");
+                    outcome = "hit"_L1;
                     break;
                 }
             }
@@ -300,7 +301,7 @@ fetchAvatarBlob(const QString &url, const QString &bearerToken) {
     static QHash<QString, AvatarBlobCacheEntry> cache;
 
     auto u = url.trimmed();
-    if (!(u.startsWith(QStringLiteral("https://")) || u.startsWith(QStringLiteral("http://")))) {
+    if (!(u.startsWith("https://"_L1) || u.startsWith("http://"_L1))) {
         return u;
     }
 
@@ -308,15 +309,15 @@ fetchAvatarBlob(const QString &url, const QString &bearerToken) {
     {
         QMutexLocker lock(&mutex);
         if (const auto it = cache.constFind(u); it != cache.constEnd() && it.value().fetchedAtUtc.secsTo(now) < kAvatarBlobTtlSeconds) {
-            const auto mime = it.value().mime.isEmpty() ? QStringLiteral("image/png") : it.value().mime;
-            return QStringLiteral("data:%1;base64,%2").arg(mime, QString::fromLatin1(it.value().bytes.toBase64()));
+            const auto mime = it.value().mime.isEmpty() ? "image/png"_L1 : it.value().mime;
+            return "data:%1;base64,%2"_L1.arg(mime, QString::fromLatin1(it.value().bytes.toBase64()));
         }
     }
 
     QNetworkRequest req { QUrl(u) };
     req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
     if (!bearerToken.isEmpty())
-        req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(bearerToken).toUtf8());
+        req.setRawHeader("Authorization", "Bearer %1"_L1.arg(bearerToken).toUtf8());
 
     QNetworkReply *reply = sharedNam().get(req);
     QEventLoop loop;
@@ -331,7 +332,7 @@ fetchAvatarBlob(const QString &url, const QString &bearerToken) {
     if (reply->isFinished() && reply->error() == QNetworkReply::NoError) {
         const auto payload = reply->readAll();
         const auto contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString().trimmed().toLower();
-        if (!payload.isEmpty() && payload.size() <= 512 * 1024 && contentType.startsWith(QStringLiteral("image/"))) {
+        if (!payload.isEmpty() && payload.size() <= 512 * 1024 && contentType.startsWith("image/"_L1)) {
             AvatarBlobCacheEntry entry;
             entry.bytes = payload;
             entry.mime = contentType;
@@ -340,7 +341,7 @@ fetchAvatarBlob(const QString &url, const QString &bearerToken) {
                 QMutexLocker lock(&mutex);
                 cache.insert(u, entry);
             }
-            out = QStringLiteral("data:%1;base64,%2").arg(contentType, QString::fromLatin1(payload.toBase64()));
+            out = "data:%1;base64,%2"_L1.arg(contentType, QString::fromLatin1(payload.toBase64()));
         }
     }
 
@@ -352,7 +353,7 @@ fetchAvatarBlob(const QString &url, const QString &bearerToken) {
 
 QString
 extractListIdDomain(const QString &headerSource) {
-    QString listId = Parser::extractField(headerSource, QStringLiteral("List-ID")).trimmed();
+    QString listId = Parser::extractField(headerSource, "List-ID"_L1).trimmed();
     if (listId.isEmpty())
         return {};
 
@@ -372,7 +373,7 @@ extractListIdDomain(const QString &headerSource) {
     // Remove the display-name cruft and keep the token with dots.
     listId = listId.toLower().trimmed();
     listId.remove('"');
-    static const QRegularExpression domainRe(QStringLiteral("([a-z0-9.-]+\\.[a-z]{2,})"));
+    static const QRegularExpression domainRe("([a-z0-9.-]+\\.[a-z]{2,})"_L1);
     const auto m = domainRe.match(listId);
     if (!m.hasMatch())
         return {};
@@ -384,7 +385,7 @@ extractListIdDomain(const QString &headerSource) {
     if (domain.endsWith('.'))
         domain.chop(1);
 
-    if (domain.contains(QStringLiteral(".local")) || domain.contains(QStringLiteral(".invalid")))
+    if (domain.contains(".local"_L1) || domain.contains(".invalid"_L1))
         return {};
 
     // Normalize to registrable-ish base domain for favicon lookup.
@@ -395,8 +396,8 @@ extractListIdDomain(const QString &headerSource) {
     auto tail2 = parts.mid(parts.size() - 2).join('.');
 
     static const QSet<QString> cc2 = {
-        QStringLiteral("co.uk"), QStringLiteral("org.uk"), QStringLiteral("gov.uk"), QStringLiteral("ac.uk"),
-        QStringLiteral("com.au"), QStringLiteral("co.jp"), QStringLiteral("com.br"), QStringLiteral("com.mx")
+        "co.uk"_L1, "org.uk"_L1, "gov.uk"_L1, "ac.uk"_L1,
+        "com.au"_L1, "co.jp"_L1, "com.br"_L1, "com.mx"_L1
     };
 
     if (cc2.contains(tail2) && parts.size() >= 3) {
@@ -415,10 +416,10 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
     if (d.isEmpty())
         return {};
 
-    static const QSet bimiSkip = {
-        QStringLiteral("gmail.com"), QStringLiteral("google.com"), QStringLiteral("googlemail.com"),
-        QStringLiteral("icloud.com"), QStringLiteral("outlook.com"),
-        QStringLiteral("mail.com"),
+    static const QSet<QString> bimiSkip = {
+        "gmail.com"_L1, "google.com"_L1, "googlemail.com"_L1,
+        "icloud.com"_L1, "outlook.com"_L1,
+        "mail.com"_L1,
     };
 
     if (bimiSkip.contains(d)) {
@@ -433,7 +434,7 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
             return cache.value(d);
     }
 
-    const QUrl url(QStringLiteral("https://dns.google/resolve?name=default._bimi.%1&type=TXT").arg(d));
+    const QUrl url("https://dns.google/resolve?name=default._bimi.%1&type=TXT"_L1.arg(d));
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
 
@@ -449,11 +450,11 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
     QString found;
     if (reply->isFinished() && reply->error() == QNetworkReply::NoError) {
         const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
-        for (const auto answers = obj.value(QStringLiteral("Answer")).toArray(); const auto &av : answers) {
+        for (const auto answers = obj.value("Answer"_L1).toArray(); const auto &av : answers) {
             const auto ao = av.toObject();
-            if (const auto type = ao.value(QStringLiteral("type")).toInt(0); type != 16)
+            if (const auto type = ao.value("type"_L1).toInt(0); type != 16)
                 continue; // TXT record
-            const auto data = ao.value(QStringLiteral("data")).toString().trimmed();
+            const auto data = ao.value("data"_L1).toString().trimmed();
             if (const auto logo = parseBimiLogoFromTxtRecord(data); !logo.isEmpty()) {
                 found = logo;
                 break;
@@ -477,7 +478,7 @@ resolveGravatarUrl(const QString &email) {
     static QMutex mutex;
     static QHash<QString, QString> cache;
 
-    const QString e = email.trimmed().toLower();
+    const QString e = Kestrel::normalizeEmail(email);
     if (e.isEmpty())
         return {};
 
@@ -489,12 +490,12 @@ resolveGravatarUrl(const QString &email) {
 
     const auto at = e.indexOf('@');
     const auto local = (at > 0) ? e.left(at) : QString();
-    if (local.contains(QStringLiteral("noreply"))
-            || local.contains(QStringLiteral("no-reply"))
-            || local.contains(QStringLiteral("donotreply"))
-            || local.contains(QStringLiteral("do-not-reply"))
-            || local.contains(QStringLiteral("mailer-daemon"))
-            || local.contains(QStringLiteral("postmaster"))) {
+    if (local.contains("noreply"_L1)
+            || local.contains("no-reply"_L1)
+            || local.contains("donotreply"_L1)
+            || local.contains("do-not-reply"_L1)
+            || local.contains("mailer-daemon"_L1)
+            || local.contains("postmaster"_L1)) {
         QMutexLocker lock(&mutex);
         cache.insert(e, {});
         return {};
@@ -503,11 +504,11 @@ resolveGravatarUrl(const QString &email) {
     const QString hash = QString::fromLatin1(
         QCryptographicHash::hash(e.toUtf8(), QCryptographicHash::Md5).toHex());
     const auto result = fetchImageBytes(
-        QUrl(QStringLiteral("https://www.gravatar.com/avatar/%1?s=128&d=404").arg(hash)));
+        QUrl("https://www.gravatar.com/avatar/%1?s=128&d=404"_L1.arg(hash)));
 
     const QString found = result.bytes.isEmpty()
         ? QString{}
-        : QStringLiteral("data:%1;base64,%2").arg(result.mime, QString::fromLatin1(result.bytes.toBase64()));
+        : "data:%1;base64,%2"_L1.arg(result.mime, QString::fromLatin1(result.bytes.toBase64()));
 
     {
         QMutexLocker lock(&mutex);
@@ -659,12 +660,12 @@ QString resolveFaviconLogoUrl(const QString &domain) {
 
     // Personal/consumer domains: use initials, not a brand logo.
     static const QSet<QString> skip = {
-        QStringLiteral("gmail.com"), QStringLiteral("googlemail.com"),
-        QStringLiteral("outlook.com"), QStringLiteral("hotmail.com"), QStringLiteral("live.com"),
-        QStringLiteral("icloud.com"), QStringLiteral("me.com"),
-        QStringLiteral("yahoo.com"), QStringLiteral("yahoo.co.uk"),
-        QStringLiteral("google.com"),
-        QStringLiteral("mail.com")
+        "gmail.com"_L1, "googlemail.com"_L1,
+        "outlook.com"_L1, "hotmail.com"_L1, "live.com"_L1,
+        "icloud.com"_L1, "me.com"_L1,
+        "yahoo.com"_L1, "yahoo.co.uk"_L1,
+        "google.com"_L1,
+        "mail.com"_L1
     };
 
     if (skip.contains(d)) {
@@ -674,18 +675,18 @@ QString resolveFaviconLogoUrl(const QString &domain) {
     }
 
     auto toDataUri = [](const ImageFetch &f) -> QString {
-        return QStringLiteral("data:%1;base64,%2").arg(f.mime, QString::fromLatin1(f.bytes.toBase64()));
+        return "data:%1;base64,%2"_L1.arg(f.mime, QString::fromLatin1(f.bytes.toBase64()));
     };
 
     QString found;
 
     const auto googleResult = fetchImageBytes(QUrl(
-        QStringLiteral("https://www.google.com/s2/favicons?domain=%1&sz=128").arg(d)));
+        "https://www.google.com/s2/favicons?domain=%1&sz=128"_L1.arg(d)));
     if (!googleResult.bytes.isEmpty() && googleResult.bytes != googleGlobePlaceholder())
         found = toDataUri(googleResult);
 
     if (found.isEmpty()) {
-        const auto ddgResult = fetchImageBytes(QUrl(QStringLiteral("https://icons.duckduckgo.com/ip3/%1.ico").arg(d)));
+        const auto ddgResult = fetchImageBytes(QUrl("https://icons.duckduckgo.com/ip3/%1.ico"_L1.arg(d)));
         if (!ddgResult.bytes.isEmpty())
             found = toDataUri(ddgResult);
     }
@@ -809,7 +810,7 @@ QString resolveFaviconLogoUrl(const QString &domain) {
 QString
 writeAvatarFile(const QString &email, const QString &dataUri)
 {
-    static const QRegularExpression re(QStringLiteral(R"(^data:(image/[^;,]+);base64,(.+)$)"),
+    static const QRegularExpression re(R"(^data:(image/[^;,]+);base64,(.+)$)"_L1,
                                        QRegularExpression::DotMatchesEverythingOption);
     const auto m = re.match(dataUri.trimmed());
     if (!m.hasMatch())
@@ -820,20 +821,20 @@ writeAvatarFile(const QString &email, const QString &dataUri)
     if (bytes.isEmpty())
         return {};
 
-    QString ext = QStringLiteral("bin");
-    if (mime.startsWith(QStringLiteral("image/png")))         ext = QStringLiteral("png");
-    else if (mime.contains(QStringLiteral("jpeg")) || mime.contains(QStringLiteral("jpg"))) ext = QStringLiteral("jpg");
-    else if (mime.startsWith(QStringLiteral("image/webp")))   ext = QStringLiteral("webp");
-    else if (mime.startsWith(QStringLiteral("image/gif")))    ext = QStringLiteral("gif");
-    else if (mime.startsWith(QStringLiteral("image/svg")))    ext = QStringLiteral("svg");
+    QString ext = "bin"_L1;
+    if (mime.startsWith("image/png"_L1))         ext = "png"_L1;
+    else if (mime.contains("jpeg"_L1) || mime.contains("jpg"_L1)) ext = "jpg"_L1;
+    else if (mime.startsWith("image/webp"_L1))   ext = "webp"_L1;
+    else if (mime.startsWith("image/gif"_L1))    ext = "gif"_L1;
+    else if (mime.startsWith("image/svg"_L1))    ext = "svg"_L1;
 
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
-                        + QStringLiteral("/kestrel-mail/avatars");
+                        + "/kestrel-mail/avatars"_L1;
     QDir().mkpath(dir);
 
     const QString hash = QString::fromLatin1(
-        QCryptographicHash::hash(email.trimmed().toLower().toUtf8(), QCryptographicHash::Sha1).toHex());
-    const QString absPath = dir + QStringLiteral("/") + hash + QStringLiteral(".") + ext;
+        QCryptographicHash::hash(Kestrel::normalizeEmail(email).toUtf8(), QCryptographicHash::Sha1).toHex());
+    const QString absPath = dir + "/"_L1 + hash + "."_L1 + ext;
 
     QFile f(absPath);
     if (!f.open(QIODevice::WriteOnly))
@@ -841,7 +842,7 @@ writeAvatarFile(const QString &email, const QString &dataUri)
     f.write(bytes);
     f.close();
 
-    return QStringLiteral("file://") + absPath;
+    return "file://"_L1 + absPath;
 }
 
 } // namespace Imap::AvatarResolver

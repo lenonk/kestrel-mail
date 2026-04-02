@@ -46,11 +46,11 @@ void appendImapLog(const qint64 connId, const QString &owner,
     const QString ts = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     const QString cmd = elideMiddle(command.trimmed());
     const QString resp = elideMiddle(response.trimmed());
-    const QByteArray block = QStringLiteral(
-        "[%1] conn=%2 owner=%3 account=%4\nC: %5\nS: %6\n----\n")
+    const QByteArray block =
+        "[%1] conn=%2 owner=%3 account=%4\nC: %5\nS: %6\n----\n"_L1
         .arg(ts,
              QString::number(connId),
-             owner.isEmpty() ? QStringLiteral("?") : owner,
+             owner.isEmpty() ? "?"_L1 : owner,
              email,
              cmd,
              resp).toUtf8();
@@ -59,12 +59,12 @@ void appendImapLog(const qint64 connId, const QString &owner,
 
 
 QByteArray buildXOAuth2Command(const QString &tag, const QString &email, const QString &accessToken) {
-    const QByteArray authRaw = QStringLiteral("user=%1\u0001auth=Bearer %2\u0001\u0001").arg(email, accessToken).toUtf8();
+    const QByteArray authRaw = "user=%1\u0001auth=Bearer %2\u0001\u0001"_L1.arg(email, accessToken).toUtf8();
     return tag.toUtf8() + " AUTHENTICATE XOAUTH2 " + authRaw.toBase64() + "\r\n";
 }
 
 QByteArray buildSelectCommand(const QString &tag, const QString &mailbox) {
-    const QString quotedMailbox = QStringLiteral("\"%1\"").arg(mailbox);
+    const QString quotedMailbox = "\"%1\""_L1.arg(mailbox);
     return tag.toUtf8() + " SELECT " + quotedMailbox.toUtf8() + "\r\n";
 }
 
@@ -176,7 +176,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
 
     // Authenticate with XOAUTH2
     const auto authTag = nextTag();
-    const QString authCommand = QStringLiteral("AUTHENTICATE XOAUTH2 <base64>");
+    const QString authCommand = "AUTHENTICATE XOAUTH2 <base64>"_L1;
     m_socket->write(buildXOAuth2Command(authTag, email, accessToken));
     m_socket->flush();
 
@@ -221,7 +221,7 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
         m_socket->flush();
         imapResp = IO::readUntilTagged(*m_socket, capTag, IO::kFetchReadTimeoutMs);
         observeThrottleState(imapResp);
-        appendImapLog(m_logConnId, m_logOwner, email, QStringLiteral("CAPABILITY"), imapResp);
+        appendImapLog(m_logConnId, m_logOwner, email, "CAPABILITY"_L1, imapResp);
         if (!imapResp.contains(capTag + " OK"_L1, Qt::CaseInsensitive)) {
             result.message = "CAPABILITY failed: %1"_L1.arg(imapResp.simplified().left(200));
             return result;
@@ -255,18 +255,18 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
         m_socket->flush();
         const QString nsResp = IO::readUntilTagged(*m_socket, nsTag, IO::kFetchReadTimeoutMs);
         observeThrottleState(nsResp);
-        appendImapLog(m_logConnId, m_logOwner, email, QStringLiteral("NAMESPACE"), nsResp);
+        appendImapLog(m_logConnId, m_logOwner, email, "NAMESPACE"_L1, nsResp);
     } else {
         const QString listTag = nextTag();
         m_socket->write(buildSimpleCommand(listTag, R"(LIST "" "")"_L1));
         m_socket->flush();
         const QString listResp = IO::readUntilTagged(*m_socket, listTag, IO::kFetchReadTimeoutMs);
         observeThrottleState(listResp);
-        appendImapLog(m_logConnId, m_logOwner, email, QStringLiteral("LIST \"\" \"\""), listResp);
+        appendImapLog(m_logConnId, m_logOwner, email, "LIST \"\" \"\""_L1, listResp);
     }
 
     result.success      = true;
-    result.message      = QStringLiteral("Connected and authenticated");
+    result.message      = "Connected and authenticated"_L1;
     result.capabilities = m_capabilities;
 
     // Detach socket from its creating thread so it can be used from any thread
@@ -361,12 +361,12 @@ Connection::fetchMimePartWithProgress(const QString &uid,
                                       const std::function<void(int, qint64)> &onProgress,
                                       QString *statusOut) {
     if (!isConnected()) {
-        if (statusOut) *statusOut = QStringLiteral("Not connected");
+        if (statusOut) *statusOut = "Not connected"_L1;
         return {};
     }
 
     const QString tag = nextTag();
-    const QString command = QStringLiteral("UID FETCH %1 (BODY.PEEK[%2])").arg(uid, partSpecifier);
+    const QString command = "UID FETCH %1 (BODY.PEEK[%2])"_L1.arg(uid, partSpecifier);
     m_socket->write(buildSimpleCommand(tag, command));
     m_socket->flush();
 
@@ -378,7 +378,7 @@ Connection::fetchMimePartWithProgress(const QString &uid,
     int lastPercent = -1;
     const int step = qBound(1, progressStepPercent, 100);
 
-    static const QRegularExpression literalRe(QStringLiteral("\\{(\\d+)\\}\\r\\n"));
+    static const QRegularExpression literalRe("\\{(\\d+)\\}\\r\\n"_L1);
 
     while (m_socket->waitForReadyRead(IO::kFetchReadTimeoutMs)) {
         acc += m_socket->readAll();
@@ -452,7 +452,7 @@ Connection::list() {
         m_socket->flush();
         resp = IO::readUntilTagged(*m_socket, fallbackTag, IO::kFetchReadTimeoutMs);
         observeThrottleState(resp);
-        appendImapLog(m_logConnId, m_logOwner, m_email, QStringLiteral("LIST \"\" \"*\""), resp);
+        appendImapLog(m_logConnId, m_logOwner, m_email, "LIST \"\" \"*\""_L1, resp);
         if (!resp.contains(fallbackTag + " OK"_L1, Qt::CaseInsensitive))
             return {};
     } else if (!resp.contains(tag + " OK"_L1, Qt::CaseInsensitive)) {
@@ -470,7 +470,7 @@ Connection::select(const QString &mailbox) {
 
     QString resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
     observeThrottleState(resp);
-    appendImapLog(m_logConnId, m_logOwner, m_email, QStringLiteral("SELECT \"%1\"").arg(mailbox), resp);
+    appendImapLog(m_logConnId, m_logOwner, m_email, "SELECT \"%1\""_L1.arg(mailbox), resp);
 
     if (resp.isEmpty()) {
         m_authenticated = false;
@@ -480,7 +480,7 @@ Connection::select(const QString &mailbox) {
             m_socket->flush();
             resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
             observeThrottleState(resp);
-            appendImapLog(m_logConnId, m_logOwner, m_email, QStringLiteral("SELECT \"%1\"").arg(mailbox), resp);
+            appendImapLog(m_logConnId, m_logOwner, m_email, "SELECT \"%1\""_L1.arg(mailbox), resp);
             if (resp.isEmpty())
                 m_authenticated = false;
         }
@@ -497,7 +497,7 @@ Connection::select(const QString &mailbox) {
 std::tuple<bool, QString>
 Connection::examine(const QString &mailbox) {
     QString expectedTag = nextTag();
-    const QString cmd = QStringLiteral("EXAMINE \"%1\"").arg(mailbox);
+    const QString cmd = "EXAMINE \"%1\""_L1.arg(mailbox);
     m_socket->write(buildSimpleCommand(expectedTag, cmd));
     m_socket->flush();
 
@@ -540,7 +540,7 @@ Connection::enterIdle() {
         return {false, "IDLE failed: timeout waiting for continuation"_L1};
 
     const QString resp = QString::fromUtf8(m_socket->readAll());
-    appendImapLog(m_logConnId, m_logOwner, m_email, QStringLiteral("IDLE"), resp);
+    appendImapLog(m_logConnId, m_logOwner, m_email, "IDLE"_L1, resp);
     if (!resp.contains('+'))
         return {false, "IDLE failed: server rejected IDLE: %1"_L1.arg(resp.simplified().left(200))};
 
@@ -571,7 +571,7 @@ Connection::exitIdle() {
     m_idleTag.clear();
     const QString resp = IO::readUntilTagged(*m_socket, doneTag, IO::kTaggedReadTimeoutMs);
     observeThrottleState(resp);
-    appendImapLog(m_logConnId, m_logOwner, m_email, QStringLiteral("DONE"), resp);
+    appendImapLog(m_logConnId, m_logOwner, m_email, "DONE"_L1, resp);
     const bool ok = resp.contains(doneTag + " OK"_L1, Qt::CaseInsensitive);
     return {ok, resp};
 }
@@ -583,7 +583,7 @@ Connection::disconnect() {
     }
 
     if (m_authenticated) {
-        m_socket->write(buildSimpleCommand(nextTag(), QStringLiteral("LOGOUT")));
+        m_socket->write(buildSimpleCommand(nextTag(), "LOGOUT"_L1));
         m_socket->flush();
         // Don't wait for response — best effort only
     }

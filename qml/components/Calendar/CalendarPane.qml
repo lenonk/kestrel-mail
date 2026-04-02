@@ -176,7 +176,7 @@ Item {
                     background: Item {}
                     contentItem: Rectangle {
                         implicitWidth: 5
-                        property color sColor: Kirigami.Theme.textColor
+                        readonly property color sColor: Kirigami.Theme.textColor
                         color: Qt.rgba(sColor.r, sColor.g, sColor.b, 0.75)
                     }
                 }

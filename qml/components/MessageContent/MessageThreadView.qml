@@ -635,7 +635,7 @@ Item {
                         delegate: Rectangle {
                             id: threadCard
 
-                            property real attachFlowH: (isExpanded && cardAttachFlow._items.length > 0) ? (cardAttachFlow.implicitHeight + 8) : 0
+                            readonly property real attachFlowH: (isExpanded && cardAttachFlow._items.length > 0) ? (cardAttachFlow.implicitHeight + 8) : 0
                             property real bodyHeight: 24
                             readonly property real collapsedHeight: cardHeaderRow.implicitHeight + 32
                             readonly property string cardBodyHtml: root._threadBodyTextForCard(index)
@@ -879,8 +879,8 @@ Item {
                                         id: cardAttachItem
 
                                         required property var modelData
-                                        property string localPath: cardAttachFlow._paths[modelData.partId] || ""
-                                        property string previewSource: {
+                                        readonly property string localPath: cardAttachFlow._paths[modelData.partId] || ""
+                                        readonly property string previewSource: {
                                             if (!localPath.length || !appRoot || !appRoot.imapServiceObj)
                                                 return "";
                                             return appRoot.imapServiceObj.attachmentPreviewPath(

@@ -68,7 +68,7 @@ int smtpCode(const QByteArray &resp) {
 
 // Build XOAUTH2 bearer string: user=<email>\x01auth=Bearer <token>\x01\x01
 QByteArray buildXOAuth2Payload(const QString &email, const QString &token) {
-    return QStringLiteral("user=%1\u0001auth=Bearer %2\u0001\u0001").arg(email, token).toUtf8().toBase64();
+    return "user=%1\u0001auth=Bearer %2\u0001\u0001"_L1.arg(email, token).toUtf8().toBase64();
 }
 
 // Encode an RFC 2047 UTF-8 display name if it contains non-ASCII, else return as-is.
@@ -109,24 +109,24 @@ QByteArray foldBase64(const QByteArray &raw)
 QString stripHtmlTags(const QString &html)
 {
     QString out = html;
-    out.replace(QRegularExpression(QStringLiteral("<style\\b[^>]*>[\\s\\S]*?</style>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral(" "));
-    out.replace(QRegularExpression(QStringLiteral("<script\\b[^>]*>[\\s\\S]*?</script>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral(" "));
-    out.replace(QRegularExpression(QStringLiteral("<br\\s*/?>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral("\n"));
-    out.replace(QRegularExpression(QStringLiteral("</p\\s*>"), QRegularExpression::CaseInsensitiveOption), QStringLiteral("\n"));
-    out.replace(QRegularExpression(QStringLiteral("<[^>]+>")), QStringLiteral(""));
-    out.replace(QStringLiteral("&nbsp;"), QStringLiteral(" "));
-    out.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
-    out.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
-    out.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+    out.replace(QRegularExpression("<style\\b[^>]*>[\\s\\S]*?</style>"_L1, QRegularExpression::CaseInsensitiveOption), " "_L1);
+    out.replace(QRegularExpression("<script\\b[^>]*>[\\s\\S]*?</script>"_L1, QRegularExpression::CaseInsensitiveOption), " "_L1);
+    out.replace(QRegularExpression("<br\\s*/?>"_L1, QRegularExpression::CaseInsensitiveOption), "\n"_L1);
+    out.replace(QRegularExpression("</p\\s*>"_L1, QRegularExpression::CaseInsensitiveOption), "\n"_L1);
+    out.replace(QRegularExpression("<[^>]+>"_L1), ""_L1);
+    out.replace("&nbsp;"_L1, " "_L1);
+    out.replace("&amp;"_L1, "&"_L1);
+    out.replace("&lt;"_L1, "<"_L1);
+    out.replace("&gt;"_L1, ">"_L1);
     return out.trimmed();
 }
 
 bool bodyLooksHtml(const QString &body)
 {
     const QString s = body.trimmed();
-    if (s.startsWith(QStringLiteral("<!DOCTYPE"), Qt::CaseInsensitive)) return true;
-    if (s.startsWith(QStringLiteral("<html"), Qt::CaseInsensitive)) return true;
-    if (s.contains(QRegularExpression(QStringLiteral("<\\s*(p|div|br|span|table|body|head|meta)\\b"), QRegularExpression::CaseInsensitiveOption))) return true;
+    if (s.startsWith("<!DOCTYPE"_L1, Qt::CaseInsensitive)) return true;
+    if (s.startsWith("<html"_L1, Qt::CaseInsensitive)) return true;
+    if (s.contains(QRegularExpression("<\\s*(p|div|br|span|table|body|head|meta)\\b"_L1, QRegularExpression::CaseInsensitiveOption))) return true;
     return false;
 }
 
@@ -142,13 +142,13 @@ QString extractAddrSpec(const QString &recipient)
 
 QString subjectHeader(const QString &subject)
 {
-    const QString subjectLine = subject.isEmpty() ? QStringLiteral("(no subject)") : subject;
+    const QString subjectLine = subject.isEmpty() ? "(no subject)"_L1 : subject;
     for (const QChar c : subjectLine) {
         if (c.unicode() > 127) {
-            return QStringLiteral("Subject: =?UTF-8?B?") + QString::fromLatin1(subjectLine.toUtf8().toBase64()) + QStringLiteral("?=\r\n");
+            return "Subject: =?UTF-8?B?"_L1 + QString::fromLatin1(subjectLine.toUtf8().toBase64()) + "?=\r\n"_L1;
         }
     }
-    return QStringLiteral("Subject: ") + subjectLine + QStringLiteral("\r\n");
+    return "Subject: "_L1 + subjectLine + "\r\n"_L1;
 }
 
 QByteArray buildInlineBodyPart(const QString &body)
@@ -187,7 +187,7 @@ bool appendAttachmentPart(QByteArray &msg, const QString &path, QString *errorOu
     QFileInfo fi(path);
     QFile file(path);
     if (!fi.exists() || !fi.isFile() || !file.open(QIODevice::ReadOnly)) {
-        if (errorOut) *errorOut = QStringLiteral("Attachment read failed: ") + path;
+        if (errorOut) *errorOut = "Attachment read failed: "_L1 + path;
         return false;
     }
 
@@ -375,7 +375,7 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
     }
 
     msg += subjectHeader(subject).toUtf8();
-    msg += "Date: " + QDateTime::currentDateTimeUtc().toString(QStringLiteral("ddd, dd MMM yyyy HH:mm:ss +0000")).toUtf8() + "\r\n";
+    msg += "Date: " + QDateTime::currentDateTimeUtc().toString("ddd, dd MMM yyyy HH:mm:ss +0000"_L1).toUtf8() + "\r\n";
     msg += "Message-ID: <" + QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8() + "@kestrel.mail>\r\n";
     msg += "MIME-Version: 1.0\r\n";
 

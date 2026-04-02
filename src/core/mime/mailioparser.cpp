@@ -5,6 +5,8 @@
 #include <QDebug>
 #include <functional>
 
+using namespace Qt::Literals::StringLiterals;
+
 #include <mailio/message.hpp>
 #include <mailio/mime.hpp>
 
@@ -79,7 +81,7 @@ QByteArray extractRfc822Literal(const QByteArray &fetchRespRaw)
 QString normalizeCid(QString cid)
 {
     cid = cid.trimmed();
-    if (cid.startsWith(QStringLiteral("cid:"), Qt::CaseInsensitive)) {
+    if (cid.startsWith("cid:"_L1, Qt::CaseInsensitive)) {
         cid = cid.mid(4).trimmed();
     }
     if (cid.startsWith('<') && cid.endsWith('>') && cid.size() > 2) {
@@ -129,9 +131,9 @@ void collectMimeParts(const mailio::mime &part, QString &htmlOut, QString &plain
 
         const QString subtypeQt = QString::fromStdString(subtype).toLower();
         const QString mimeType = subtypeQt.isEmpty()
-                ? QStringLiteral("image/jpeg")
-                : QStringLiteral("image/") + subtypeQt;
-        const QString dataUrl = QStringLiteral("data:%1;base64,%2").arg(mimeType, QString::fromLatin1(bytes.toBase64()));
+                ? "image/jpeg"_L1
+                : "image/"_L1 + subtypeQt;
+        const QString dataUrl = "data:%1;base64,%2"_L1.arg(mimeType, QString::fromLatin1(bytes.toBase64()));
         cidMap.insert(cid, dataUrl);
     }
 }
@@ -142,8 +144,8 @@ QString inlineCidImages(QString html, const QHash<QString, QString> &cidMap)
     for (auto it = cidMap.constBegin(); it != cidMap.constEnd(); ++it) {
         const QString cid = it.key();
         const QString data = it.value();
-        html.replace(QStringLiteral("cid:%1").arg(cid), data, Qt::CaseInsensitive);
-        html.replace(QStringLiteral("cid:<%1>").arg(cid), data, Qt::CaseInsensitive);
+        html.replace("cid:%1"_L1.arg(cid), data, Qt::CaseInsensitive);
+        html.replace("cid:<%1>"_L1.arg(cid), data, Qt::CaseInsensitive);
     }
     return html;
 }
@@ -157,22 +159,22 @@ QString sanitizeExtractedHtml(QString html)
     // mailio part decoding already handles transfer encoding; extra decode corrupts valid '=' in HTML/URLs.
 
     const QString lower = html.toLower();
-    const int htmlStart = lower.indexOf(QStringLiteral("<html"));
+    const int htmlStart = lower.indexOf("<html"_L1);
     if (htmlStart > 0) html = html.mid(htmlStart);
 
     const QString lower2 = html.toLower();
-    const int htmlEnd = lower2.lastIndexOf(QStringLiteral("</html>"));
+    const int htmlEnd = lower2.lastIndexOf("</html>"_L1);
     if (htmlEnd >= 0) {
         html = html.left(htmlEnd + 7);
     }
 
     const QString check = html.toLower();
-    if (check.contains(QStringLiteral("delivered-to:")) && check.contains(QStringLiteral("received:"))
-            && !check.contains(QStringLiteral("<body"))) {
+    if (check.contains("delivered-to:"_L1) && check.contains("received:"_L1)
+            && !check.contains("<body"_L1)) {
         return {};
     }
 
-    if (!html.contains(QRegularExpression(QStringLiteral("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"),
+    if (!html.contains(QRegularExpression("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
                                           QRegularExpression::CaseInsensitiveOption))) {
         return {};
     }
@@ -273,7 +275,7 @@ QVariantList extractAttachmentsWithMailio(const QByteArray &fetchRespRaw)
                 QVariantMap row;
                 row.insert("index", rowIndex);
                 row.insert("partId", QString::number(rowIndex));
-                row.insert("name", hasFileName ? fileName : QStringLiteral("Attachment"));
+                row.insert("name", hasFileName ? fileName : "Attachment"_L1);
                 QString mediaName = "application";
                 switch (mediaType) {
                     case mailio::mime::media_type_t::TEXT: mediaName = "text"; break;
@@ -285,7 +287,7 @@ QVariantList extractAttachmentsWithMailio(const QByteArray &fetchRespRaw)
                     case mailio::mime::media_type_t::MESSAGE: mediaName = "message"; break;
                     default: break;
                 }
-                row.insert("mimeType", QStringLiteral("%1/%2").arg(mediaName, subtype));
+                row.insert("mimeType", "%1/%2"_L1.arg(mediaName, subtype));
                 row.insert("bytes", sizeBytes);
                 row.insert("canPreview", mediaType == mailio::mime::media_type_t::IMAGE);
                 out.push_back(row);

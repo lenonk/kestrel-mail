@@ -1,5 +1,7 @@
 #include "accountrepository.h"
 
+#include "../utils.h"
+
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -24,7 +26,7 @@ AccountRepository::accounts() const {
 
 void
 AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
-    const auto email = account.value("email").toString().trimmed().toLower();
+    const auto email = Kestrel::normalizeEmail(account.value("email").toString());
 
     if (email.isEmpty()) {
         return;
@@ -32,7 +34,7 @@ AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
 
     auto updated = false;
     for (auto & m_account : m_accounts) {
-        if (auto existing = m_account.toMap(); existing.value("email").toString().trimmed().toLower() == email) {
+        if (auto existing = m_account.toMap(); Kestrel::normalizeEmail(existing.value("email").toString()) == email) {
             for (auto it = account.constBegin(); it != account.constEnd(); ++it) {
                 // Don't overwrite existing non-null values with null/empty
                 if (it.value().isNull()) continue;
@@ -55,14 +57,14 @@ AccountRepository::addOrUpdateAccount(const QVariantMap &account) {
 
 bool
 AccountRepository::removeAccount(const QString &email) {
-    const auto normalized = email.trimmed().toLower();
+    const auto normalized = Kestrel::normalizeEmail(email);
     if (normalized.isEmpty()) {
         return false;
     }
 
     for (int i = 0; i < m_accounts.size(); ++i) {
         const auto existing = m_accounts[i].toMap();
-        if (existing.value("email").toString().trimmed().toLower() == normalized) {
+        if (Kestrel::normalizeEmail(existing.value("email").toString()) == normalized) {
             m_accounts.removeAt(i);
             save();
             emit accountsChanged();
@@ -88,7 +90,7 @@ AccountRepository::load() {
     auto migrated = false;
     for (const auto &v : arr) {
         auto account = v.toObject().toVariantMap();
-        if (const auto providerId = account.value("providerId").toString(); providerId == QStringLiteral("gmail")) {
+        if (const auto providerId = account.value("providerId").toString(); providerId == "gmail"_L1) {
             if (account.value("oauthClientId").toString().trimmed().isEmpty()) {
                 account.insert("oauthClientId", ""_L1);
                 migrated = true;

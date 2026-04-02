@@ -18,53 +18,53 @@ namespace {
 QString bucketKeyForDate(const QString &dateValue)
 {
     const QDateTime dt = QDateTime::fromString(dateValue, Qt::ISODate);
-    if (!dt.isValid()) return QStringLiteral("older");
+    if (!dt.isValid()) return "older"_L1;
     const QDate target = dt.toLocalTime().date();
     const QDate today = QDate::currentDate();
     const int diffDays = target.daysTo(today);
-    if (diffDays <= 0) return QStringLiteral("today");
-    if (diffDays == 1) return QStringLiteral("yesterday");
+    if (diffDays <= 0) return "today"_L1;
+    if (diffDays == 1) return "yesterday"_L1;
 
     const QDate weekStart = today.addDays(-(today.dayOfWeek() % 7)); // Sunday-start week
     if (target >= weekStart && target < today) {
         return QStringLiteral("weekday-%1").arg(target.dayOfWeek());
     }
 
-    if (diffDays <= 14) return QStringLiteral("lastWeek");
-    if (diffDays <= 21) return QStringLiteral("twoWeeksAgo");
-    return QStringLiteral("older");
+    if (diffDays <= 14) return "lastWeek"_L1;
+    if (diffDays <= 21) return "twoWeeksAgo"_L1;
+    return "older"_L1;
 }
 
 QString bucketLabel(const QString &bucketKey)
 {
-    if (bucketKey == QStringLiteral("today")) return QStringLiteral("Today");
-    if (bucketKey == QStringLiteral("yesterday")) return QStringLiteral("Yesterday");
-    if (bucketKey.startsWith(QStringLiteral("weekday-"))) {
+    if (bucketKey == "today"_L1) return "Today"_L1;
+    if (bucketKey == "yesterday"_L1) return "Yesterday"_L1;
+    if (bucketKey.startsWith("weekday-"_L1)) {
         bool ok = false;
-        const int dow = bucketKey.mid(QStringLiteral("weekday-").size()).toInt(&ok);
+        const int dow = bucketKey.mid("weekday-"_L1.size()).toInt(&ok);
         if (ok && dow >= 1 && dow <= 7) {
             return QLocale().dayName(dow, QLocale::LongFormat);
         }
     }
-    if (bucketKey == QStringLiteral("lastWeek")) return QStringLiteral("Last Week");
-    if (bucketKey == QStringLiteral("twoWeeksAgo")) return QStringLiteral("Two Weeks Ago");
-    return QStringLiteral("Older");
+    if (bucketKey == "lastWeek"_L1) return "Last Week"_L1;
+    if (bucketKey == "twoWeeksAgo"_L1) return "Two Weeks Ago"_L1;
+    return "Older"_L1;
 }
 
 QString messageStableKey(const QVariantMap &row)
 {
-    const QString account = row.value(QStringLiteral("accountEmail")).toString();
-    const QString folder = row.value(QStringLiteral("folder")).toString();
-    const QString uid = row.value(QStringLiteral("uid")).toString();
+    const QString account = row.value("accountEmail"_L1).toString();
+    const QString folder = row.value("folder"_L1).toString();
+    const QString uid = row.value("uid"_L1).toString();
     if (!account.isEmpty() && !folder.isEmpty() && !uid.isEmpty()) {
-        return QStringLiteral("msg:%1|%2|%3").arg(account, folder, uid);
+        return "msg:%1|%2|%3"_L1.arg(account, folder, uid);
     }
-    return QStringLiteral("msg:%1|%2|%3|%4|%5")
+    return "msg:%1|%2|%3|%4|%5"_L1
             .arg(account,
-                 row.value(QStringLiteral("uid")).toString(),
-                 row.value(QStringLiteral("receivedAt")).toString(),
-                 row.value(QStringLiteral("sender")).toString(),
-                 row.value(QStringLiteral("subject")).toString());
+                 row.value("uid"_L1).toString(),
+                 row.value("receivedAt"_L1).toString(),
+                 row.value("sender"_L1).toString(),
+                 row.value("subject"_L1).toString());
 }
 
 } // namespace
@@ -96,26 +96,26 @@ QVariant MessageListModel::data(const QModelIndex &index, int role) const
     case TitleRole: return row.title;
     case ExpandedRole: return row.expanded;
     case MessageKeyRole: return row.stableKey;
-    case AccountEmailRole: return row.message.value(QStringLiteral("accountEmail"));
-    case FolderRole: return row.message.value(QStringLiteral("folder"));
-    case UidRole: return row.message.value(QStringLiteral("uid"));
-    case SenderRole: return row.message.value(QStringLiteral("sender"));
-    case RecipientRole: return row.message.value(QStringLiteral("recipient"));
-    case SubjectRole: return row.message.value(QStringLiteral("subject"));
-    case ReceivedAtRole: return row.message.value(QStringLiteral("receivedAt"));
-    case SnippetRole: return row.message.value(QStringLiteral("snippet"));
-    case AvatarDomainRole: return row.message.value(QStringLiteral("avatarDomain"));
-    case AvatarUrlRole: return row.message.value(QStringLiteral("avatarUrl"));
-    case AvatarSourceRole: return row.message.value(QStringLiteral("avatarSource"));
-    case UnreadRole: return row.message.value(QStringLiteral("unread"));
-    case HasAttachmentsRole: return row.message.value(QStringLiteral("hasAttachments"));
-    case HasTrackingPixelRole: return row.message.value(QStringLiteral("hasTrackingPixel"));
-    case ThreadCountRole: return row.message.value(QStringLiteral("threadCount"));
-    case IsImportantRole: return row.message.value(QStringLiteral("isImportant"));
-    case AllSendersRole:  return row.message.value(QStringLiteral("allSenders"));
-    case FlaggedRole:          return row.message.value(QStringLiteral("flagged"));
-    case IsSearchResultRole:   return row.message.value(QStringLiteral("isSearchResult"));
-    case ResultFolderRole:     return row.message.value(QStringLiteral("folder"));
+    case AccountEmailRole: return row.message.value("accountEmail"_L1);
+    case FolderRole: return row.message.value("folder"_L1);
+    case UidRole: return row.message.value("uid"_L1);
+    case SenderRole: return row.message.value("sender"_L1);
+    case RecipientRole: return row.message.value("recipient"_L1);
+    case SubjectRole: return row.message.value("subject"_L1);
+    case ReceivedAtRole: return row.message.value("receivedAt"_L1);
+    case SnippetRole: return row.message.value("snippet"_L1);
+    case AvatarDomainRole: return row.message.value("avatarDomain"_L1);
+    case AvatarUrlRole: return row.message.value("avatarUrl"_L1);
+    case AvatarSourceRole: return row.message.value("avatarSource"_L1);
+    case UnreadRole: return row.message.value("unread"_L1);
+    case HasAttachmentsRole: return row.message.value("hasAttachments"_L1);
+    case HasTrackingPixelRole: return row.message.value("hasTrackingPixel"_L1);
+    case ThreadCountRole: return row.message.value("threadCount"_L1);
+    case IsImportantRole: return row.message.value("isImportant"_L1);
+    case AllSendersRole:  return row.message.value("allSenders"_L1);
+    case FlaggedRole:          return row.message.value("flagged"_L1);
+    case IsSearchResultRole:   return row.message.value("isSearchResult"_L1);
+    case ResultFolderRole:     return row.message.value("folder"_L1);
     default: return {};
     }
 }
@@ -220,22 +220,22 @@ void MessageListModel::setBucketExpanded(const QString &bucketKey, bool expanded
     // Expansion state only affects the view — no DB re-query needed.
     const QString key = bucketKey.trimmed();
     bool changed = false;
-    if (key == QStringLiteral("today")) {
+    if (key == "today"_L1) {
         changed = (m_todayExpanded != expanded);
         m_todayExpanded = expanded;
-    } else if (key == QStringLiteral("yesterday")) {
+    } else if (key == "yesterday"_L1) {
         changed = (m_yesterdayExpanded != expanded);
         m_yesterdayExpanded = expanded;
-    } else if (key == QStringLiteral("lastWeek")) {
+    } else if (key == "lastWeek"_L1) {
         changed = (m_lastWeekExpanded != expanded);
         m_lastWeekExpanded = expanded;
-    } else if (key == QStringLiteral("twoWeeksAgo")) {
+    } else if (key == "twoWeeksAgo"_L1) {
         changed = (m_twoWeeksAgoExpanded != expanded);
         m_twoWeeksAgoExpanded = expanded;
-    } else if (key == QStringLiteral("older")) {
+    } else if (key == "older"_L1) {
         changed = (m_olderExpanded != expanded);
         m_olderExpanded = expanded;
-    } else if (key.startsWith(QStringLiteral("weekday-"))) {
+    } else if (key.startsWith("weekday-"_L1)) {
         const bool prev = m_weekdayExpanded.value(key, true);
         changed = (prev != expanded);
         m_weekdayExpanded.insert(key, expanded);
@@ -437,19 +437,19 @@ void MessageListModel::onMessageMarkedRead(const QString &accountEmail, const QS
     for (int i = 0; i < m_rows.size(); ++i) {
         Row &row = m_rows[i];
         if (row.type != MessageRow) continue;
-        if (row.message.value(QStringLiteral("accountEmail")).toString() != accountEmail) continue;
-        if (row.message.value(QStringLiteral("uid")).toString() != uid) continue;
-        if (row.message.value(QStringLiteral("unread")).toInt() == 0) continue;
-        row.message.insert(QStringLiteral("unread"), 0);
+        if (row.message.value("accountEmail"_L1).toString() != accountEmail) continue;
+        if (row.message.value("uid"_L1).toString() != uid) continue;
+        if (row.message.value("unread"_L1).toInt() == 0) continue;
+        row.message.insert("unread"_L1, 0);
         emit dataChanged(index(i), index(i), {UnreadRole});
         break;
     }
     // Also patch m_allRows so the window doesn't restore the stale value on the next scroll.
     for (Row &row : m_allRows) {
         if (row.type == MessageRow
-                && row.message.value(QStringLiteral("accountEmail")).toString() == accountEmail
-                && row.message.value(QStringLiteral("uid")).toString() == uid) {
-            row.message.insert(QStringLiteral("unread"), 0);
+                && row.message.value("accountEmail"_L1).toString() == accountEmail
+                && row.message.value("uid"_L1).toString() == uid) {
+            row.message.insert("unread"_L1, 0);
             break;
         }
     }
@@ -461,18 +461,18 @@ void MessageListModel::onMessageFlaggedChanged(const QString &accountEmail, cons
     for (int i = 0; i < m_rows.size(); ++i) {
         Row &row = m_rows[i];
         if (row.type != MessageRow) continue;
-        if (row.message.value(QStringLiteral("accountEmail")).toString() != accountEmail) continue;
-        if (row.message.value(QStringLiteral("uid")).toString() != uid) continue;
-        if (row.message.value(QStringLiteral("flagged")).toInt() == newFlagged) continue;
-        row.message.insert(QStringLiteral("flagged"), newFlagged);
+        if (row.message.value("accountEmail"_L1).toString() != accountEmail) continue;
+        if (row.message.value("uid"_L1).toString() != uid) continue;
+        if (row.message.value("flagged"_L1).toInt() == newFlagged) continue;
+        row.message.insert("flagged"_L1, newFlagged);
         emit dataChanged(index(i), index(i), {FlaggedRole});
         break;
     }
     for (Row &row : m_allRows) {
         if (row.type == MessageRow
-                && row.message.value(QStringLiteral("accountEmail")).toString() == accountEmail
-                && row.message.value(QStringLiteral("uid")).toString() == uid) {
-            row.message.insert(QStringLiteral("flagged"), newFlagged);
+                && row.message.value("accountEmail"_L1).toString() == accountEmail
+                && row.message.value("uid"_L1).toString() == uid) {
+            row.message.insert("flagged"_L1, newFlagged);
             break;
         }
     }
@@ -517,28 +517,28 @@ QVector<MessageListModel::Row> MessageListModel::buildRows(const QVariantList &r
     QVariantList workingRows = rows;
 
     if (workingRows.isEmpty()) {
-        const bool inboxSelected = m_folderKey.compare(QStringLiteral("account:inbox"), Qt::CaseInsensitive) == 0;
+        const bool inboxSelected = m_folderKey.compare("account:inbox"_L1, Qt::CaseInsensitive) == 0;
         const bool categoryTabActive = !m_selectedCategories.isEmpty();
         if (inboxSelected && !categoryTabActive) {
             QVariantMap mock;
-            mock.insert(QStringLiteral("accountEmail"), QString());
-            mock.insert(QStringLiteral("folder"), QStringLiteral("INBOX"));
-            mock.insert(QStringLiteral("uid"), QStringLiteral("mock"));
-            mock.insert(QStringLiteral("sender"), QStringLiteral("welcome@kestrel.mail"));
-            mock.insert(QStringLiteral("subject"), QStringLiteral("Welcome to Kestrel Mail"));
-            mock.insert(QStringLiteral("snippet"), QStringLiteral("Your account is set up. Press Refresh to load real mail from your provider."));
-            mock.insert(QStringLiteral("receivedAt"), QStringLiteral("2026-02-17T11:00:00"));
-            mock.insert(QStringLiteral("unread"), true);
+            mock.insert("accountEmail"_L1, QString());
+            mock.insert("folder"_L1, "INBOX"_L1);
+            mock.insert("uid"_L1, "mock"_L1);
+            mock.insert("sender"_L1, "welcome@kestrel.mail"_L1);
+            mock.insert("subject"_L1, "Welcome to Kestrel Mail"_L1);
+            mock.insert("snippet"_L1, "Your account is set up. Press Refresh to load real mail from your provider."_L1);
+            mock.insert("receivedAt"_L1, "2026-02-17T11:00:00"_L1);
+            mock.insert("unread"_L1, true);
             workingRows.push_back(mock);
         }
     }
 
     QHash<QString, QList<QVariantMap>> buckets;
-    buckets.insert(QStringLiteral("today"), {});
-    buckets.insert(QStringLiteral("yesterday"), {});
-    buckets.insert(QStringLiteral("lastWeek"), {});
-    buckets.insert(QStringLiteral("twoWeeksAgo"), {});
-    buckets.insert(QStringLiteral("older"), {});
+    buckets.insert("today"_L1, {});
+    buckets.insert("yesterday"_L1, {});
+    buckets.insert("lastWeek"_L1, {});
+    buckets.insert("twoWeeksAgo"_L1, {});
+    buckets.insert("older"_L1, {});
 
     const QDate today = QDate::currentDate();
     const QDate weekStart = today.addDays(-(today.dayOfWeek() % 7)); // Sunday-start week
@@ -557,14 +557,14 @@ QVector<MessageListModel::Row> MessageListModel::buildRows(const QVariantList &r
         const QString stable = messageStableKey(map);
         if (dedupe.contains(stable)) continue;
         dedupe.insert(stable);
-        const QString bucket = bucketKeyForDate(map.value(QStringLiteral("receivedAt")).toString());
+        const QString bucket = bucketKeyForDate(map.value("receivedAt"_L1).toString());
         buckets[bucket].push_back(map);
     }
 
     QStringList order;
-    order << QStringLiteral("today") << QStringLiteral("yesterday");
+    order << "today"_L1 << "yesterday"_L1;
     order << weekdayOrder;
-    order << QStringLiteral("lastWeek") << QStringLiteral("twoWeeksAgo") << QStringLiteral("older");
+    order << "lastWeek"_L1 << "twoWeeksAgo"_L1 << "older"_L1;
 
     for (const QString &bucket : order) {
         const QList<QVariantMap> rowsInBucket = buckets.value(bucket);
@@ -576,7 +576,7 @@ QVector<MessageListModel::Row> MessageListModel::buildRows(const QVariantList &r
         header.title = bucketLabel(bucket);
         header.expanded = bucketExpanded(bucket);
         header.hasTopGap = !out.isEmpty();
-        header.stableKey = QStringLiteral("header:%1").arg(bucket);
+        header.stableKey = "header:%1"_L1.arg(bucket);
         out.push_back(header);
 
         if (!header.expanded) continue;
@@ -728,24 +728,24 @@ QList<int> MessageListModel::changedRoles(const Row &oldRow, const Row &newRow) 
 
     const QVariantMap &o = oldRow.message;
     const QVariantMap &n = newRow.message;
-    if (o.value(QStringLiteral("accountEmail")) != n.value(QStringLiteral("accountEmail"))) roleSet.insert(AccountEmailRole);
-    if (o.value(QStringLiteral("folder")) != n.value(QStringLiteral("folder"))) roleSet.insert(FolderRole);
-    if (o.value(QStringLiteral("uid")) != n.value(QStringLiteral("uid"))) roleSet.insert(UidRole);
-    if (o.value(QStringLiteral("sender")) != n.value(QStringLiteral("sender"))) roleSet.insert(SenderRole);
-    if (o.value(QStringLiteral("subject")) != n.value(QStringLiteral("subject"))) roleSet.insert(SubjectRole);
-    if (o.value(QStringLiteral("receivedAt")) != n.value(QStringLiteral("receivedAt"))) roleSet.insert(ReceivedAtRole);
-    if (o.value(QStringLiteral("snippet")) != n.value(QStringLiteral("snippet"))) roleSet.insert(SnippetRole);
-    if (o.value(QStringLiteral("unread"))        != n.value(QStringLiteral("unread")))        roleSet.insert(UnreadRole);
-    if (o.value(QStringLiteral("recipient"))     != n.value(QStringLiteral("recipient")))     roleSet.insert(RecipientRole);
-    if (o.value(QStringLiteral("avatarDomain"))  != n.value(QStringLiteral("avatarDomain")))  roleSet.insert(AvatarDomainRole);
-    if (o.value(QStringLiteral("avatarUrl"))     != n.value(QStringLiteral("avatarUrl")))     roleSet.insert(AvatarUrlRole);
-    if (o.value(QStringLiteral("avatarSource"))  != n.value(QStringLiteral("avatarSource")))  roleSet.insert(AvatarSourceRole);
-    if (o.value(QStringLiteral("hasAttachments"))   != n.value(QStringLiteral("hasAttachments")))   roleSet.insert(HasAttachmentsRole);
-    if (o.value(QStringLiteral("hasTrackingPixel")) != n.value(QStringLiteral("hasTrackingPixel"))) roleSet.insert(HasTrackingPixelRole);
-    if (o.value(QStringLiteral("threadCount"))   != n.value(QStringLiteral("threadCount")))   roleSet.insert(ThreadCountRole);
-    if (o.value(QStringLiteral("isImportant"))   != n.value(QStringLiteral("isImportant")))   roleSet.insert(IsImportantRole);
-    if (o.value(QStringLiteral("allSenders"))    != n.value(QStringLiteral("allSenders")))    roleSet.insert(AllSendersRole);
-    if (o.value(QStringLiteral("flagged"))       != n.value(QStringLiteral("flagged")))       roleSet.insert(FlaggedRole);
+    if (o.value("accountEmail"_L1) != n.value("accountEmail"_L1)) roleSet.insert(AccountEmailRole);
+    if (o.value("folder"_L1) != n.value("folder"_L1)) roleSet.insert(FolderRole);
+    if (o.value("uid"_L1) != n.value("uid"_L1)) roleSet.insert(UidRole);
+    if (o.value("sender"_L1) != n.value("sender"_L1)) roleSet.insert(SenderRole);
+    if (o.value("subject"_L1) != n.value("subject"_L1)) roleSet.insert(SubjectRole);
+    if (o.value("receivedAt"_L1) != n.value("receivedAt"_L1)) roleSet.insert(ReceivedAtRole);
+    if (o.value("snippet"_L1) != n.value("snippet"_L1)) roleSet.insert(SnippetRole);
+    if (o.value("unread"_L1)        != n.value("unread"_L1))        roleSet.insert(UnreadRole);
+    if (o.value("recipient"_L1)     != n.value("recipient"_L1))     roleSet.insert(RecipientRole);
+    if (o.value("avatarDomain"_L1)  != n.value("avatarDomain"_L1))  roleSet.insert(AvatarDomainRole);
+    if (o.value("avatarUrl"_L1)     != n.value("avatarUrl"_L1))     roleSet.insert(AvatarUrlRole);
+    if (o.value("avatarSource"_L1)  != n.value("avatarSource"_L1))  roleSet.insert(AvatarSourceRole);
+    if (o.value("hasAttachments"_L1)   != n.value("hasAttachments"_L1))   roleSet.insert(HasAttachmentsRole);
+    if (o.value("hasTrackingPixel"_L1) != n.value("hasTrackingPixel"_L1)) roleSet.insert(HasTrackingPixelRole);
+    if (o.value("threadCount"_L1)   != n.value("threadCount"_L1))   roleSet.insert(ThreadCountRole);
+    if (o.value("isImportant"_L1)   != n.value("isImportant"_L1))   roleSet.insert(IsImportantRole);
+    if (o.value("allSenders"_L1)    != n.value("allSenders"_L1))    roleSet.insert(AllSendersRole);
+    if (o.value("flagged"_L1)       != n.value("flagged"_L1))       roleSet.insert(FlaggedRole);
 
     QList<int> roles = roleSet.values();
     std::sort(roles.begin(), roles.end());
@@ -754,10 +754,10 @@ QList<int> MessageListModel::changedRoles(const Row &oldRow, const Row &newRow) 
 
 bool MessageListModel::bucketExpanded(const QString &bucketKey) const
 {
-    if (bucketKey == QStringLiteral("today")) return m_todayExpanded;
-    if (bucketKey == QStringLiteral("yesterday")) return m_yesterdayExpanded;
-    if (bucketKey.startsWith(QStringLiteral("weekday-"))) return m_weekdayExpanded.value(bucketKey, true);
-    if (bucketKey == QStringLiteral("lastWeek")) return m_lastWeekExpanded;
-    if (bucketKey == QStringLiteral("twoWeeksAgo")) return m_twoWeeksAgoExpanded;
+    if (bucketKey == "today"_L1) return m_todayExpanded;
+    if (bucketKey == "yesterday"_L1) return m_yesterdayExpanded;
+    if (bucketKey.startsWith("weekday-"_L1)) return m_weekdayExpanded.value(bucketKey, true);
+    if (bucketKey == "lastWeek"_L1) return m_lastWeekExpanded;
+    if (bucketKey == "twoWeeksAgo"_L1) return m_twoWeeksAgoExpanded;
     return m_olderExpanded;
 }

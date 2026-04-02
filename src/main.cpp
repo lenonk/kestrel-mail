@@ -39,6 +39,8 @@
 #include "core/transport/smtp/smtpservice.h"
 #include <KNotification>
 
+using namespace Qt::Literals::StringLiterals;
+
 class CachingNetworkAccessManagerFactory : public QQmlNetworkAccessManagerFactory
 {
 public:
@@ -48,7 +50,7 @@ public:
         auto *diskCache = new QNetworkDiskCache(nam);
 
         const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-        const QString cachePath = cacheBase + QStringLiteral("/http");
+        const QString cachePath = cacheBase + "/http"_L1;
         QDir().mkpath(cachePath);
         diskCache->setCacheDirectory(cachePath);
         diskCache->setMaximumCacheSize(128LL * 1024LL * 1024LL); // 128MB
@@ -97,19 +99,19 @@ int main(int argc, char *argv[])
 {
     QtWebEngineQuick::initialize();
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("kestrel-mail"));
-    app.setOrganizationDomain(QStringLiteral("github.com"));
-    app.setOrganizationName(QStringLiteral("lenonk"));
-    const QIcon kestrelIcon(QStringLiteral(":/data/assets/kestrel-mail.png"));
+    app.setApplicationName("kestrel-mail"_L1);
+    app.setOrganizationDomain("github.com"_L1);
+    app.setOrganizationName("lenonk"_L1);
+    const QIcon kestrelIcon(":/data/assets/kestrel-mail.png"_L1);
     app.setWindowIcon(kestrelIcon.isNull()
-                          ? QIcon::fromTheme(QStringLiteral("mail-message-new"))
+                          ? QIcon::fromTheme("mail-message-new"_L1)
                           : kestrelIcon);
 
     KLocalizedString::setApplicationDomain("kestrel-mail");
 
     SplashScreen *splash = nullptr;
     {
-        QPixmap splashPixmap(QStringLiteral(":/data/assets/splash.png"));
+        QPixmap splashPixmap(":/data/assets/splash.png"_L1);
         if (!splashPixmap.isNull()) {
             splash = new SplashScreen(splashPixmap);
             splash->show();
@@ -156,12 +158,12 @@ int main(int argc, char *argv[])
     // Desktop notification for new mail.
     QObject::connect(&dataStore, &DataStore::newMailReceived, &app,
         [&dataStore, &imapService](const QVariantMap &info) {
-            const QString senderRaw = info.value(QStringLiteral("senderRaw")).toString();
-            const QString subject   = info.value(QStringLiteral("subject")).toString();
-            const QString snippet   = info.value(QStringLiteral("snippet")).toString();
-            const QString account   = info.value(QStringLiteral("accountEmail")).toString();
-            const QString folder    = info.value(QStringLiteral("folder")).toString();
-            const QString uid       = info.value(QStringLiteral("uid")).toString();
+            const QString senderRaw = info.value("senderRaw"_L1).toString();
+            const QString subject   = info.value("subject"_L1).toString();
+            const QString snippet   = info.value("snippet"_L1).toString();
+            const QString account   = info.value("accountEmail"_L1).toString();
+            const QString folder    = info.value("folder"_L1).toString();
+            const QString uid       = info.value("uid"_L1).toString();
 
             // Resolve display name through the same path the message list uses:
             // contacts DB lookup → extracted display name → bare email fallback.
@@ -172,14 +174,14 @@ int main(int argc, char *argv[])
                 : senderRaw.trimmed();
             QString sender = dataStore.displayNameForEmail(email);
             if (sender.isEmpty())
-                sender = info.value(QStringLiteral("senderDisplay")).toString();
+                sender = info.value("senderDisplay"_L1).toString();
 
-            auto *n = new KNotification(QStringLiteral("newMail"));
+            auto *n = new KNotification("newMail"_L1);
             n->setTitle(sender);
 
             QString body = subject;
             if (!snippet.isEmpty())
-                body += QStringLiteral("\n") + snippet;
+                body += "\n"_L1 + snippet;
             n->setText(body);
 
             // Load sender avatar or generate initials fallback.
@@ -187,7 +189,7 @@ int main(int argc, char *argv[])
             QPixmap avatar;
             if (!avatarUrl.isEmpty()) {
                 QString path = avatarUrl;
-                if (path.startsWith(QStringLiteral("file://")))
+                if (path.startsWith("file://"_L1))
                     path = path.mid(7);
                 avatar = QPixmap(path);
                 if (!avatar.isNull())
@@ -196,10 +198,10 @@ int main(int argc, char *argv[])
             if (avatar.isNull())
                 avatar = DataStore::avatarPixmap(sender, senderRaw);
             n->setPixmap(avatar);
-            n->setHint(QStringLiteral("sound-name"), QStringLiteral("message-new-instant"));
+            n->setHint("sound-name"_L1, "message-new-instant"_L1);
 
-            auto *markRead = n->addAction(QStringLiteral("Mark as Read"));
-            auto *reply    = n->addAction(QStringLiteral("Reply"));
+            auto *markRead = n->addAction("Mark as Read"_L1);
+            auto *reply    = n->addAction("Reply"_L1);
 
             QObject::connect(markRead, &KNotificationAction::activated, [&imapService, &dataStore, account, folder, uid]() {
                 imapService.markMessageRead(account, folder, uid);
@@ -237,10 +239,10 @@ int main(int argc, char *argv[])
     // Find a condensed sans-serif font, preferring specific families.
     {
         const QStringList preferred = {
-            QStringLiteral("Open Sans Condensed"),
-            QStringLiteral("DejaVu Sans Condensed"),
-            QStringLiteral("Roboto Condensed"),
-            QStringLiteral("Fira Sans Condensed"),
+            "Open Sans Condensed"_L1,
+            "DejaVu Sans Condensed"_L1,
+            "Roboto Condensed"_L1,
+            "Fira Sans Condensed"_L1,
         };
         const auto allFamilies = QFontDatabase::families();
         const QSet<QString> installed(allFamilies.cbegin(), allFamilies.cend());
@@ -251,7 +253,7 @@ int main(int argc, char *argv[])
         // Fallback: any installed condensed sans font.
         if (condensed.isEmpty()) {
             for (const auto &f : allFamilies) {
-                if (f.endsWith(QStringLiteral("Condensed"), Qt::CaseInsensitive)
+                if (f.endsWith("Condensed"_L1, Qt::CaseInsensitive)
                     && !QFontDatabase::isFixedPitch(f)) {
                     condensed = f;
                     break;
@@ -267,7 +269,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("kestrelDebugBuild", true);
 #endif
 
-    const QUrl url(QStringLiteral("qrc:/qml/Main.qml"));
+    const QUrl url("qrc:/qml/Main.qml"_L1);
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
@@ -311,20 +313,20 @@ int main(int argc, char *argv[])
     WindowExposeWatcher *exposeWatcher = nullptr;
     if (mainWindow) {
         exposeWatcher = new WindowExposeWatcher(mainWindow, &app);
-        engine.rootContext()->setContextProperty(QStringLiteral("windowExposeWatcher"), exposeWatcher);
+        engine.rootContext()->setContextProperty("windowExposeWatcher"_L1, exposeWatcher);
     }
 
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
         auto *trayMenu = new QMenu();
-        auto *showHideAction = trayMenu->addAction(QStringLiteral("Show / Hide"));
+        auto *showHideAction = trayMenu->addAction("Show / Hide"_L1);
         trayMenu->addSeparator();
-        auto *quitAction = trayMenu->addAction(QStringLiteral("Quit"));
+        auto *quitAction = trayMenu->addAction("Quit"_L1);
 
         auto *trayIcon = new QSystemTrayIcon(&app);
-        // const QIcon tray = QIcon::fromTheme(QStringLiteral("mail-message-new"), app.windowIcon());
+        // const QIcon tray = QIcon::fromTheme("mail-message-new"_L1, app.windowIcon());
         const QIcon tray = kestrelIcon;
         trayIcon->setIcon(tray);
-        trayIcon->setToolTip(QStringLiteral("Kestrel Mail"));
+        trayIcon->setToolTip("Kestrel Mail"_L1);
         trayIcon->setContextMenu(trayMenu);
 
         auto toggleMainWindow = [&engine]() {

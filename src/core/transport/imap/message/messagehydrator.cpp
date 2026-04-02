@@ -117,7 +117,7 @@ QString MessageHydrator::execute(const Request &req) {
         // fallback, or unresolved CID image refs, the 128 KB window likely missed
         // related MIME parts. Retry with the full body so mailio can inline CIDs.
         const bool isPlainTextFallback = html.contains(QLatin1String("white-space:normal"));
-        const bool hasUnresolvedCidSrc = QRegularExpression(QStringLiteral("\\bsrc\\s*=\\s*[\"']\\s*cid:"),
+        const bool hasUnresolvedCidSrc = QRegularExpression("\\bsrc\\s*=\\s*[\"']\\s*cid:"_L1,
                                                             QRegularExpression::CaseInsensitiveOption)
                                              .match(html).hasMatch();
         // Also retry if the bounded fetch was truncated: server returned exactly 131072 bytes,

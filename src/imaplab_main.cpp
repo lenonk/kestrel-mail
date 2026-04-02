@@ -4,6 +4,8 @@
 
 #include "tools/imaplabcontroller.h"
 
+using namespace Qt::Literals::StringLiterals;
+
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
@@ -12,7 +14,7 @@ int main(int argc, char *argv[])
     ImapLabController controller(&engine);
     engine.rootContext()->setContextProperty("imapLab", &controller);
 
-    const QUrl url(QStringLiteral("qrc:/qml/ImapLab.qml"));
+    const QUrl url("qrc:/qml/ImapLab.qml"_L1);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, []() {
         QCoreApplication::exit(-1);
     }, Qt::QueuedConnection);

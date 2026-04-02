@@ -14,7 +14,7 @@ Rectangle {
     property int    attachmentBytes:    0      // 0 = hide size label
     property bool   selected:           false  // highlight state for received view
     property bool   showRemoveButton:   false  // true in compose mode
-    property bool   hovered:            chipMouse.containsMouse
+    readonly property bool   hovered:            chipMouse.containsMouse
 
     signal removeClicked
     signal chipClicked(var mouse)

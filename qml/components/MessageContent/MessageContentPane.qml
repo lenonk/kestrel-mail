@@ -83,7 +83,7 @@ Rectangle {
             return i18n("Folder")
         return (appRoot && appRoot.displayFolderName) ? appRoot.displayFolderName(raw) : raw
     }
-    property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
+    readonly property bool forceDarkHtml: !!(appRoot ? appRoot.contentPaneDarkModeEnabled : true)
     readonly property bool hasExternalImages: {
         const html = (root.messageBodyHtml || "").toString();
         return /src\s*=\s*["']https?:\/\//i.test(html)
@@ -976,7 +976,7 @@ Rectangle {
             Item {
                 id: avatarWrap
 
-                property var avatarSources: appRoot.senderAvatarSources(root.senderText, "", "", root.messageData && root.messageData.accountEmail ? root.messageData.accountEmail : "")
+                readonly property var avatarSources: appRoot.senderAvatarSources(root.senderText, "", "", root.messageData && root.messageData.accountEmail ? root.messageData.accountEmail : "")
 
                 Layout.preferredHeight: Kirigami.Units.iconSizes.large + 8
                 Layout.preferredWidth: Kirigami.Units.iconSizes.large + 8

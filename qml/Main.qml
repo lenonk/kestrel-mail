@@ -2169,7 +2169,7 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.favoritesExpanded) ? root.visibleFavoriteItems() : []
                         delegate: Components.FolderItemDelegate {
-                            property var folderStats: root.folderStatsByKey(modelData.key, "")
+                            readonly property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
                             indentLevel: 1
@@ -2200,8 +2200,8 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.tagsExpanded) ? root.tagFolderItems() : []
                         delegate: Components.FolderItemDelegate {
-                            property string rawFolderName: (modelData.rawName || modelData.name || "")
-                            property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
+                            readonly property string rawFolderName: (modelData.rawName || modelData.name || "")
+                            readonly property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
                             indentLevel: 1
@@ -2248,8 +2248,8 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.accountExpanded) ? root.accountFolderItems() : []
                         delegate: Components.FolderItemDelegate {
-                            property string rawFolderName: (modelData.rawName || modelData.name || "")
-                            property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
+                            readonly property string rawFolderName: (modelData.rawName || modelData.name || "")
+                            readonly property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
                             indentLevel: 1
@@ -2281,8 +2281,8 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.accountExpanded && root.moreExpanded) ? root.moreAccountFolderItems() : []
                         delegate: Components.FolderItemDelegate {
-                            property string rawFolderName: (modelData.rawName || modelData.name || "")
-                            property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
+                            readonly property string rawFolderName: (modelData.rawName || modelData.name || "")
+                            readonly property var folderStats: root.folderStatsByKey(modelData.key, rawFolderName)
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
                             folderKey: modelData.key
@@ -2320,7 +2320,7 @@ Kirigami.ApplicationWindow {
                     Repeater {
                         model: (root.activeWorkspace === "mail" && root.localFoldersExpanded) ? root.allLocalFolderItems() : []
                         delegate: Components.FolderItemDelegate {
-                            property var folderStats: root.folderStatsByKey(modelData.key, "")
+                            readonly property var folderStats: root.folderStatsByKey(modelData.key, "")
                             rowHeight: root.folderRowHeight
                             iconSize: root.folderListIconSize
                             indentLevel: 1

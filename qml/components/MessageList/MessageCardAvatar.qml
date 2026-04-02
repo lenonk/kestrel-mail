@@ -13,7 +13,7 @@ Item {
     property string displayName: ""
     property string fallbackText: ""
 
-    property var avatarSources: appRoot
+    readonly property var avatarSources: appRoot
                                 ? appRoot.senderAvatarSources(
                                    mailbox,
                                    "",

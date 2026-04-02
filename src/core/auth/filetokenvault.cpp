@@ -1,17 +1,21 @@
 #include "filetokenvault.h"
 
+#include "../utils.h"
+
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
 
+using namespace Qt::Literals::StringLiterals;
+
 FileTokenVault::FileTokenVault()
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
-            + QStringLiteral("/kestrel-mail");
+            + "/kestrel-mail"_L1;
     QDir().mkpath(base);
-    m_path = base + QStringLiteral("/tokens.json");
+    m_path = base + "/tokens.json"_L1;
 }
 
 bool FileTokenVault::storeRefreshToken(const QString &accountEmail, const QString &refreshToken)
@@ -22,7 +26,7 @@ bool FileTokenVault::storeRefreshToken(const QString &accountEmail, const QStrin
         obj = QJsonDocument::fromJson(in.readAll()).object();
     }
 
-    obj[accountEmail.trimmed().toLower()] = refreshToken;
+    obj[Kestrel::normalizeEmail(accountEmail)] = refreshToken;
 
     QFile out(m_path);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -39,7 +43,7 @@ QString FileTokenVault::loadRefreshToken(const QString &accountEmail)
         return {};
     }
     const QJsonObject obj = QJsonDocument::fromJson(in.readAll()).object();
-    return obj.value(accountEmail.trimmed().toLower()).toString();
+    return obj.value(Kestrel::normalizeEmail(accountEmail)).toString();
 }
 
 bool FileTokenVault::removeRefreshToken(const QString &accountEmail)
@@ -52,7 +56,7 @@ bool FileTokenVault::removeRefreshToken(const QString &accountEmail)
     QJsonObject obj = QJsonDocument::fromJson(in.readAll()).object();
     in.close();
 
-    obj.remove(accountEmail.trimmed().toLower());
+    obj.remove(Kestrel::normalizeEmail(accountEmail));
 
     QFile out(m_path);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {

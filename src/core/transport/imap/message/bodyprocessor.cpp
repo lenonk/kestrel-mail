@@ -14,7 +14,7 @@ QList<BodyPart>
 BodyStructureParser::parsePreferredTextParts() {
     QList<BodyPart> out;
 
-    auto pos = m_text.indexOf(QStringLiteral("BODYSTRUCTURE"));
+    auto pos = m_text.indexOf("BODYSTRUCTURE"_L1);
     if (pos < 0)
         return out;
 
@@ -126,9 +126,9 @@ BodyStructureParser::parseMultipart(const QString &partPrefix, QList<BodyPart> &
     skipRemainingInList();
 
     // slight preference for multipart/alternative first part
-    if (subtype == QStringLiteral("ALTERNATIVE")) {
+    if (subtype == "ALTERNATIVE"_L1) {
         for (auto &p : out) {
-            if (p.partId.startsWith(partPrefix.isEmpty() ? QStringLiteral("1") : (partPrefix + "."))) {
+            if (p.partId.startsWith(partPrefix.isEmpty() ? "1"_L1 : (partPrefix + "."))) {
                 p.score += 2;
             }
         }
@@ -143,10 +143,10 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
     // BODYSTRUCTURE param format: ("KEY" "VALUE" "KEY2" "VALUE2" ...)
     // Both key and value are quoted atoms separated by whitespace.
     static const QRegularExpression charsetRe(
-        QStringLiteral("\"charset\"\\s+\"([a-z0-9._-]+)\""),
+        "\"charset\"\\s+\"([a-z0-9._-]+)\""_L1,
         QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression nameRe(
-        QStringLiteral("\"(?:name|filename)\"\\s+\"([^\"]+)\""),
+        "\"(?:name|filename)\"\\s+\"([^\"]+)\""_L1,
         QRegularExpression::CaseInsensitiveOption);
 
     // Helper: extract paren-delimited block at current position, preserving original case.
@@ -185,7 +185,7 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
     const auto sizeToken = parseAtomOrQuoted();
 
     // TEXT parts have an extra 'lines' field after size.
-    if (type == QStringLiteral("TEXT"))
+    if (type == "TEXT"_L1)
         skipAny();
 
     // Optional md5: atom or quoted string (never a list).
@@ -200,10 +200,10 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
         const QString dispRaw = readParenBlock();
         if (!dispRaw.isEmpty()) {
             static const QRegularExpression dispTypeRe(
-                QStringLiteral("^\\(\\s*\"([^\"]+)\""),
+                "^\\(\\s*\"([^\"]+)\""_L1,
                 QRegularExpression::CaseInsensitiveOption);
             if (const auto dm = dispTypeRe.match(dispRaw); dm.hasMatch())
-                isInlineDisp = dm.captured(1).compare(QStringLiteral("inline"), Qt::CaseInsensitive) == 0;
+                isInlineDisp = dm.captured(1).compare("inline"_L1, Qt::CaseInsensitive) == 0;
             if (filename.isEmpty()) {
                 if (const auto fm = nameRe.match(dispRaw); fm.hasMatch())
                     filename = fm.captured(1).trimmed();
@@ -212,14 +212,14 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
     }
 
     {
-        const auto pid = partPrefix.isEmpty() ? QStringLiteral("1") : partPrefix;
+        const auto pid = partPrefix.isEmpty() ? "1"_L1 : partPrefix;
         BodyPart part;
 
         part.partId = pid;
         part.type = type;
         part.subtype = subtype;
         part.encoding = encoding;
-        part.charset = charset.isEmpty() ? QStringLiteral("utf-8") : charset;
+        part.charset = charset.isEmpty() ? "utf-8"_L1 : charset;
         part.filename = filename;
         part.isInline = isInlineDisp;
 
@@ -233,10 +233,10 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
             part.bytes = 0;
 
         int score = 0;
-        if (type == QStringLiteral("TEXT")) {
-            if (subtype == QStringLiteral("PLAIN"))
+        if (type == "TEXT"_L1) {
+            if (subtype == "PLAIN"_L1)
                 score += 300;
-            else if (subtype == QStringLiteral("HTML"))
+            else if (subtype == "HTML"_L1)
                 score += 200;
             else
                 score += 100;
@@ -244,10 +244,10 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
             if (!part.isAttachment)
                 score += 50;
 
-            if (part.charset == QStringLiteral("utf-8"))
+            if (part.charset == "utf-8"_L1)
                 score += 20;
 
-            if (encoding == QStringLiteral("quoted-printable") || encoding == QStringLiteral("7bit") || encoding == QStringLiteral("8bit"))
+            if (encoding == "quoted-printable"_L1 || encoding == "7bit"_L1 || encoding == "8bit"_L1)
                 score += 10;
         }
 
@@ -306,8 +306,8 @@ parseAttachmentParts(const QString &bodyStructureResponse) {
         if (p.isInline)
             continue;
         if (p.isAttachment
-                || (p.type != QStringLiteral("TEXT")
-                    && p.type != QStringLiteral("MULTIPART")
+                || (p.type != "TEXT"_L1
+                    && p.type != "MULTIPART"_L1
                     && !p.type.isEmpty())) {
             out.push_back(p);
         }
@@ -324,8 +324,8 @@ preferredSnippetPart(const QString &bodyStructureResponse) {
     BodyPart html;
 
     for (const BodyPart &p : parts) {
-        if (plain.partId.isEmpty() && p.subtype == QStringLiteral("PLAIN")) plain = p;
-        if (html.partId.isEmpty() && p.subtype == QStringLiteral("HTML")) html = p;
+        if (plain.partId.isEmpty() && p.subtype == "PLAIN"_L1) plain = p;
+        if (html.partId.isEmpty() && p.subtype == "HTML"_L1) html = p;
     }
 
     // Replies often have tiny plain parts; prefer HTML if plain is suspiciously short.
@@ -416,13 +416,13 @@ extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw) {
     const QString rawUtf8 = QString::fromUtf8(fetchRespRaw);
     const QString rawLatin1 = QString::fromLatin1(fetchRespRaw);
     auto extractRawHtmlDoc = [](const QString &raw) -> QString {
-        const int start = raw.indexOf(QStringLiteral("<html"), 0, Qt::CaseInsensitive);
+        const int start = raw.indexOf("<html"_L1, 0, Qt::CaseInsensitive);
         if (start < 0)
             return {};
-        const int end = raw.lastIndexOf(QStringLiteral("</html>"), -1, Qt::CaseInsensitive);
+        const int end = raw.lastIndexOf("</html>"_L1, -1, Qt::CaseInsensitive);
         if (end <= start)
             return {};
-        const int endIncl = end + QStringLiteral("</html>").size();
+        const int endIncl = end + "</html>"_L1.size();
         const QString doc = raw.mid(start, endIncl - start).trimmed();
         return doc.size() >= 256 ? doc : QString();
     };
@@ -435,16 +435,16 @@ extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw) {
 
     if (const QString plain = Mime::extractPlainTextWithMailio(fetchRespRaw).trimmed(); !plain.isEmpty()) {
         QString escaped = plain.toHtmlEscaped();
-        escaped.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
-        escaped.replace(QStringLiteral("\r"), QStringLiteral("\n"));
-        escaped.replace(QStringLiteral("\n"), QStringLiteral("<br/>\n"));
-        return QStringLiteral("<html><body style=\"white-space:normal;\">%1</body></html>").arg(escaped);
+        escaped.replace("\r\n"_L1, "\n"_L1);
+        escaped.replace("\r"_L1, "\n"_L1);
+        escaped.replace("\n"_L1, "<br/>\n"_L1);
+        return "<html><body style=\"white-space:normal;\">%1</body></html>"_L1.arg(escaped);
     }
 
-    return QStringLiteral(
+    return
         "<html><body style=\"font-family:sans-serif;padding:1.5em;color:#aaa;\">"
         "<p style=\"margin:0;\">(This message has no text content — it may contain only attachments.)</p>"
-        "</body></html>");
+        "</body></html>"_L1;
 }
 
 // Remove a complete <tag>…</tag> block using a linear string scan.
@@ -482,12 +482,12 @@ static QString flattenHtmlToText(const QString &html)
 
     // Block-end tags → newline so words don't jam together
     static const QRegularExpression kBreakTagsRe(
-        QStringLiteral("<br\\s*/?>|</p>|</div>|</li>|</tr>|</h[1-6]>"),
+        "<br\\s*/?>|</p>|</div>|</li>|</tr>|</h[1-6]>"_L1,
         QRegularExpression::CaseInsensitiveOption);
     s.replace(kBreakTagsRe, "\n"_L1);
 
     // Strip remaining tags
-    static const QRegularExpression kTagRe(QStringLiteral("<[^>]+>"));
+    static const QRegularExpression kTagRe("<[^>]+>"_L1);
     s.replace(kTagRe, " "_L1);
 
     // Decode common HTML entities
@@ -505,7 +505,7 @@ static QString flattenHtmlToText(const QString &html)
     s.replace("&rdquo;"_L1, u"\u201D"_s,   Qt::CaseInsensitive);
     s.replace("&ldquo;"_L1, u"\u201C"_s,   Qt::CaseInsensitive);
 
-    static const QRegularExpression kWsRe(QStringLiteral("\\s+"));
+    static const QRegularExpression kWsRe("\\s+"_L1);
     s.replace(kWsRe, " "_L1);
     return s.trimmed();
 }
@@ -576,24 +576,24 @@ extractBodyTextForSnippet(const QByteArray &fetchRespRaw) {
 QString
 extractHiddenPreheader(const QString &html) {
     static const QRegularExpression preheaderRe(
-            QStringLiteral("<(?:div|span|p)[^>]*style=[\"'][^\"']*(?:display\\s*:\\s*none|visibility\\s*:\\s*hidden|mso-hide\\s*:\\s*all)[^\"']*[\"'][^>]*>([\\s\\S]{1,400}?)</(?:div|span|p)>"),
+            "<(?:div|span|p)[^>]*style=[\"'][^\"']*(?:display\\s*:\\s*none|visibility\\s*:\\s*hidden|mso-hide\\s*:\\s*all)[^\"']*[\"'][^>]*>([\\s\\S]{1,400}?)</(?:div|span|p)>"_L1,
             QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression htmlTagRe (QStringLiteral("<[^>]+>"));
-    static const QRegularExpression htmlEntityRe (QStringLiteral("&nbsp;|&amp;|&[a-zA-Z0-9#]+;"));
-    static const QRegularExpression quotPrintRe (QStringLiteral("(=[0-9A-Fa-f]{2})+"));
-    static const QRegularExpression quotPrint2Re (QStringLiteral("=09|=20"));
-    static const QRegularExpression spacesRe (QStringLiteral("\\s+"));
+    static const QRegularExpression htmlTagRe ("<[^>]+>"_L1);
+    static const QRegularExpression htmlEntityRe ("&nbsp;|&amp;|&[a-zA-Z0-9#]+;"_L1);
+    static const QRegularExpression quotPrintRe ("(=[0-9A-Fa-f]{2})+"_L1);
+    static const QRegularExpression quotPrint2Re ("=09|=20"_L1);
+    static const QRegularExpression spacesRe ("\\s+"_L1);
 
     const auto m = preheaderRe.match(html);
     if (!m.hasMatch()) return {};
 
     auto pre = m.captured(1);
 
-    pre.replace(htmlTagRe, QStringLiteral(" "));
-    pre.replace(htmlEntityRe, QStringLiteral(" "));
-    pre.replace(quotPrintRe, QStringLiteral(" "));
-    pre.replace(quotPrint2Re, QStringLiteral(" "));
-    pre.replace(spacesRe, QStringLiteral(" "));
+    pre.replace(htmlTagRe, " "_L1);
+    pre.replace(htmlEntityRe, " "_L1);
+    pre.replace(quotPrintRe, " "_L1);
+    pre.replace(quotPrint2Re, " "_L1);
+    pre.replace(spacesRe, " "_L1);
 
     pre = pre.trimmed();
     if (pre.size() > 200)

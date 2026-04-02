@@ -55,11 +55,11 @@ BackgroundWorker::fetchAllFolderStatuses() const {
     if (!cxn)
         return out;
 
-    static const QRegularExpression uidNextRe(QStringLiteral("\\bUIDNEXT\\s+(\\d+)"),
+    static const QRegularExpression uidNextRe("\\bUIDNEXT\\s+(\\d+)"_L1,
                                                QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression modSeqRe(QStringLiteral("\\bHIGHESTMODSEQ\\s+(\\d+)"),
+    static const QRegularExpression modSeqRe("\\bHIGHESTMODSEQ\\s+(\\d+)"_L1,
                                               QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression messagesRe(QStringLiteral("\\bMESSAGES\\s+(\\d+)"),
+    static const QRegularExpression messagesRe("\\bMESSAGES\\s+(\\d+)"_L1,
                                                 QRegularExpression::CaseInsensitiveOption);
 
     // Prefer LIST-STATUS (RFC 5819) — fetches all folder statuses in one round trip.
@@ -71,7 +71,7 @@ BackgroundWorker::fetchAllFolderStatuses() const {
         // Server sends interleaved * LIST and * STATUS untagged responses.
         // Parse each * STATUS line to extract per-folder values.
         static const QRegularExpression statusLineRe(
-            QStringLiteral(R"~(\* STATUS "([^"]+)"\s*\(([^)]+)\))~"),
+            R"~(\* STATUS "([^"]+)"\s*\(([^)]+)\))~"_L1,
             QRegularExpression::CaseInsensitiveOption);
 
         auto it = statusLineRe.globalMatch(resp);
@@ -94,7 +94,7 @@ BackgroundWorker::fetchAllFolderStatuses() const {
         // Collect all known folder names from a fresh LIST.
         const QString listResp = cxn->execute(R"(LIST "" "*")"_L1);
         static const QRegularExpression folderNameRe(
-            QStringLiteral(R"~(\* LIST[^\r\n]+"([^"]+)"\s*$)~"),
+            R"~(\* LIST[^\r\n]+"([^"]+)"\s*$)~"_L1,
             QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
 
         auto fit = folderNameRe.globalMatch(listResp);
@@ -108,7 +108,7 @@ BackgroundWorker::fetchAllFolderStatuses() const {
             mailbox.replace("\""_L1, "\\\""_L1);
 
             const QString resp = cxn->execute(
-                QStringLiteral("STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)").arg(mailbox));
+                "STATUS \"%1\" (UIDNEXT HIGHESTMODSEQ MESSAGES)"_L1.arg(mailbox));
 
             FolderStatus fs;
             if (const auto m = uidNextRe.match(resp);   m.hasMatch())

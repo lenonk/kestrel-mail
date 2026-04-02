@@ -4,34 +4,28 @@ import QtQuick.Layouts
 import QtWebEngine
 import QtQuick.Pdf
 import org.kde.kirigami as Kirigami
+import ".."
 
-Item {
+ArrowPopup {
     id: root
 
-    readonly property real anchorCenterX: anchorPos.x + (anchorItem ? anchorItem.width / 2 : 0)
-    property real anchorGap: Kirigami.Units.smallSpacing
-    property Item anchorItem: null
-    property point anchorPos: visible && anchorItem ? anchorItem.mapToItem(QQC2.Overlay.overlay, 0, 0) : Qt.point(0, 0)
-    property real arrowHeight: 8
-    property real arrowLeftPx: 70
-    property real arrowWidth: 18
+    property bool targetHovered: false
     property bool downloadComplete: false
     property int downloadProgress: 0
-    property real edgeMargin: 6
     property string fallbackIcon: "mail-attachment"
-    readonly property bool isImagePreview: previewMimeType.toLowerCase().indexOf("image/") === 0 || previewLower.endsWith(".png") || previewLower.endsWith(".jpg") || previewLower.endsWith(".jpeg") || previewLower.endsWith(".webp") || previewLower.endsWith(".gif") || previewLower.endsWith(".bmp")
-    readonly property bool isPdfPreview: previewMimeType.toLowerCase().indexOf("pdf") >= 0 || previewLower.endsWith(".pdf")
-    readonly property bool isWebPreview: !isImagePreview && !isPdfPreview && (previewLower.endsWith(".txt") || previewLower.endsWith(".md") || previewLower.endsWith(".html") || previewLower.endsWith(".htm"))
+    property string previewMimeType: ""
+    property string previewSource: ""
     property int maxPreviewHeight: 112
     property int maxPreviewWidth: 112
     property string openButtonText: i18n("Open")
-    readonly property string previewLower: (previewSource || "").toLowerCase()
-    property string previewMimeType: ""
-    property string previewSource: ""
-    readonly property string previewUrl: previewSource.length > 0 ? ("file://" + encodeURI(previewSource)) : ""
     property string saveButtonText: i18n("Save")
+
+    readonly property string previewLower: (previewSource || "").toLowerCase()
+    readonly property string previewUrl: previewSource.length > 0 ? ("file://" + encodeURI(previewSource)) : ""
+    readonly property bool isImagePreview: previewMimeType.toLowerCase().indexOf("image/") === 0 || previewLower.endsWith(".png") || previewLower.endsWith(".jpg") || previewLower.endsWith(".jpeg") || previewLower.endsWith(".webp") || previewLower.endsWith(".gif") || previewLower.endsWith(".bmp")
+    readonly property bool isPdfPreview: previewMimeType.toLowerCase().indexOf("pdf") >= 0 || previewLower.endsWith(".pdf")
+    readonly property bool isWebPreview: !isImagePreview && !isPdfPreview && (previewLower.endsWith(".txt") || previewLower.endsWith(".md") || previewLower.endsWith(".html") || previewLower.endsWith(".htm"))
     readonly property bool shown: targetHovered || hoverProbe.hovered
-    property bool targetHovered: false
 
     signal openTriggered
     signal saveTriggered
@@ -43,93 +37,20 @@ Item {
         return luminance < 0.5 ? Qt.rgba(1, 1, 1, 0.42) : Qt.darker(c, 2.0);
     }
 
-    height: implicitHeight
-    implicitHeight: content.implicitHeight + 20 + arrowHeight
-    implicitWidth: 258
-    parent: QQC2.Overlay.overlay
+    borderColor: Qt.darker(Kirigami.Theme.disabledTextColor, 2)
     visible: shown
+    implicitWidth: 258
     width: implicitWidth
-    x: {
-        const arrowCenterFromLeft = arrowLeftPx + (arrowWidth / 2);
-        const desired = anchorCenterX - arrowCenterFromLeft;
-        const minX = edgeMargin;
-        const maxX = Math.max(minX, QQC2.Overlay.overlay.width - width - edgeMargin);
-        return Math.max(minX, Math.min(desired, maxX));
-    }
-    y: anchorPos.y + (anchorItem ? anchorItem.height : 0) + anchorGap
-    z: 2000
 
-    onVisibleChanged: if (visible)
-        backgroundCanvas.requestPaint()
-
-    Canvas {
-        id: backgroundCanvas
-
-        function cssColor(c) {
-            if (c === undefined || c === null)
-                return "#202020";
-            if (typeof c === "string")
-                return c;
-            if (c.r !== undefined && c.g !== undefined && c.b !== undefined) {
-                const a = (c.a !== undefined) ? c.a : 1;
-                return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + a + ")";
-            }
-            return "" + c;
-        }
-
-        anchors.fill: parent
-
-        Component.onCompleted: requestPaint()
-        onPaint: {
-            const ctx = getContext("2d");
-            ctx.reset();
-            ctx.clearRect(0, 0, width, height);
-
-            const ax = Math.max(8, Math.min(root.arrowLeftPx, width - root.arrowWidth - 8));
-
-            ctx.beginPath();
-            ctx.moveTo(ax + root.arrowWidth / 2, 0);
-            ctx.lineTo(ax, root.arrowHeight);
-            ctx.lineTo(0, root.arrowHeight);
-            ctx.lineTo(0, height);
-            ctx.lineTo(width, height);
-            ctx.lineTo(width, root.arrowHeight);
-            ctx.lineTo(ax + root.arrowWidth, root.arrowHeight);
-            ctx.closePath();
-            ctx.fillStyle = cssColor(Kirigami.Theme.backgroundColor);
-            ctx.fill();
-
-            ctx.beginPath();
-            ctx.moveTo(ax + root.arrowWidth / 2, 0);
-            ctx.lineTo(ax, root.arrowHeight);
-            ctx.lineTo(0, root.arrowHeight);
-            ctx.lineTo(0, height);
-            ctx.lineTo(width, height);
-            ctx.lineTo(width, root.arrowHeight);
-            ctx.lineTo(ax + root.arrowWidth, root.arrowHeight);
-            ctx.closePath();
-            ctx.lineWidth = 1;
-            ctx.strokeStyle = cssColor(Qt.darker(Kirigami.Theme.disabledTextColor, 2));
-            ctx.stroke();
-        }
-    }
     HoverHandler {
         id: hoverProbe
-
         margin: Math.max(0, root.anchorGap)
     }
-    ColumnLayout {
-        id: content
 
-        anchors.bottomMargin: 10
+    ColumnLayout {
         anchors.left: parent.left
-        anchors.leftMargin: 10
         anchors.right: parent.right
-        anchors.rightMargin: 10
-        anchors.top: parent.top
-        anchors.topMargin: arrowHeight + 10
         spacing: 8
-        z: 1
 
         Rectangle {
             Layout.fillWidth: true

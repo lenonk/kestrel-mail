@@ -10,6 +10,7 @@ QQC2.Button {
     property int iconSize: 16
     property color highlightColor: "#3daee9"
 
+    Accessible.name: root.text.length > 0 ? root.text : root.iconName
     flat: true
     implicitWidth: 28
     implicitHeight: 28

@@ -13,6 +13,7 @@ QQC2.Button {
     property color iconColor: Kirigami.Theme.textColor
     property int cornerRadius: 0
 
+    Accessible.name: root.text.length > 0 ? root.text : root.iconName
     implicitWidth: buttonWidth
     implicitHeight: buttonHeight
     leftPadding: 0

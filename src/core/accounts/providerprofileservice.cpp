@@ -5,6 +5,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+using namespace Qt::Literals::StringLiterals;
+
 ProviderProfileService::ProviderProfileService(QObject *parent)
     : QObject(parent)
 {
@@ -55,7 +57,7 @@ QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const
 
 void ProviderProfileService::loadProfiles()
 {
-    QFile f(QStringLiteral(":/data/providers.json"));
+    QFile f(":/data/providers.json"_L1);
     if (!f.open(QIODevice::ReadOnly)) {
         return;
     }

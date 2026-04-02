@@ -21,7 +21,7 @@ if(POLICY CMP0167)
     set(CMAKE_POLICY_DEFAULT_CMP0167 NEW)
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -127,6 +127,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/PaneHeaderBar.qml
         qml/components/TitleBarIconButton.qml
         qml/components/PopupMenu.qml
+        qml/components/ArrowPopup.qml
         qml/components/AvatarBadge.qml
         qml/components/ContactHoverPopup.qml
         qml/components/InviteCard.qml

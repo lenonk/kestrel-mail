@@ -3,6 +3,7 @@
 #include "../../accounts/accountrepository.h"
 #include "../../auth/tokenvault.h"
 #include "../../store/datastore.h"
+#include "../../utils.h"
 #include "connection/imapconnection.h"
 #include "sync/syncutils.h"
 #include "sync/syncengine.h"
@@ -187,7 +188,7 @@ ImapService::getDedicatedHydrateConnection(const QString &email) {
         return {};
 
     Imap::Connection *raw = g_hydrateSlots[slotIndex].conn.get();
-    raw->setLogOwner(QStringLiteral("hydrate-dedicated"));
+    raw->setLogOwner("hydrate-dedicated"_L1);
     const QString slotEmail = g_hydrateSlots[slotIndex].email;
     const QString slotHost  = g_hydrateSlots[slotIndex].host;
     const int     slotPort  = g_hydrateSlots[slotIndex].port;
@@ -228,12 +229,12 @@ ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVau
     if (m_offlineMode)
         qInfo() << "[offline-mode] KESTREL_OFFLINE_MODE enabled; IMAP network operations are disabled.";
     Imap::Connection::setThrottleObserver([this](const QString &accountEmail, bool throttled, const QString &response) {
-        const QString msg = QStringLiteral("Account throttled by server: %1")
+        const QString msg = "Account throttled by server: %1"_L1
                                 .arg(response.simplified().left(240));
         QMetaObject::invokeMethod(this, [this, accountEmail, throttled, msg]() {
             if (m_destroying.load()) return;
 
-            const QString key = accountEmail.trimmed().toLower();
+            const QString key = Kestrel::normalizeEmail(accountEmail);
             const bool prev = m_accountThrottleState.value(key, false);
             m_accountThrottleState.insert(key, throttled);
 
@@ -356,7 +357,7 @@ ImapService::initialize() {
     initializeConnectionPool();
 
     if (m_offlineMode) {
-        emit realtimeStatus(true, QStringLiteral("Offline mode is enabled (KESTREL_OFFLINE_MODE=1). IMAP sync is paused."));
+        emit realtimeStatus(true, "Offline mode is enabled (KESTREL_OFFLINE_MODE=1). IMAP sync is paused."_L1);
         return;
     }
 
@@ -461,9 +462,9 @@ ImapService::saveAttachmentUrl(const QString &url, const QString &suggestedFileN
     if (defaultName.isEmpty())
         defaultName = QFileInfo(qurl.path()).fileName();
     if (defaultName.isEmpty())
-        defaultName = QStringLiteral("attachment");
+        defaultName = "attachment"_L1;
 
-    const QString outPath = QFileDialog::getSaveFileName(nullptr, QStringLiteral("Save Attachment"), defaultName);
+    const QString outPath = QFileDialog::getSaveFileName(nullptr, "Save Attachment"_L1, defaultName);
     if (outPath.isEmpty())
         return false;
 
@@ -924,7 +925,7 @@ ImapService::openAttachment(const QString &accountEmail, const QString &, const 
         return;
     }
 
-    emit realtimeStatus(false, QStringLiteral("Attachment is still downloading. Please try again shortly."));
+    emit realtimeStatus(false, "Attachment is still downloading. Please try again shortly."_L1);
 }
 
 bool
@@ -932,7 +933,7 @@ ImapService::saveAttachment(const QString &accountEmail, const QString &, const 
                             const QString &partId, const QString &fileName, const QString &) {
     const QString cached = cachedAttachmentPath(accountEmail, uid, partId);
     if (cached.isEmpty() || !QFile::exists(cached)) {
-        emit realtimeStatus(false, QStringLiteral("Attachment is still downloading. Please try again shortly."));
+        emit realtimeStatus(false, "Attachment is still downloading. Please try again shortly."_L1);
         return false;
     }
 
@@ -945,8 +946,8 @@ ImapService::saveAttachment(const QString &accountEmail, const QString &, const 
     if (data.isEmpty())
         return false;
 
-    const QString outPath = QFileDialog::getSaveFileName(nullptr, QStringLiteral("Save Attachment"),
-                                                         fileName.isEmpty() ? QStringLiteral("attachment") : fileName);
+    const QString outPath = QFileDialog::getSaveFileName(nullptr, "Save Attachment"_L1,
+                                                         fileName.isEmpty() ? "attachment"_L1 : fileName);
     if (outPath.isEmpty())
         return false;
 
@@ -1113,7 +1114,7 @@ ImapService::startBackgroundWorker() {
     connect(m_backgroundWorker, &Imap::BackgroundWorker::requestAccountThrottled,
             this, [this](const QString &accountEmail, bool *out) {
                 if (!out) return;
-                *out = m_accountThrottleState.value(accountEmail.trimmed().toLower(), false);
+                *out = m_accountThrottleState.value(Kestrel::normalizeEmail(accountEmail), false);
             }, Qt::BlockingQueuedConnection);
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::upsertFoldersRequested,
@@ -1242,18 +1243,18 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
         return;
 
     const QString folderLower = folderNorm.toLower();
-    const bool isInboxish = (folderLower == QStringLiteral("inbox")
-                             || folderLower == QStringLiteral("[gmail]/inbox")
-                             || folderLower == QStringLiteral("[google mail]/inbox")
-                             || folderLower.endsWith(QStringLiteral("/inbox")));
+    const bool isInboxish = (folderLower == "inbox"_L1
+                             || folderLower == "[gmail]/inbox"_L1
+                             || folderLower == "[google mail]/inbox"_L1
+                             || folderLower.endsWith("/inbox"_L1));
     // Product policy: background body hydration only for Inbox-class folders.
     if (!isInboxish)
         return;
 
-    if (m_accountThrottleState.value(email.trimmed().toLower(), false)) {
+    if (m_accountThrottleState.value(Kestrel::normalizeEmail(email), false)) {
         static QHash<QString, qint64> s_lastThrottleSkipLogMs;
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-        const QString k = email.trimmed().toLower();
+        const QString k = Kestrel::normalizeEmail(email);
         if (!s_lastThrottleSkipLogMs.contains(k) || (nowMs - s_lastThrottleSkipLogMs.value(k)) > 60000) {
             s_lastThrottleSkipLogMs.insert(k, nowMs);
             qInfo().noquote() << "[bg-hydrate]" << "account=" << email << "paused=true reason=throttled";
@@ -1261,7 +1262,7 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
         return;
     }
 
-    const QString key = email.trimmed().toLower() + "|" + folderNorm.toLower();
+    const QString key = Kestrel::normalizeEmail(email) + "|" + folderNorm.toLower();
     {
         QMutexLocker lock(&m_bgHydrateMutex);
         if (m_activeBgHydrateFolders.contains(key)) {
@@ -1372,14 +1373,14 @@ ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &emai
 
         if (!m_idleWatcher || !m_idleWatcher->isRunning()) {
             startIdleWatcher();
-            emit realtimeStatus(true, QStringLiteral("Idle/live watcher (re)started."));
+            emit realtimeStatus(true, "Idle/live watcher (re)started."_L1);
         }
 
         // Keep background hydration progressing even when folder STATUS values are stable
         // and no header sync is dispatched in this loop. Inbox-only policy is enforced
         // inside backgroundFetchBodies().
         if (!email.trimmed().isEmpty())
-            backgroundFetchBodies({}, email, QStringLiteral("INBOX"), {});
+            backgroundFetchBodies({}, email, "INBOX"_L1, {});
     };
 
     if (QThread::currentThread() == thread())
@@ -1676,7 +1677,7 @@ ImapService::refreshFolderList(bool announce) {
 
     if (m_offlineMode) {
         if (announce)
-            emit syncFinished(true, QStringLiteral("Offline mode: skipped folder refresh."));
+            emit syncFinished(true, "Offline mode: skipped folder refresh."_L1);
         return;
     }
 
@@ -1760,13 +1761,13 @@ ImapService::refreshGoogleCalendars() {
             return;
 
         QNetworkAccessManager nam;
-        QUrl listUrl(QStringLiteral("https://www.googleapis.com/calendar/v3/users/me/calendarList"));
+        QUrl listUrl("https://www.googleapis.com/calendar/v3/users/me/calendarList"_L1);
         QUrlQuery listQuery;
-        listQuery.addQueryItem(QStringLiteral("colorRgbFormat"), QStringLiteral("true"));
+        listQuery.addQueryItem("colorRgbFormat"_L1, "true"_L1);
         listUrl.setQuery(listQuery);
         QNetworkRequest req{listUrl};
         req.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
-        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json"_L1);
 
         QEventLoop loop;
         QNetworkReply *reply = nam.get(req);
@@ -1786,7 +1787,7 @@ ImapService::refreshGoogleCalendars() {
                                  << "body=" << bodyText;
             QMetaObject::invokeMethod(this, [this, httpStatus]() {
                 Q_UNUSED(httpStatus)
-                emit realtimeStatus(false, QStringLiteral("Calendar sync error. Please reconnect your Google account and try again."));
+                emit realtimeStatus(false, "Calendar sync error. Please reconnect your Google account and try again."_L1);
             }, Qt::QueuedConnection);
             return;
         }
@@ -1860,18 +1861,18 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
         QVariantList out;
 
         for (const QString &calendarId : calendarIds) {
-            QUrl evUrl(QStringLiteral("https://www.googleapis.com/calendar/v3/calendars/%1/events")
+            QUrl evUrl("https://www.googleapis.com/calendar/v3/calendars/%1/events"_L1
                        .arg(QString::fromUtf8(QUrl::toPercentEncoding(calendarId))));
             QUrlQuery q;
-            q.addQueryItem(QStringLiteral("singleEvents"), QStringLiteral("true"));
-            q.addQueryItem(QStringLiteral("orderBy"), QStringLiteral("startTime"));
-            q.addQueryItem(QStringLiteral("timeMin"), weekStart.toUTC().toString(Qt::ISODate));
-            q.addQueryItem(QStringLiteral("timeMax"), weekEnd.toUTC().toString(Qt::ISODate));
+            q.addQueryItem("singleEvents"_L1, "true"_L1);
+            q.addQueryItem("orderBy"_L1, "startTime"_L1);
+            q.addQueryItem("timeMin"_L1, weekStart.toUTC().toString(Qt::ISODate));
+            q.addQueryItem("timeMax"_L1, weekEnd.toUTC().toString(Qt::ISODate));
             evUrl.setQuery(q);
 
             QNetworkRequest req{evUrl};
             req.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
-            req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+            req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json"_L1);
 
             QEventLoop loop;
             QNetworkReply *reply = nam.get(req);
@@ -1892,7 +1893,7 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                                      << "body=" << bodyText;
                 QMetaObject::invokeMethod(this, [this, calendarId]() {
                     Q_UNUSED(calendarId)
-                    emit realtimeStatus(false, QStringLiteral("Calendar events couldn’t be loaded right now. Please try again."));
+                    emit realtimeStatus(false, "Calendar events couldn’t be loaded right now. Please try again."_L1);
                 }, Qt::QueuedConnection);
                 continue;
             }
@@ -1942,7 +1943,7 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                 // Recurrence description (from the expanded instance's recurringEventId).
                 const QString recurrence = o.contains("recurringEventId")
                                            ? o.value("recurrence").toArray().isEmpty()
-                                             ? QStringLiteral("Recurring")
+                                             ? "Recurring"_L1
                                              : o.value("recurrence").toArray().first().toString()
                                            : QString();
 
@@ -1962,7 +1963,7 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                     row.insert("durationHours"_L1, 24.0);
                     row.insert("isAllDay"_L1, true);
                     row.insert("title"_L1, o.value("summary"_L1).toString());
-                    row.insert("subtitle"_L1, QStringLiteral("All day"));
+                    row.insert("subtitle"_L1, "All day"_L1);
                     row.insert("color"_L1, eventColor);
                     row.insert("location"_L1, o.value("location"_L1).toString());
                     row.insert("visibility"_L1, o.value("visibility"_L1).toString());
@@ -1984,7 +1985,7 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                     row.insert("durationHours"_L1, static_cast<double>(durMinutes) / 60.0);
                     row.insert("isAllDay"_L1, false);
                     row.insert("title"_L1, o.value("summary"_L1).toString());
-                    row.insert("subtitle"_L1, QStringLiteral("%1 - %2")
+                    row.insert("subtitle"_L1, "%1 - %2"_L1
                                      .arg(startDt.time().toString("h:mmap"_L1).toLower())
                                      .arg(endDt.time().toString("h:mmap"_L1).toLower()));
                     row.insert("color"_L1, eventColor);
@@ -2028,7 +2029,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
     if (m_offlineMode) {
         if (userInitiated)
-            emit hydrateStatus(false, QStringLiteral("Offline mode is enabled. Body hydration is paused."));
+            emit hydrateStatus(false, "Offline mode is enabled. Body hydration is paused."_L1);
         return;
     }
 
@@ -2074,7 +2075,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         slowTimer->setSingleShot(true);
         slowTimer->setInterval(5000);
         connect(slowTimer, &QTimer::timeout, this, [this]() {
-            emit hydrateStatus(true, QStringLiteral("Still loading message body\u2026"));
+            emit hydrateStatus(true, "Still loading message body\u2026"_L1);
         });
         slowTimer->start();
     }
@@ -2110,12 +2111,12 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
         const QString htmlTrim = html.trimmed();
         const QString htmlLower = htmlTrim.left(1024).toLower();
-        const bool hasHtmlish = QRegularExpression(QStringLiteral("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"),
+        const bool hasHtmlish = QRegularExpression("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
                                                  QRegularExpression::CaseInsensitiveOption).match(htmlTrim).hasMatch();
-        const bool hasMarkdownLinks = QRegularExpression(QStringLiteral("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"),
+        const bool hasMarkdownLinks = QRegularExpression("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"_L1,
                                                          QRegularExpression::CaseInsensitiveOption).match(htmlTrim).hasMatch();
-        const bool hasMimeHeaders = htmlLower.contains(QStringLiteral("content-type:"))
-                                 || htmlLower.contains(QStringLiteral("mime-version:"));
+        const bool hasMimeHeaders = htmlLower.contains("content-type:"_L1)
+                                 || htmlLower.contains("mime-version:"_L1);
         const bool plainWrap = htmlTrim.startsWith("<html><body style=\"white-space:normal;\">", Qt::CaseInsensitive);
         const bool suspicious = !hasHtmlish || hasMarkdownLinks || hasMimeHeaders || htmlTrim.size() < 160;
 
@@ -2283,7 +2284,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
     }
 
     if (m_offlineMode) {
-        emit realtimeStatus(true, QStringLiteral("Offline mode: skipped IMAP move for %1.").arg(uid));
+        emit realtimeStatus(true, "Offline mode: skipped IMAP move for %1."_L1.arg(uid));
         return;
     }
 
@@ -2355,7 +2356,7 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
             if (!ok) return;
         }
 
-        const QString result = cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Seen)").arg(uid));
+        const QString result = cxn->execute("UID STORE %1 +FLAGS (\\Seen)"_L1.arg(uid));
         Q_UNUSED(result);
     });
 }
@@ -2370,7 +2371,7 @@ ImapService::markMessageFlagged(const QString &accountEmail, const QString &fold
     if (m_offlineMode)
         return;
 
-    const QString flags = flagged ? QStringLiteral("+FLAGS (\\Flagged)") : QStringLiteral("-FLAGS (\\Flagged)");
+    const QString flags = flagged ? "+FLAGS (\\Flagged)"_L1 : "-FLAGS (\\Flagged)"_L1;
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, flags]() {
         if (m_destroying.load()) return;
 
@@ -2385,7 +2386,7 @@ ImapService::markMessageFlagged(const QString &accountEmail, const QString &fold
             if (!ok) return;
         }
 
-        const QString result = cxn->execute(QStringLiteral("UID STORE %1 %2").arg(uid, flags));
+        const QString result = cxn->execute("UID STORE %1 %2"_L1.arg(uid, flags));
         Q_UNUSED(result);
     });
     Q_UNUSED(retval);
@@ -2412,8 +2413,8 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
             const QString special = f.value("specialUse"_L1).toString().trimmed().toLower();
             const QString lname = name.toLower();
 
-            if (desired == QStringLiteral("important")) {
-                if (special == QStringLiteral("important") || lname.endsWith(QStringLiteral("/important"))) {
+            if (desired == "important"_L1) {
+                if (special == "important"_L1 || lname.endsWith("/important"_L1)) {
                     resolvedTarget = name;
                     break;
                 }
@@ -2440,7 +2441,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
     }
 
     if (m_offlineMode) {
-        emit realtimeStatus(true, QStringLiteral("Offline mode: skipped IMAP add-to-folder for %1.").arg(uid));
+        emit realtimeStatus(true, "Offline mode: skipped IMAP add-to-folder for %1."_L1.arg(uid));
         return;
     }
 
@@ -2458,7 +2459,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
             if (!ok) return;
         }
 
-        const QString resp = cxn->execute(QStringLiteral("UID COPY %1 \"%2\"").arg(uid, resolvedTarget));
+        const QString resp = cxn->execute("UID COPY %1 \"%2\""_L1.arg(uid, resolvedTarget));
 
         static const QRegularExpression kCopyUidRe(
             R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
@@ -2512,8 +2513,8 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
             const QString special = f.value("specialUse"_L1).toString().trimmed().toLower();
             const QString lname = name.toLower();
 
-            if (desired == QStringLiteral("important")) {
-                if (special == QStringLiteral("important") || lname.endsWith(QStringLiteral("/important"))) {
+            if (desired == "important"_L1) {
+                if (special == "important"_L1 || lname.endsWith("/important"_L1)) {
                     resolvedTarget = name;
                     break;
                 }
@@ -2546,7 +2547,7 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
     }
 
     if (m_offlineMode) {
-        emit realtimeStatus(true, QStringLiteral("Offline mode: skipped IMAP remove-from-folder for %1.").arg(uid));
+        emit realtimeStatus(true, "Offline mode: skipped IMAP remove-from-folder for %1."_L1.arg(uid));
         return;
     }
 
@@ -2564,8 +2565,8 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
             // (it remains in [Gmail]/All Mail and any other labeled folders).
             const auto [ok, _] = cxn->select(resolvedTarget);
             if (ok) {
-                (void)cxn->execute(QStringLiteral("UID STORE %1 +FLAGS (\\Deleted)").arg(targetUid));
-                (void)cxn->execute(QStringLiteral("UID EXPUNGE %1").arg(targetUid));
+                (void)cxn->execute("UID STORE %1 +FLAGS (\\Deleted)"_L1.arg(targetUid));
+                (void)cxn->execute("UID EXPUNGE %1"_L1.arg(targetUid));
             }
         }
         // If we have no targetUid the label folder hasn't been synced yet; the optimistic
@@ -2587,7 +2588,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
 
     if (m_offlineMode) {
         if (announce)
-            emit syncFinished(true, QStringLiteral("Offline mode: skipped sync for %1.").arg(target));
+            emit syncFinished(true, "Offline mode: skipped sync for %1."_L1.arg(target));
         return;
     }
     const QString syncTargetKey = target.trimmed().toLower();
@@ -2702,16 +2703,16 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             flush();
             result.ok      = true;
             result.inserted = inboxInserted;
-            result.message  = QStringLiteral("%1 sync complete.").arg(target);
+            result.message  = "%1 sync complete."_L1.arg(target);
 
             return result;
         },
         [this, announce, target, releaseSyncTarget](const SyncResult &r) {
             QString folderLabel = target;
             if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
-                folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
+                folderLabel = folderLabel.mid("[Google Mail]/"_L1.size());
             if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
-                folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
+                folderLabel = folderLabel.mid("[Gmail]/"_L1.size());
             if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
                 folderLabel = "Inbox"_L1;
 
@@ -2754,7 +2755,7 @@ ImapService::syncAll(bool announce) {
 
     if (m_offlineMode) {
         if (announce)
-            emit syncFinished(true, QStringLiteral("Offline mode: skipped sync all."));
+            emit syncFinished(true, "Offline mode: skipped sync all."_L1);
         return;
     }
 
@@ -2833,14 +2834,14 @@ ImapService::syncAll(bool announce) {
                 }
 
                 // Build ordered sync target list (INBOX first, then all non-category folders)
-                auto canonicalFolderKey = [](const QString &folderName) {
+                auto canonicalFolderKey = [](const QString &folderName) -> QString {
                     QString k = folderName.trimmed().toLower();
                     if (k.startsWith("[gmail]/"_L1))
-                        k = k.mid(QStringLiteral("[gmail]/").size());
+                        k = k.mid("[gmail]/"_L1.size());
                     else if (k.startsWith("[google mail]/"_L1))
-                        k = k.mid(QStringLiteral("[google mail]/").size());
+                        k = k.mid("[google mail]/"_L1.size());
                     if (k == "inbox"_L1)
-                        return QStringLiteral("inbox");
+                        return "inbox"_L1;
                     return k;
                 };
 
@@ -2891,9 +2892,9 @@ ImapService::syncAll(bool announce) {
 
                     QString folderLabel = folderTarget;
                     if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
-                        folderLabel = folderLabel.mid(QStringLiteral("[Google Mail]/").size());
+                        folderLabel = folderLabel.mid("[Google Mail]/"_L1.size());
                     if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
-                        folderLabel = folderLabel.mid(QStringLiteral("[Gmail]/").size());
+                        folderLabel = folderLabel.mid("[Gmail]/"_L1.size());
                     if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
                         folderLabel = "Inbox"_L1;
 

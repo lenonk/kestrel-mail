@@ -1,5 +1,7 @@
 #include "libsecrettokenvault.h"
 
+#include "../utils.h"
+
 // GLib's gio headers use "signals" as a struct member, which collides with
 // Qt's "signals" keyword macro.  Temporarily undefine it.
 #undef signals
@@ -21,7 +23,7 @@ LibSecretTokenVault::LibSecretTokenVault() = default;
 
 bool LibSecretTokenVault::storeRefreshToken(const QString &accountEmail, const QString &refreshToken)
 {
-    const QByteArray account = accountEmail.trimmed().toLower().toUtf8();
+    const QByteArray account = Kestrel::normalizeEmail(accountEmail).toUtf8();
     const QByteArray token   = refreshToken.toUtf8();
 
     GError *error = nullptr;
@@ -44,7 +46,7 @@ bool LibSecretTokenVault::storeRefreshToken(const QString &accountEmail, const Q
 
 QString LibSecretTokenVault::loadRefreshToken(const QString &accountEmail)
 {
-    const QByteArray account = accountEmail.trimmed().toLower().toUtf8();
+    const QByteArray account = Kestrel::normalizeEmail(accountEmail).toUtf8();
 
     GError *error = nullptr;
     gchar *password = secret_password_lookup_sync(
@@ -70,7 +72,7 @@ QString LibSecretTokenVault::loadRefreshToken(const QString &accountEmail)
 
 bool LibSecretTokenVault::removeRefreshToken(const QString &accountEmail)
 {
-    const QByteArray account = accountEmail.trimmed().toLower().toUtf8();
+    const QByteArray account = Kestrel::normalizeEmail(accountEmail).toUtf8();
 
     GError *error = nullptr;
     const gboolean ok = secret_password_clear_sync(
