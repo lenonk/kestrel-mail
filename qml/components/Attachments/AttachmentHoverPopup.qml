@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import QtWebEngine
 import QtQuick.Pdf
@@ -163,71 +162,29 @@ ArrowPopup {
                 Layout.alignment: Qt.AlignTop | Qt.AlignRight
                 spacing: 8
 
-                QQC2.Button {
+                StyledButton {
                     id: openBtn
 
                     bottomPadding: 4
-                    flat: true
                     icon.name: "document-open"
                     leftPadding: 8
                     rightPadding: 10
                     text: root.openButtonText
                     topPadding: 4
-
-                    background: Rectangle {
-                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
-                        border.width: 1
-                        color: openBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35) : (openBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22) : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
-                        radius: 0
-                    }
-                    contentItem: RowLayout {
-                        spacing: 8
-
-                        Kirigami.Icon {
-                            Layout.preferredHeight: 16
-                            Layout.preferredWidth: 16
-                            source: openBtn.icon.name
-                        }
-                        QQC2.Label {
-                            color: Kirigami.Theme.textColor
-                            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
-                            text: openBtn.text
-                        }
-                    }
+                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
 
                     onClicked: root.openTriggered()
                 }
-                QQC2.Button {
+                StyledButton {
                     id: saveBtn
 
                     bottomPadding: 4
-                    flat: true
                     icon.name: "document-save"
                     leftPadding: 8
                     rightPadding: 10
                     text: root.saveButtonText
                     topPadding: 4
-
-                    background: Rectangle {
-                        border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
-                        border.width: 1
-                        color: saveBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35) : (saveBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22) : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
-                        radius: 0
-                    }
-                    contentItem: RowLayout {
-                        spacing: 8
-
-                        Kirigami.Icon {
-                            Layout.preferredHeight: 16
-                            Layout.preferredWidth: 16
-                            source: saveBtn.icon.name
-                        }
-                        QQC2.Label {
-                            color: Kirigami.Theme.textColor
-                            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
-                            text: saveBtn.text
-                        }
-                    }
+                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 2
 
                     onClicked: root.saveTriggered()
                 }

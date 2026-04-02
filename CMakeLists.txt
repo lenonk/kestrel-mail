@@ -84,6 +84,7 @@ qt_standard_project_setup()
 qt_add_executable(kestrel-mail
     src/main.cpp
     src/ui/splashscreen.cpp
+    src/ui/calendarlayouthelper.cpp
     src/core/accounts/providerprofileservice.cpp
     src/core/accounts/accountrepository.cpp
     src/core/accounts/accountsetupcontroller.cpp
@@ -115,6 +116,10 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
     FILES
         qml/Main.qml
         qml/components/AccountWizardDialog.qml
+        qml/components/AccountWizardStep1.qml
+        qml/components/AccountWizardStep2.qml
+        qml/components/AccountWizardStep3.qml
+        qml/components/OAuthBrowserWindow.qml
         qml/components/DarkLightToggleButton.qml
         qml/components/PaneIconButton.qml
         qml/components/TextToolTip.qml
@@ -135,6 +140,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/CollapsedPaneRail.qml
         qml/components/SearchBar.qml
         qml/components/SearchFilterPopup.qml
+        qml/components/StyledButton.qml
         qml/components/MessageList/MessageListPane.qml
         qml/components/MessageList/MessageCard.qml
         qml/components/MessageList/MessageCardAvatar.qml

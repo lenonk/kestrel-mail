@@ -22,6 +22,7 @@
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
 #include "ui/splashscreen.h"
+#include "ui/calendarlayouthelper.h"
 #include "core/htmlprocessor.h"
 #include "core/accounts/accountrepository.h"
 #include "core/accounts/accountsetupcontroller.h"
@@ -227,6 +228,9 @@ int main(int argc, char *argv[])
         QObject::connect(&imapService, &ImapService::realtimeStatus, &dataStore, enableNotify);
     }
 
+    CalendarLayoutHelper calendarLayoutHelper(&engine);
+
+    engine.rootContext()->setContextProperty("calendarLayoutHelper", &calendarLayoutHelper);
     engine.rootContext()->setContextProperty("providerProfiles", &providerProfiles);
     engine.rootContext()->setContextProperty("accountSetup", &accountSetup);
     engine.rootContext()->setContextProperty("accountRepository", &accountRepository);

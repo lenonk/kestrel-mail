@@ -78,12 +78,13 @@ ArrowPopup {
         RowLayout {
             spacing: 6
 
-            QQC2.Button {
+            StyledButton {
                 id: primaryBtn
                 visible: root.primaryButtonText.length > 0
                 text: root.primaryButtonText
                 icon.name: "mail-message"
-                flat: true
+                iconSize: 14
+                iconLabelSpacing: 4
                 leftPadding: 8
                 rightPadding: 8
                 topPadding: 3
@@ -92,34 +93,15 @@ ArrowPopup {
                     root.dismissedByAction = true
                     root.primaryTriggered()
                 }
-                contentItem: RowLayout {
-                    spacing: 4
-                    Kirigami.Icon {
-                        source: primaryBtn.icon.name
-                        Layout.preferredWidth: 14
-                        Layout.preferredHeight: 14
-                    }
-                    QQC2.Label {
-                        text: primaryBtn.text
-                        color: Kirigami.Theme.textColor
-                    }
-                }
-                background: Rectangle {
-                    color: primaryBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
-                                          : (primaryBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
-                                                                : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
-                    border.width: 1
-                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
-                    radius: 0
-                }
             }
 
-            QQC2.Button {
+            StyledButton {
                 id: secondaryBtn
                 visible: root.secondaryButtonText.length > 0
                 text: root.secondaryButtonText
                 icon.name: "im-user"
-                flat: true
+                iconSize: 14
+                iconLabelSpacing: 4
                 leftPadding: 8
                 rightPadding: 8
                 topPadding: 3
@@ -127,26 +109,6 @@ ArrowPopup {
                 onClicked: {
                     root.dismissedByAction = true
                     root.secondaryTriggered()
-                }
-                contentItem: RowLayout {
-                    spacing: 4
-                    Kirigami.Icon {
-                        source: secondaryBtn.icon.name
-                        Layout.preferredWidth: 14
-                        Layout.preferredHeight: 14
-                    }
-                    QQC2.Label {
-                        text: secondaryBtn.text
-                        color: Kirigami.Theme.textColor
-                    }
-                }
-                background: Rectangle {
-                    color: secondaryBtn.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
-                                            : (secondaryBtn.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
-                                                                    : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
-                    border.width: 1
-                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
-                    radius: 0
                 }
             }
         }

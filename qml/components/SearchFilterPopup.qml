@@ -176,23 +176,15 @@ ArrowPopup {
             Layout.bottomMargin: 4
             spacing: 8
 
-            QQC2.Button {
+            StyledButton {
                 text: i18n("Create Search Folder...")
-                flat: true
                 enabled: false
                 font.pixelSize: 12
+                radius: 4
                 leftPadding: 8
                 rightPadding: 8
                 topPadding: 4
                 bottomPadding: 4
-                background: Rectangle {
-                    color: parent.down ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
-                         : (parent.hovered ? Qt.darker(Kirigami.Theme.backgroundColor, 1.22)
-                                           : Qt.darker(Kirigami.Theme.backgroundColor, 1.12))
-                    border.width: 1
-                    border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.25)
-                    radius: 4
-                }
             }
 
             Item { Layout.fillWidth: true }
