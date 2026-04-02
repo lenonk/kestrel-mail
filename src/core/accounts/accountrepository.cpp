@@ -80,6 +80,7 @@ AccountRepository::load() {
     QFile f(m_path);
 
     if (!f.open(QIODevice::ReadOnly)) {
+        qWarning() << "AccountRepository::load: failed to open" << m_path;
         return;
     }
 
@@ -119,6 +120,7 @@ AccountRepository::save() const {
     QFile f(m_path);
 
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "AccountRepository::save: failed to open" << m_path;
         return;
     }
 

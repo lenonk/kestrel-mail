@@ -7,6 +7,8 @@
 
 using namespace Qt::Literals::StringLiterals;
 
+static constexpr auto kWalletFolder = "kestrel-mail";
+
 KWalletTokenVault::KWalletTokenVault() = default;
 
 static KWallet::Wallet *openWallet()
@@ -16,9 +18,10 @@ static KWallet::Wallet *openWallet()
     if (!wallet)
         return nullptr;
 
-    if (!wallet->hasFolder("kestrel-mail"_L1))
-        wallet->createFolder("kestrel-mail"_L1);
-    wallet->setFolder("kestrel-mail"_L1);
+    const auto folder = QString::fromLatin1(kWalletFolder);
+    if (!wallet->hasFolder(folder))
+        wallet->createFolder(folder);
+    wallet->setFolder(folder);
     return wallet;
 }
 

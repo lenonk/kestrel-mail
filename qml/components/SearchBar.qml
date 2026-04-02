@@ -297,7 +297,7 @@ Item {
                 folderScopeFixedWidth: root.folderScopeFixedWidth
                 folderScope: root.folderScope
                 barHeight: root.barHeight
-                onFolderScopeChanged: function(newScope) { root.folderScope = newScope }
+                onScopeSelected: function(newScope) { root.folderScope = newScope }
             }
 
             // Vertical divider after folder scope
@@ -500,7 +500,7 @@ Item {
                 folderScope: root.folderScope
                 barHeight: root.barHeight
                 onClicked: root.enterEditing()
-                onFolderScopeChanged: function(newScope) { root.folderScope = newScope }
+                onScopeSelected: function(newScope) { root.folderScope = newScope }
             }
 
             // Vertical divider

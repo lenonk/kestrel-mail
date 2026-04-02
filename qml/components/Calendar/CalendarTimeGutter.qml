@@ -29,7 +29,7 @@ Item {
     Text {
         id: allDayMetric
         visible: false
-        text: "All-day"
+        text: i18n("All-day")
         font.pixelSize: 12
     }
 

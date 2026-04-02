@@ -46,7 +46,7 @@ QString xoauth2String(const QString &email, const QString &accessToken)
 ImapLabController::ImapLabController(QObject *parent)
     : QObject(parent)
     , m_accountsRepo(new AccountRepository(this))
-    , m_tokenVault(new FileTokenVault())
+    , m_tokenVault(std::make_unique<FileTokenVault>())
 {
     m_templates = {
         QVariantMap{{"name", "CAPABILITY"}, {"command", "CAPABILITY"}},
@@ -67,8 +67,6 @@ ImapLabController::ImapLabController(QObject *parent)
 ImapLabController::~ImapLabController()
 {
     closePersistentSession();
-    delete m_tokenVault;
-    m_tokenVault = nullptr;
 }
 
 QVariantList ImapLabController::accounts() const { return m_accounts; }

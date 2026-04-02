@@ -34,7 +34,7 @@ Item {
     }
 
     function handleMailtoUrl(urlString) {
-        const raw = (urlString || "").toString();
+        const raw = (urlString || "");
         if (!raw.toLowerCase().startsWith("mailto:"))
             return false;
 

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QVariantList>
+#include <memory>
 
 class AccountRepository;
 class FileTokenVault;
@@ -59,7 +60,7 @@ private:
     void closePersistentSession();
 
     AccountRepository *m_accountsRepo = nullptr;
-    FileTokenVault *m_tokenVault = nullptr;
+    std::unique_ptr<FileTokenVault> m_tokenVault;
     QVariantList m_accounts;
     QVariantList m_templates;
     QString m_selectedAccountEmail;

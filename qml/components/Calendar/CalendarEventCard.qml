@@ -113,7 +113,7 @@ Rectangle {
                 color: root.dimTextColor
             }
             QQC2.Label {
-                text: "Private"
+                text: i18n("Private")
                 font.pixelSize: 10
                 color: root.dimTextColor
             }

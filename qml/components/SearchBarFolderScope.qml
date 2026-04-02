@@ -13,7 +13,7 @@ Item {
     property int barHeight: 30
 
     // Emitted when the user picks a scope value
-    signal folderScopeChanged(int newScope)
+    signal scopeSelected(int newScope)
     // Emitted when the selector area is clicked (before opening the menu)
     signal clicked()
 
@@ -59,19 +59,19 @@ Item {
             text: i18n("Current folder")
             checkable: true
             checked: scopeRoot.folderScope === 0
-            onTriggered: scopeRoot.folderScopeChanged(0)
+            onTriggered: scopeRoot.scopeSelected(0)
         }
         QQC2.MenuItem {
             text: i18n("Current folder and subfolders")
             checkable: true
             checked: scopeRoot.folderScope === 1
-            onTriggered: scopeRoot.folderScopeChanged(1)
+            onTriggered: scopeRoot.scopeSelected(1)
         }
         QQC2.MenuItem {
             text: i18n("All folders")
             checkable: true
             checked: scopeRoot.folderScope === 2
-            onTriggered: scopeRoot.folderScopeChanged(2)
+            onTriggered: scopeRoot.scopeSelected(2)
         }
         QQC2.MenuSeparator {}
         QQC2.MenuItem {

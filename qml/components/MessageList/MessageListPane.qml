@@ -62,8 +62,6 @@ Rectangle {
                                            : ""
             property bool loadMoreQueued: false
 
-            Component.onCompleted: {}
-
             function queueRestoreScroll() {
                 if (!restorePending)
                     return

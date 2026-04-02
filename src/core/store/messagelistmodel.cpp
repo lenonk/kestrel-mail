@@ -15,39 +15,46 @@ using namespace Qt::Literals::StringLiterals;
 
 namespace {
 
+static constexpr auto kBucketToday       = "today";
+static constexpr auto kBucketYesterday   = "yesterday";
+static constexpr auto kBucketWeekday     = "weekday-";
+static constexpr auto kBucketLastWeek    = "lastWeek";
+static constexpr auto kBucketTwoWeeksAgo = "twoWeeksAgo";
+static constexpr auto kBucketOlder       = "older";
+
 QString bucketKeyForDate(const QString &dateValue)
 {
     const QDateTime dt = QDateTime::fromString(dateValue, Qt::ISODate);
-    if (!dt.isValid()) return "older"_L1;
+    if (!dt.isValid()) return QString::fromLatin1(kBucketOlder);
     const QDate target = dt.toLocalTime().date();
     const QDate today = QDate::currentDate();
     const int diffDays = target.daysTo(today);
-    if (diffDays <= 0) return "today"_L1;
-    if (diffDays == 1) return "yesterday"_L1;
+    if (diffDays <= 0) return QString::fromLatin1(kBucketToday);
+    if (diffDays == 1) return QString::fromLatin1(kBucketYesterday);
 
     const QDate weekStart = today.addDays(-(today.dayOfWeek() % 7)); // Sunday-start week
     if (target >= weekStart && target < today) {
         return QStringLiteral("weekday-%1").arg(target.dayOfWeek());
     }
 
-    if (diffDays <= 14) return "lastWeek"_L1;
-    if (diffDays <= 21) return "twoWeeksAgo"_L1;
-    return "older"_L1;
+    if (diffDays <= 14) return QString::fromLatin1(kBucketLastWeek);
+    if (diffDays <= 21) return QString::fromLatin1(kBucketTwoWeeksAgo);
+    return QString::fromLatin1(kBucketOlder);
 }
 
 QString bucketLabel(const QString &bucketKey)
 {
-    if (bucketKey == "today"_L1) return "Today"_L1;
-    if (bucketKey == "yesterday"_L1) return "Yesterday"_L1;
-    if (bucketKey.startsWith("weekday-"_L1)) {
+    if (bucketKey == QLatin1StringView(kBucketToday)) return "Today"_L1;
+    if (bucketKey == QLatin1StringView(kBucketYesterday)) return "Yesterday"_L1;
+    if (bucketKey.startsWith(QLatin1StringView(kBucketWeekday))) {
         bool ok = false;
-        const int dow = bucketKey.mid("weekday-"_L1.size()).toInt(&ok);
+        const int dow = bucketKey.mid(QLatin1StringView(kBucketWeekday).size()).toInt(&ok);
         if (ok && dow >= 1 && dow <= 7) {
             return QLocale().dayName(dow, QLocale::LongFormat);
         }
     }
-    if (bucketKey == "lastWeek"_L1) return "Last Week"_L1;
-    if (bucketKey == "twoWeeksAgo"_L1) return "Two Weeks Ago"_L1;
+    if (bucketKey == QLatin1StringView(kBucketLastWeek)) return "Last Week"_L1;
+    if (bucketKey == QLatin1StringView(kBucketTwoWeeksAgo)) return "Two Weeks Ago"_L1;
     return "Older"_L1;
 }
 

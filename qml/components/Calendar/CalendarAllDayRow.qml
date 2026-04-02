@@ -36,9 +36,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: allDayColumns.left
         anchors.rightMargin: 6
-        text: "All-day"
+        text: i18n("All-day")
         font.pixelSize: 12
-        // color: Qt.rgba(1, 1, 1, 0.60)
         color: Kirigami.Theme.textColor
     }
 

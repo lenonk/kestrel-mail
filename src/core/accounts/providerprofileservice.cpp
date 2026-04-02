@@ -59,6 +59,7 @@ void ProviderProfileService::loadProfiles()
 {
     QFile f(":/data/providers.json"_L1);
     if (!f.open(QIODevice::ReadOnly)) {
+        qWarning() << "ProviderProfileService::loadProfiles: failed to open providers.json";
         return;
     }
 
