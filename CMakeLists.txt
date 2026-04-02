@@ -44,7 +44,7 @@ include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick Sql Network Concurrent WebEngineQuick Widgets)
-find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n Wallet)
+find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n Notifications Wallet)
 find_package(KF6Kirigami REQUIRED)
 find_package(KF6KirigamiPlatform REQUIRED)
 find_package(Boost CONFIG REQUIRED)
@@ -190,6 +190,7 @@ target_link_libraries(kestrel-mail
         Qt6::Widgets
         KF6::I18n
         KF6::CoreAddons
+        KF6::Notifications
         KF6::Wallet
         KF6::Kirigami
         KF6::KirigamiPlatform
@@ -228,6 +229,10 @@ install(TARGETS kestrel-mail kestrel-imap-lab ${KDE_INSTALL_TARGETS_DEFAULT_ARGS
 
 install(FILES kestrel-mail.desktop
     DESTINATION ${KDE_INSTALL_APPDIR}
+)
+
+install(FILES data/kestrel-mail.notifyrc
+    DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR}
 )
 
 install(FILES assets/kestrel-mail.png

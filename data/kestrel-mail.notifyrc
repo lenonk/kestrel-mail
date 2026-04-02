@@ -1,0 +1,12 @@
+[Global]
+IconName=mail-unread
+DesktopEntry=kestrel-mail
+Comment=Kestrel Mail Notifications
+Name=Kestrel Mail
+
+[Event/newMail]
+Name=New Mail
+Comment=A new email has arrived
+Action=Popup|Sound
+Sound=freedesktop/stereo/message-new-instant.oga
+Urgency=Normal

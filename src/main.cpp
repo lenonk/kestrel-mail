@@ -37,6 +37,7 @@
 #include "core/store/messagelistmodel.h"
 #include "core/transport/imap/imapservice.h"
 #include "core/transport/smtp/smtpservice.h"
+#include <KNotification>
 
 class CachingNetworkAccessManagerFactory : public QQmlNetworkAccessManagerFactory
 {
@@ -151,6 +152,78 @@ int main(int argc, char *argv[])
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &imapService, &ImapService::shutdown);
     imapService.initializeConnectionPool();
     SmtpService smtpService(&accountRepository, tokenVault.get(), &engine);
+
+    // Desktop notification for new mail.
+    QObject::connect(&dataStore, &DataStore::newMailReceived, &app,
+        [&dataStore, &imapService](const QVariantMap &info) {
+            const QString senderRaw = info.value(QStringLiteral("senderRaw")).toString();
+            const QString subject   = info.value(QStringLiteral("subject")).toString();
+            const QString snippet   = info.value(QStringLiteral("snippet")).toString();
+            const QString account   = info.value(QStringLiteral("accountEmail")).toString();
+            const QString folder    = info.value(QStringLiteral("folder")).toString();
+            const QString uid       = info.value(QStringLiteral("uid")).toString();
+
+            // Resolve display name through the same path the message list uses:
+            // contacts DB lookup → extracted display name → bare email fallback.
+            const int lt = senderRaw.indexOf('<');
+            const int gt = senderRaw.indexOf('>', lt);
+            const QString email = (lt >= 0 && gt > lt)
+                ? senderRaw.mid(lt + 1, gt - lt - 1).trimmed()
+                : senderRaw.trimmed();
+            QString sender = dataStore.displayNameForEmail(email);
+            if (sender.isEmpty())
+                sender = info.value(QStringLiteral("senderDisplay")).toString();
+
+            auto *n = new KNotification(QStringLiteral("newMail"));
+            n->setTitle(sender);
+
+            QString body = subject;
+            if (!snippet.isEmpty())
+                body += QStringLiteral("\n") + snippet;
+            n->setText(body);
+
+            // Load sender avatar or generate initials fallback.
+            const QString avatarUrl = dataStore.avatarForEmail(email);
+            QPixmap avatar;
+            if (!avatarUrl.isEmpty()) {
+                QString path = avatarUrl;
+                if (path.startsWith(QStringLiteral("file://")))
+                    path = path.mid(7);
+                avatar = QPixmap(path);
+                if (!avatar.isNull())
+                    avatar = avatar.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
+            if (avatar.isNull())
+                avatar = DataStore::avatarPixmap(sender, senderRaw);
+            n->setPixmap(avatar);
+            n->setHint(QStringLiteral("sound-name"), QStringLiteral("message-new-instant"));
+
+            auto *markRead = n->addAction(QStringLiteral("Mark as Read"));
+            auto *reply    = n->addAction(QStringLiteral("Reply"));
+
+            QObject::connect(markRead, &KNotificationAction::activated, [&imapService, &dataStore, account, folder, uid]() {
+                imapService.markMessageRead(account, folder, uid);
+                dataStore.markMessageRead(account, uid);
+            });
+            QObject::connect(reply, &KNotificationAction::activated, [&dataStore, account, folder, uid]() {
+                emit dataStore.notificationReplyRequested(account, folder, uid);
+            });
+
+            n->sendEvent();
+        });
+    // Enable notifications after the first successful sync so a cold-start
+    // bulk import doesn't spam the desktop. On warm starts (DB already has
+    // messages), enable immediately so the very first IDLE message is notified.
+    if (dataStore.inboxCount() > 0) {
+        dataStore.setDesktopNotifyEnabled(true);
+    } else {
+        auto enableNotify = [&dataStore](bool ok, const QString &) {
+            if (ok && !dataStore.desktopNotifyEnabled())
+                dataStore.setDesktopNotifyEnabled(true);
+        };
+        QObject::connect(&imapService, &ImapService::syncFinished, &dataStore, enableNotify);
+        QObject::connect(&imapService, &ImapService::realtimeStatus, &dataStore, enableNotify);
+    }
 
     engine.rootContext()->setContextProperty("providerProfiles", &providerProfiles);
     engine.rootContext()->setContextProperty("accountSetup", &accountSetup);

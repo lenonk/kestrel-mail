@@ -952,6 +952,15 @@ Kirigami.ApplicationWindow {
             // Keep current selection stable; messageByKey() now resolves against DB
             // when the row is outside the in-memory inbox cache window.
         }
+        function onNotificationReplyRequested(accountEmail, folder, uid) {
+            // Raise the window and open reply compose for the notified message.
+            root.raise()
+            root.requestActivate()
+            const key = "msg:" + accountEmail + "|" + folder + "|" + uid
+            const d = root.dataStoreObj ? root.dataStoreObj.messageByKey(accountEmail, folder, uid) : null
+            if (d)
+                root.openReplyCompose(d, false, root.contentPaneDarkModeEnabled)
+        }
         function onBodyHtmlUpdated(accountEmail, folder, uid) {
             // Bump _bodyUpdateVersion so selectedMessageData re-evaluates and picks up
             // the fresh body from the DB — without a full inbox reload.

@@ -21,32 +21,13 @@ Item {
     height: size
 
     function computedInitials() {
-        const rawName = (displayName || "").trim()
-        const rawFallback = (fallbackText || "").trim()
-        const raw = rawName.length ? rawName : rawFallback
-        if (!raw.length)
-            return "?"
-        const parts = raw.split(/\s+/).filter(function(p) { return p.length > 0 })
-        if (parts.length >= 2)
-            return (parts[0][0] + parts[1][0]).toUpperCase()
-        return raw[0].toUpperCase()
-    }
-
-    function stableHash(input) {
-        let h = 2166136261
-        const s = (input || "")
-        for (let i = 0; i < s.length; ++i) {
-            h ^= s.charCodeAt(i)
-            h = Math.imul(h, 16777619)
-        }
-        return (h >>> 0)
+        return (typeof dataStore !== "undefined" && dataStore)
+            ? dataStore.avatarInitials(displayName || "", fallbackText || "") : "?"
     }
 
     function computedFallbackColor() {
-        const key = ((displayName || "") + "|" + (fallbackText || "")).trim().toLowerCase()
-        const hash = stableHash(key.length ? key : "unknown")
-        const hue = (hash % 360) / 360.0
-        return Qt.hsla(hue, 0.50, 0.45, 1.0)
+        return (typeof dataStore !== "undefined" && dataStore)
+            ? dataStore.avatarColor(displayName || "", fallbackText || "") : "#666"
     }
 
     Rectangle {

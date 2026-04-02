@@ -1,8 +1,10 @@
 #pragma once
 
+#include <QColor>
 #include <QHash>
 #include <QMutex>
 #include <QObject>
+#include <QPixmap>
 #include <QVariantList>
 #include <QStringList>
 
@@ -140,6 +142,18 @@ signals:
     // Emitted after body_html is stored for a message. Does NOT trigger an inbox
     // reload — QML bindings that need the fresh body should depend on this signal.
     void bodyHtmlUpdated(const QString &accountEmail, const QString &folder, const QString &uid);
+    void newMailReceived(const QVariantMap &info);
+    void notificationReplyRequested(const QString &accountEmail, const QString &folder, const QString &uid);
+
+public:
+    bool desktopNotifyEnabled() const { return m_desktopNotifyEnabled.load(); }
+    void setDesktopNotifyEnabled(bool enabled) { m_desktopNotifyEnabled.store(enabled); }
+    int inboxCount() const;
+
+    // Shared avatar initials/color logic — used by AvatarBadge.qml and desktop notifications.
+    Q_INVOKABLE static QString avatarInitials(const QString &displayName, const QString &fallback);
+    Q_INVOKABLE static QColor  avatarColor(const QString &displayName, const QString &fallback);
+    static QPixmap avatarPixmap(const QString &displayName, const QString &email, int size = 64);
 
 private:
     QString m_connectionName;
@@ -169,6 +183,7 @@ private:
     // Keyed by lowercase raw folder name (e.g. "inbox", "[gmail]/categories/primary").
     mutable QMutex m_newCountMutex;
     QHash<QString, int> m_newMessageCounts;
+    std::atomic<bool> m_desktopNotifyEnabled{false};
 
     // In-memory cache for contact_avatars lookups — keyed by normalised email.
     // Populated on first DB hit; invalidated/updated on upsert. Eliminates

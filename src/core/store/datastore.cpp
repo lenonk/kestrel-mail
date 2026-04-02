@@ -17,6 +17,8 @@
 #include <QThread>
 #include <QTimer>
 #include <QColor>
+#include <QFont>
+#include <QPainter>
 #include <limits>
 
 #include "src/core/transport/imap/sync/kestreltimer.h"
@@ -472,6 +474,31 @@ bool isTrashFolderName(const QString &folder)
 bool isCategoryFolderName(const QString &folder)
 {
     return folder.trimmed().toLower().contains(QStringLiteral("/categories/"));
+}
+
+// Map raw X-GM-LABELS text to a synthetic category folder name using the same
+// keyword matching as Imap::Parser::extractGmailCategoryFolder.
+QString inferCategoryFromLabels(const QString &rawLabels)
+{
+    QString l = rawLabels.toLower();
+    l.replace('"', ' ');  l.replace('\\', ' ');  l.replace('^', ' ');
+    l.replace(':', ' ');  l.replace('/', ' ');    l.replace('-', ' ');
+
+    auto has = [&](const char *needle) { return l.contains(QString::fromLatin1(needle)); };
+
+    if (has("promotions") || has("promotion") || has("categorypromotions") || has("smartlabel_promo"))
+        return QStringLiteral("[Gmail]/Categories/Promotions");
+    if (has("social") || has("categorysocial") || has("smartlabel_social"))
+        return QStringLiteral("[Gmail]/Categories/Social");
+    if (has("purchases") || has("purchase") || has("categorypurchases") || has("smartlabel_receipt"))
+        return QStringLiteral("[Gmail]/Categories/Purchases");
+    if (has("updates") || has("update") || has("categoryupdates") || has("smartlabel_notification"))
+        return QStringLiteral("[Gmail]/Categories/Updates");
+    if (has("forums") || has("forum") || has("categoryforums") || has("smartlabel_group"))
+        return QStringLiteral("[Gmail]/Categories/Forums");
+    if (has("primary") || has("categorypersonal") || has("smartlabel_personal"))
+        return QStringLiteral("[Gmail]/Categories/Primary");
+    return {};
 }
 
 bool isSystemLabelName(const QString &label)
@@ -1681,8 +1708,32 @@ void DataStore::upsertHeader(const QVariantMap &header)
 
     const bool isCategoryFolder = folderValue.contains(QStringLiteral("/Categories/"), Qt::CaseInsensitive);
     if (!isCategoryFolder) {
-        if (upsertFolderEdge(database, accountEmail, messageId, folderValue, uidValue, unreadValue))
+        if (upsertFolderEdge(database, accountEmail, messageId, folderValue, uidValue, unreadValue)) {
             incrementNewMessageCount(folderValue);
+            // For INBOX messages, also increment the inferred Gmail category count
+            // so category tabs show +X immediately.
+            if (!rawGmailLabels.isEmpty()) {
+                const QString catFolder = inferCategoryFromLabels(rawGmailLabels);
+                if (!catFolder.isEmpty())
+                    incrementNewMessageCount(catFolder);
+            }
+            // Desktop notification for new unread inbox messages.
+            if (m_desktopNotifyEnabled.load()
+                && unreadValue
+                && folderValue.compare("INBOX"_L1, Qt::CaseInsensitive) == 0) {
+                QVariantMap info;
+                info["senderDisplay"_L1] = senderDisplayNameValue.isEmpty() ? senderEmailValue : senderDisplayNameValue;
+                info["senderRaw"_L1]     = senderValue;
+                info["subject"_L1]       = subjectValue;
+                info["snippet"_L1]       = snippetValue;
+                info["accountEmail"_L1]  = accountEmail;
+                info["folder"_L1]        = folderValue;
+                info["uid"_L1]           = uidValue;
+                QMetaObject::invokeMethod(this, [this, info]() {
+                    emit newMailReceived(info);
+                }, Qt::QueuedConnection);
+            }
+        }
     } else {
         // Check if this category label is new before upserting.
         QSqlQuery qCheckLabel(database);
@@ -2652,8 +2703,33 @@ void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId,
     q.bindValue(":unread"_L1, unread);
     q.exec();
 
-    if (isNew)
+    if (isNew) {
         incrementNewMessageCount(folder);
+        // Desktop notification for new unread inbox messages.
+        if (m_desktopNotifyEnabled.load()
+            && unread
+            && folder.compare("INBOX"_L1, Qt::CaseInsensitive) == 0) {
+            QSqlQuery qMsg(database);
+            qMsg.prepare("SELECT sender, subject, snippet FROM messages WHERE id=:id LIMIT 1"_L1);
+            qMsg.bindValue(":id"_L1, messageId);
+            if (qMsg.exec() && qMsg.next()) {
+                const QString rawSender = qMsg.value(0).toString().trimmed();
+                const QString se = extractFirstEmail(rawSender);
+                const QString sn = extractExplicitDisplayName(rawSender, se);
+                QVariantMap info;
+                info["senderDisplay"_L1] = sn.isEmpty() ? se : sn;
+                info["senderRaw"_L1]     = rawSender;
+                info["subject"_L1]       = qMsg.value(1).toString();
+                info["snippet"_L1]       = qMsg.value(2).toString();
+                info["accountEmail"_L1]  = accountEmail;
+                info["folder"_L1]        = folder;
+                info["uid"_L1]           = uid;
+                QMetaObject::invokeMethod(this, [this, info]() {
+                    emit newMailReceived(info);
+                }, Qt::QueuedConnection);
+            }
+        }
+    }
     // Clean up any orphaned messages now that this edge is committed.
     // The just-inserted edge protects its own message_id; only truly stale rows are removed.
     QSqlQuery qOrphan(database);
@@ -5042,6 +5118,65 @@ QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &r
         m_folderStatsCache.insert(key, out);
     }
     return out;
+}
+
+// ── Shared avatar initials / color ────────────────────────────────────────────
+
+QString DataStore::avatarInitials(const QString &displayName, const QString &fallback)
+{
+    const QString raw = displayName.trimmed().isEmpty() ? fallback.trimmed() : displayName.trimmed();
+    if (raw.isEmpty())
+        return QStringLiteral("?");
+    const auto parts = raw.split(QRegularExpression(R"(\s+)"), Qt::SkipEmptyParts);
+    QString initials;
+    for (const auto &p : parts) {
+        if (initials.size() >= 2) break;
+        if (!p.isEmpty()) initials += p.at(0).toUpper();
+    }
+    return initials.isEmpty() ? raw.left(1).toUpper() : initials;
+}
+
+QColor DataStore::avatarColor(const QString &displayName, const QString &fallback)
+{
+    // FNV-1a hash — must match AvatarBadge.qml stableHash().
+    const QString key = (displayName + "|"_L1 + fallback).trimmed().toLower();
+    const QByteArray input = (key.isEmpty() ? QStringLiteral("unknown") : key).toUtf8();
+    quint32 h = 2166136261u;
+    for (const char c : input) {
+        h ^= static_cast<unsigned char>(c);
+        h *= 16777619u;
+    }
+    const qreal hue = static_cast<qreal>(h % 360) / 360.0;
+    return QColor::fromHslF(hue, 0.50, 0.45, 1.0);
+}
+
+QPixmap DataStore::avatarPixmap(const QString &displayName, const QString &email, int size)
+{
+    const QString initials = avatarInitials(displayName, email);
+    const QColor bg = avatarColor(displayName, email);
+
+    QPixmap px(size, size);
+    px.fill(Qt::transparent);
+    QPainter p(&px);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setBrush(bg);
+    p.setPen(Qt::NoPen);
+    p.drawEllipse(0, 0, size, size);
+    p.setPen(Qt::white);
+    p.setFont(QFont(QStringLiteral("sans-serif"), size / 3, QFont::Bold));
+    p.drawText(QRect(0, 0, size, size), Qt::AlignCenter, initials);
+    p.end();
+    return px;
+}
+
+int DataStore::inboxCount() const
+{
+    auto database = db();
+    if (!database.isValid() || !database.isOpen())
+        return 0;
+    QSqlQuery q(database);
+    q.exec("SELECT COUNT(*) FROM message_folder_map WHERE lower(folder)='inbox'"_L1);
+    return (q.next()) ? q.value(0).toInt() : 0;
 }
 
 void DataStore::incrementNewMessageCount(const QString &rawFolder)
