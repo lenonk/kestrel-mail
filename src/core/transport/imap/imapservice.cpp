@@ -2067,7 +2067,24 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
     auto *watcher = new QFutureWatcher<QString>(this);
     registerWatcher(watcher);
 
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, emailNorm, folderNorm, uidNorm, inFlightKey, userInitiated]() {
+    // Show a toast if the hydration is still in progress after 5 seconds.
+    QTimer *slowTimer = nullptr;
+    if (userInitiated) {
+        slowTimer = new QTimer(this);
+        slowTimer->setSingleShot(true);
+        slowTimer->setInterval(5000);
+        connect(slowTimer, &QTimer::timeout, this, [this]() {
+            emit hydrateStatus(true, QStringLiteral("Still loading message body\u2026"));
+        });
+        slowTimer->start();
+    }
+
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, slowTimer, emailNorm, folderNorm, uidNorm, inFlightKey, userInitiated]() {
+        if (slowTimer) {
+            slowTimer->stop();
+            slowTimer->deleteLater();
+        }
+
         const QString html = watcher->result();
         unregisterWatcher(watcher);
         watcher->deleteLater();
@@ -2170,51 +2187,74 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
         const qint64 mapMs = hydrateTimer.elapsed();
 
-        std::shared_ptr<Imap::Connection> pooled;
-        bool usedDedicated = false;
-        if (userInitiated) {
-            // Try the dedicated hydration connection first (non-blocking).
-            pooled = getDedicatedHydrateConnection(emailCopy);
-            if (pooled) {
-                usedDedicated = true;
+        // Retry loop: on failure for user-initiated hydrations, wait for
+        // a fresh OAuth token and try once more (up to 60 s total).
+        constexpr int kHydrateRetryDelayMs = 3000;
+        constexpr int kHydrateMaxTotalMs   = 60000;
+        const int maxAttempts = userInitiated ? 3 : 1;
+
+        for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+            if (m_destroying)
+                return QString{};
+            if (attempt > 0 && hydrateTimer.elapsed() >= kHydrateMaxTotalMs)
+                break;
+
+            // Back off before retries so the token refresh has time to land.
+            if (attempt > 0)
+                QThread::msleep(kHydrateRetryDelayMs);
+
+            std::shared_ptr<Imap::Connection> pooled;
+            bool usedDedicated = false;
+            if (userInitiated) {
+                pooled = getDedicatedHydrateConnection(emailCopy);
+                if (pooled) {
+                    usedDedicated = true;
+                } else {
+                    qint8 poolAttempts = 0;
+                    pooled = getPooledConnection(emailCopy, "hydrate-user"_L1);
+                    while (!pooled && poolAttempts++ < 10)
+                        pooled = getPooledConnection(emailCopy, "hydrate-user-fallback"_L1);
+                }
             } else {
-                // Dedicated slot busy — fall back to pool.
-                qint8 attempts = 0;
-                pooled = getPooledConnection(emailCopy, "hydrate-user"_L1);
-                while (!pooled && attempts++ < 10)
-                    pooled = getPooledConnection(emailCopy, "hydrate-user-fallback"_L1);
+                pooled = getPooledConnection(emailCopy, "bg-hydrate"_L1);
             }
-        } else {
-            // Semaphore ensures only 1 bg hydrate runs; one attempt is enough.
-            pooled = getPooledConnection(emailCopy, "bg-hydrate"_L1);
-        }
 
-        const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
+            const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
 
-        if (!pooled) {
-            if (userInitiated)
-                emit hydrateStatus(false, "Message body fetch failed: IMAP connection pool timeout.");
+            if (!pooled) {
+                if (attempt == maxAttempts - 1) {
+                    if (userInitiated)
+                        emit hydrateStatus(false, "Message body fetch failed: IMAP connection pool timeout.");
+                    qWarning().noquote() << "[perf-hydrate]"
+                                         << "uid=" << uidNorm
+                                         << "mapMs=" << mapMs
+                                         << "acquireMs=" << acquireMs
+                                         << "result=pool-timeout";
+                }
+                continue;
+            }
+
+            r.cxn = std::move(pooled);
+            const QString html = Imap::MessageHydrator::execute(r);
+            const qint64 totalMs = hydrateTimer.elapsed();
+            const qint64 executeMs = totalMs - mapMs - acquireMs;
             qWarning().noquote() << "[perf-hydrate]"
                                  << "uid=" << uidNorm
+                                 << "source=" << (userInitiated ? (usedDedicated ? "user-dedicated" : "user-pool") : "bg")
+                                 << "attempt=" << (attempt + 1)
                                  << "mapMs=" << mapMs
                                  << "acquireMs=" << acquireMs
-                                 << "result=pool-timeout";
-            return {};
-        }
+                                 << "executeMs=" << executeMs
+                                 << "totalMs=" << totalMs
+                                 << "htmlLen=" << html.size();
 
-        r.cxn = std::move(pooled);
-        const QString html = Imap::MessageHydrator::execute(r);
-        const qint64 totalMs = hydrateTimer.elapsed();
-        const qint64 executeMs = totalMs - mapMs - acquireMs;
-        qWarning().noquote() << "[perf-hydrate]"
-                             << "uid=" << uidNorm
-                             << "source=" << (userInitiated ? (usedDedicated ? "user-dedicated" : "user-pool") : "bg")
-                             << "mapMs=" << mapMs
-                             << "acquireMs=" << acquireMs
-                             << "executeMs=" << executeMs
-                             << "totalMs=" << totalMs
-                             << "htmlLen=" << html.size();
-        return html;
+            if (!html.isEmpty())
+                return html;
+
+            // Release the (possibly dead) connection before retrying.
+            r.cxn.reset();
+        }
+        return QString{};
     }));
 }
 

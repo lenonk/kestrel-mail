@@ -69,6 +69,11 @@ QString MessageHydrator::execute(const Request &req) {
                                      << "folder=" << folder
                                      << "selectMs=" << selectMs
                                      << "selectErr=" << msg.simplified().left(120);
+                // If the connection is dead and couldn't be recovered, bail out.
+                // Remaining candidates would all fail with BAD on the
+                // unauthenticated socket.
+                if (!req.cxn->isConnected())
+                    break;
                 continue;
             }
         }
