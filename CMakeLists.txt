@@ -139,6 +139,8 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/PaneIconStrip.qml
         qml/components/CollapsedPaneRail.qml
         qml/components/SearchBar.qml
+        qml/components/SearchBarFolderScope.qml
+        qml/components/RecentSearchesDropdown.qml
         qml/components/SearchFilterPopup.qml
         qml/components/StyledButton.qml
         qml/components/MessageList/MessageListPane.qml

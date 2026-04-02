@@ -26,13 +26,6 @@ Item {
     implicitWidth: barRect.width
     implicitHeight: barHeight
 
-    readonly property var folderScopeLabels: [
-        i18n("Current folder"),
-        i18n("Current folder and subfolders"),
-        i18n("All folders"),
-        i18n("Custom Folder Selection...")
-    ]
-
     readonly property var fieldScopeLabels: [
         i18n("Subject, sender, recipients, body, notes and attachments"),
         i18n("Subject, sender, recipients and body"),
@@ -135,23 +128,9 @@ Item {
         }
     }
 
-    function timeAgo(isoDateStr) {
-        if (!isoDateStr || isoDateStr.length === 0) return ""
-        const then = new Date(isoDateStr + "Z")
-        const now = new Date()
-        const diffMs = now - then
-        const diffMin = Math.floor(diffMs / 60000)
-        if (diffMin < 1) return i18n("Searched now")
-        if (diffMin < 60) return i18n("Searched %1 min ago", diffMin)
-        const diffHr = Math.floor(diffMin / 60)
-        if (diffHr < 24) return i18n("Searched %1 hr ago", diffHr)
-        const diffDays = Math.floor(diffHr / 24)
-        return i18n("Searched %1 days ago", diffDays)
-    }
-
     // Sequenced text scroll animation.
-    // Expanding: width resizes (150ms) → text scrolls in (300ms)
-    // Collapsing: text scrolls out (300ms) → width shrinks (150ms)
+    // Expanding: width resizes (150ms) -> text scrolls in (300ms)
+    // Collapsing: text scrolls out (300ms) -> width shrinks (150ms)
     property bool textScrolled: false
     property bool animateTextScroll: false
     property bool collapseHoldWidth: false // keeps width expanded while text scrolls out
@@ -312,68 +291,13 @@ Item {
                 NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
             }
 
-            // Folder scope text + chevron — fixed width for longest option
-            Item {
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: root.folderScopeFixedWidth
-                Layout.preferredHeight: root.barHeight
-
-                RowLayout {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 0
-
-                    QQC2.Label {
-                        text: root.folderScopeText
-                        font.pixelSize: 11
-                        color: Kirigami.Theme.textColor
-                        Layout.fillWidth: true
-                    }
-                    Kirigami.Icon {
-                        source: "arrow-down"
-                        Layout.preferredWidth: 12
-                        Layout.preferredHeight: 12
-                        color: Kirigami.Theme.textColor
-                    }
-                }
-
-                MouseArea {
-                    id: folderScopeMA
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: folderScopeMenu.openIfClosed()
-                }
-
-                PopupMenu {
-                    id: folderScopeMenu
-                    verticalOffset: 2
-
-                    QQC2.MenuItem {
-                        text: i18n("Current folder")
-                        checkable: true
-                        checked: root.folderScope === 0
-                        onTriggered: root.folderScope = 0
-                    }
-                    QQC2.MenuItem {
-                        text: i18n("Current folder and subfolders")
-                        checkable: true
-                        checked: root.folderScope === 1
-                        onTriggered: root.folderScope = 1
-                    }
-                    QQC2.MenuItem {
-                        text: i18n("All folders")
-                        checkable: true
-                        checked: root.folderScope === 2
-                        onTriggered: root.folderScope = 2
-                    }
-                    QQC2.MenuSeparator {}
-                    QQC2.MenuItem {
-                        text: i18n("Custom Folder Selection...")
-                        enabled: false
-                    }
-                }
+            // Folder scope selector
+            SearchBarFolderScope {
+                folderScopeText: root.folderScopeText
+                folderScopeFixedWidth: root.folderScopeFixedWidth
+                folderScope: root.folderScope
+                barHeight: root.barHeight
+                onFolderScopeChanged: function(newScope) { root.folderScope = newScope }
             }
 
             // Vertical divider after folder scope
@@ -568,42 +492,15 @@ Item {
                 NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
             }
 
-            // Folder scope text + chevron — fixed width, matching editing layout
-            Item {
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: root.folderScopeFixedWidth
-                Layout.preferredHeight: root.barHeight
-
-                RowLayout {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 0
-
-                    QQC2.Label {
-                        text: root.folderScopeText
-                        font.pixelSize: 11
-                        color: Kirigami.Theme.textColor
-                        Layout.fillWidth: true
-                    }
-                    Kirigami.Icon {
-                        source: "arrow-down"
-                        Layout.preferredWidth: 12
-                        Layout.preferredHeight: 12
-                        color: Kirigami.Theme.textColor
-                    }
-                }
-
-                MouseArea {
-                    id: activeFolderMA
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.enterEditing()
-                        folderScopeMenu.openIfClosed()
-                    }
-                }
+            // Folder scope selector
+            SearchBarFolderScope {
+                id: activeFolderScope
+                folderScopeText: root.folderScopeText
+                folderScopeFixedWidth: root.folderScopeFixedWidth
+                folderScope: root.folderScope
+                barHeight: root.barHeight
+                onClicked: root.enterEditing()
+                onFolderScopeChanged: function(newScope) { root.folderScope = newScope }
             }
 
             // Vertical divider
@@ -705,7 +602,7 @@ Item {
     // -----------------------------------------------------------------------
     // Recent searches dropdown
     // -----------------------------------------------------------------------
-    QQC2.Popup {
+    RecentSearchesDropdown {
         id: recentSearchesPopup
         // Align with the area between the two separators (folder scope divider to magnifying glass divider)
         readonly property real fieldStartX: barRect.x + 8 + root.folderScopeFixedWidth + 6 + 1 + 6
@@ -713,110 +610,20 @@ Item {
         x: fieldStartX - 7
         y: barRect.y + barRect.height + 2
         width: fieldEndX - fieldStartX + 8
-        padding: 0
-        modal: false
-        closePolicy: QQC2.Popup.CloseOnPressOutside | QQC2.Popup.CloseOnEscape
 
-        background: Rectangle {
-            color: Kirigami.Theme.backgroundColor
-            border.width: 1
-            border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2)
-            radius: 4
+        recentSearchItems: root.recentSearchItems
+        appRoot: root.appRoot
+
+        onSearchSelected: function(query) {
+            searchField.text = query
+            root.activateSearch()
         }
-
-        contentItem: Column {
-            width: parent ? parent.width : 0
-            spacing: 0
-
-            Repeater {
-                model: root.recentSearchItems
-
-                delegate: Rectangle {
-                    required property var modelData
-                    required property int index
-                    width: parent.width
-                    height: 36
-                    color: recentItemMA.containsMouse
-                           ? Qt.lighter(Kirigami.Theme.backgroundColor, 1.15)
-                           : "transparent"
-                    radius: index === 0 ? 4 : 0
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 6
-                        spacing: 8
-
-                        Kirigami.Icon {
-                            source: "edit-find"
-                            Layout.preferredWidth: 18
-                            Layout.preferredHeight: 18
-                            Layout.alignment: Qt.AlignVCenter
-                            color: Kirigami.Theme.disabledTextColor
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 0
-
-                            QQC2.Label {
-                                text: (modelData && modelData.query) ? modelData.query : ""
-                                font.pixelSize: 12
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-                            QQC2.Label {
-                                text: root.timeAgo((modelData && modelData.searchedAt) ? modelData.searchedAt : "")
-                                font.pixelSize: 10
-                                opacity: 0.6
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        Item {
-                            Layout.preferredWidth: 20
-                            Layout.preferredHeight: 20
-                            Layout.alignment: Qt.AlignVCenter
-
-                            Kirigami.Icon {
-                                anchors.centerIn: parent
-                                width: 14
-                                height: 14
-                                source: "edit-delete-remove"
-                                color: deleteMA.containsMouse
-                                       ? Kirigami.Theme.negativeTextColor
-                                       : Kirigami.Theme.disabledTextColor
-                            }
-                            MouseArea {
-                                id: deleteMA
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    if (root.appRoot && root.appRoot.dataStoreObj && modelData && modelData.query)
-                                        root.appRoot.dataStoreObj.removeRecentSearch(modelData.query)
-                                    root.refreshRecentSearches()
-                                    if (root.recentSearchItems.length === 0)
-                                        recentSearchesPopup.close()
-                                }
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: recentItemMA
-                        anchors.fill: parent
-                        anchors.rightMargin: 30
-                        hoverEnabled: true
-                        onClicked: {
-                            const q = (modelData && modelData.query) ? modelData.query : ""
-                            if (q.length > 0) {
-                                searchField.text = q
-                                root.activateSearch()
-                            }
-                        }
-                    }
-                }
-            }
+        onItemDeleted: function(query) {
+            if (root.appRoot && root.appRoot.dataStoreObj)
+                root.appRoot.dataStoreObj.removeRecentSearch(query)
+            root.refreshRecentSearches()
+            if (root.recentSearchItems.length === 0)
+                recentSearchesPopup.close()
         }
     }
 

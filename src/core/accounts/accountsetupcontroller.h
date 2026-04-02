@@ -29,7 +29,7 @@ public:
 
     Q_INVOKABLE void discoverProvider();
     Q_INVOKABLE void beginOAuth();
-    Q_INVOKABLE bool completeOAuth(const QString &callbackOrCode);
+    Q_INVOKABLE void completeOAuth(const QString &callbackOrCode);
     Q_INVOKABLE bool saveCurrentAccount(const QString &accountName = QString(), const QString &encryption = QStringLiteral("TLS"));
     Q_INVOKABLE bool hasTokenForEmail(const QString &email) const;
     Q_INVOKABLE bool removeAccount(const QString &email);

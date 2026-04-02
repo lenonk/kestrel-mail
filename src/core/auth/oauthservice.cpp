@@ -6,7 +6,6 @@
 #include <QByteArray>
 #include <QCryptographicHash>
 #include <QDebug>
-#include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -28,6 +27,7 @@ constexpr quint16 kOAuthCallbackPort = 53682;
 OAuthService::OAuthService(TokenVault *vault, QObject *parent)
     : QObject(parent)
     , m_vault(vault)
+    , m_nam(new QNetworkAccessManager(this))
 {
 }
 
@@ -138,7 +138,7 @@ QString OAuthService::startAuthorization(const QVariantMap &provider, const QStr
     return m_pendingAuthUrl;
 }
 
-bool OAuthService::completeAuthorization(const QString &callbackOrCode)
+void OAuthService::completeAuthorization(const QString &callbackOrCode)
 {
     QString code;
     QString state;
@@ -157,17 +157,16 @@ bool OAuthService::completeAuthorization(const QString &callbackOrCode)
         m_lastStatus = "Missing authorization code."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
-        return false;
+        return;
     }
 
     if (!state.isEmpty() && state != m_pendingState) {
         m_lastStatus = "OAuth state mismatch."_L1;
         emit lastStatusChanged();
         emit authorizationCompleted(false, m_lastStatus);
-        return false;
+        return;
     }
 
-    QNetworkAccessManager nam;
     QNetworkRequest req{QUrl(m_pendingTokenUrl)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded"_L1);
 
@@ -181,60 +180,58 @@ bool OAuthService::completeAuthorization(const QString &callbackOrCode)
         body.addQueryItem("client_secret"_L1, m_pendingClientSecret);
     }
 
-    QNetworkReply *reply = nam.post(req, body.toString(QUrl::FullyEncoded).toUtf8());
-    QEventLoop loop;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
+    QNetworkReply *reply = m_nam->post(req, body.toString(QUrl::FullyEncoded).toUtf8());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
 
-    const QByteArray payload = reply->readAll();
-    const bool ok = (reply->error() == QNetworkReply::NoError);
-    reply->deleteLater();
+        const QByteArray payload = reply->readAll();
+        const bool ok = (reply->error() == QNetworkReply::NoError);
 
-    if (!ok) {
-        m_lastStatus = "Token exchange failed: %1"_L1.arg(QString::fromUtf8(payload));
-        emit lastStatusChanged();
-        emit authorizationCompleted(false, m_lastStatus);
-        return false;
-    }
-
-    const QJsonObject obj = QJsonDocument::fromJson(payload).object();
-    const QString refreshToken = obj.value("refresh_token"_L1).toString();
-    if (refreshToken.isEmpty()) {
-        m_lastStatus = "Token exchange succeeded but no refresh_token returned."_L1;
-        emit lastStatusChanged();
-        emit authorizationCompleted(false, m_lastStatus);
-        return false;
-    }
-
-    QVariantMap profile;
-    const QVariantMap claims = parseJwtPayloadClaims(obj.value("id_token"_L1).toString());
-    const QString claimName = claims.value("name"_L1).toString().trimmed();
-    const QString claimEmail = Kestrel::normalizeEmail(claims.value("email"_L1).toString());
-    if (!claimName.isEmpty()) {
-        profile.insert("displayName"_L1, claimName);
-    }
-    if (!claimEmail.isEmpty()) {
-        profile.insert("email"_L1, claimEmail);
-    }
-    if (!profile.isEmpty()) {
-        const QString key = Kestrel::normalizeEmail(m_pendingEmail);
-        if (!key.isEmpty()) {
-            m_profileByEmail.insert(key, profile);
+        if (!ok) {
+            m_lastStatus = "Token exchange failed: %1"_L1.arg(QString::fromUtf8(payload));
+            emit lastStatusChanged();
+            emit authorizationCompleted(false, m_lastStatus);
+            return;
         }
-    }
 
-    const bool stored = m_vault ? m_vault->storeRefreshToken(m_pendingEmail, refreshToken) : false;
-    if (!stored) {
-        m_lastStatus = "Token exchange succeeded but token vault write failed."_L1;
+        const QJsonObject obj = QJsonDocument::fromJson(payload).object();
+        const QString refreshToken = obj.value("refresh_token"_L1).toString();
+        if (refreshToken.isEmpty()) {
+            m_lastStatus = "Token exchange succeeded but no refresh_token returned."_L1;
+            emit lastStatusChanged();
+            emit authorizationCompleted(false, m_lastStatus);
+            return;
+        }
+
+        QVariantMap profile;
+        const QVariantMap claims = parseJwtPayloadClaims(obj.value("id_token"_L1).toString());
+        const QString claimName = claims.value("name"_L1).toString().trimmed();
+        const QString claimEmail = Kestrel::normalizeEmail(claims.value("email"_L1).toString());
+        if (!claimName.isEmpty()) {
+            profile.insert("displayName"_L1, claimName);
+        }
+        if (!claimEmail.isEmpty()) {
+            profile.insert("email"_L1, claimEmail);
+        }
+        if (!profile.isEmpty()) {
+            const QString key = Kestrel::normalizeEmail(m_pendingEmail);
+            if (!key.isEmpty()) {
+                m_profileByEmail.insert(key, profile);
+            }
+        }
+
+        const bool stored = m_vault ? m_vault->storeRefreshToken(m_pendingEmail, refreshToken) : false;
+        if (!stored) {
+            m_lastStatus = "Token exchange succeeded but token vault write failed."_L1;
+            emit lastStatusChanged();
+            emit authorizationCompleted(false, m_lastStatus);
+            return;
+        }
+
+        m_lastStatus = "OAuth complete. Refresh token stored."_L1;
         emit lastStatusChanged();
-        emit authorizationCompleted(false, m_lastStatus);
-        return false;
-    }
-
-    m_lastStatus = "OAuth complete. Refresh token stored."_L1;
-    emit lastStatusChanged();
-    emit authorizationCompleted(true, m_lastStatus);
-    return true;
+        emit authorizationCompleted(true, m_lastStatus);
+    });
 }
 
 QString OAuthService::randomBase64Url(int bytes)

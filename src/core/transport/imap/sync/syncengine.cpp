@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <ranges>
 #include <span>
 #include <vector>
 #include <tuple>
@@ -328,11 +329,10 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
         };
 
         QString espVendor;
-        for (const auto &sig : kEspMarkers) {
-            if (headerSource.contains(QLatin1StringView(sig.marker), Qt::CaseInsensitive)) {
-                espVendor = QLatin1StringView(sig.vendor);
-                break;
-            }
+        if (auto it = std::ranges::find_if(kEspMarkers, [&](const auto &sig) {
+                return headerSource.contains(QLatin1StringView(sig.marker), Qt::CaseInsensitive);
+            }); it != std::end(kEspMarkers)) {
+            espVendor = QLatin1StringView(it->vendor);
         }
 
         // Received-chain fallback: curated whitelist of known ESP relay domain suffixes.
@@ -632,7 +632,8 @@ fetchUidBatch(SyncContext &ctx,
     } else {
         QStringList ids;
         ids.reserve(static_cast<int>(requested.size()));
-        for (const qint32 u : requested) ids.push_back(QString::number(u));
+        std::ranges::transform(requested, std::back_inserter(ids),
+                               [](qint32 u) { return QString::number(u); });
         uidSpec = ids.join(',');
     }
 
@@ -682,8 +683,8 @@ fetchUidBatch(SyncContext &ctx,
                     QStringList sortedHints = hinted.values();
                     std::ranges::sort(sortedHints);
                     QStringList quoted;
-                    for (const QString &hf : sortedHints)
-                        quoted.push_back("\"%1\""_L1.arg(hf));
+                    std::ranges::transform(sortedHints, std::back_inserter(quoted),
+                                           [](const QString &hf) { return "\"%1\""_L1.arg(hf); });
                     fetchResp += "\nX-GM-LABELS (%1)\n"_L1.arg(quoted.join(' '));
                 }
             }
@@ -748,7 +749,8 @@ prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, const Inges
 
         QStringList uidStrs;
         uidStrs.reserve(static_cast<int>(chunk.size()));
-        for (const qint32 u : chunk) uidStrs.push_back(QString::number(u));
+        std::ranges::transform(chunk, std::back_inserter(uidStrs),
+                               [](qint32 u) { return QString::number(u); });
 
         const QString resp = ctx.cxn->execute(
             "UID FETCH %1 (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])"_L1
@@ -779,10 +781,8 @@ prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, const Inges
     respondedUids.reserve(uidInfo.size());
     for (auto it = uidInfo.cbegin(); it != uidInfo.cend(); ++it)
         respondedUids.insert(it.key());
-    for (const qint32 u : uids) {
-        if (!respondedUids.contains(u))
-            result.needFullFetch.push_back(u);
-    }
+    std::ranges::copy_if(uids, std::back_inserter(result.needFullFetch),
+                         [&](qint32 u) { return !respondedUids.contains(u); });
 
     // Collect non-empty Message-IDs for batch DB lookup.
     QStringList msgIdList;
@@ -856,31 +856,21 @@ executeIncremental(SyncContext &ctx) {
             buildCategoryHints(ctx, state, ctx.minUidExclusive + 1, INT_MAX);
     }
 
-    // Filter: only UIDs strictly greater than minUidExclusive.
-    QStringList filtered;
-    filtered.reserve(newUids.size());
+    // Filter to UIDs strictly greater than minUidExclusive, then sort and convert
+    // to qint32 in one pipeline.
+    std::vector<qint32> incUids;
+    incUids.reserve(newUids.size());
     for (const auto &u : newUids) {
         bool ok = false;
-        if (const auto v = u.toLongLong(&ok); ok && v > ctx.minUidExclusive)
-            filtered.push_back(u);
+        const qint32 v = u.toInt(&ok);
+        if (ok && v > ctx.minUidExclusive)
+            incUids.push_back(v);
     }
-    newUids = filtered;
-    std::ranges::sort(newUids, [](const QString &a, const QString &b) {
-        return a.toLongLong() < b.toLongLong();
-    });
-
+    std::ranges::sort(incUids);
 
     // Cross-folder dedup pre-pass for new UIDs.
     qint32 throttleBackoffMs = 0;
     using SyncUtils::kSyncBatchSize;
-
-    std::vector<qint32> incUids;
-    incUids.reserve(newUids.size());
-    for (const auto &uid : newUids) {
-        bool ok = false;
-        const qint32 v = uid.toInt(&ok);
-        if (ok) incUids.push_back(v);
-    }
 
     if (!incUids.empty()) {
         const auto prepass = prepassMessageIds(ctx, incUids, state);
@@ -920,7 +910,10 @@ executeIncremental(SyncContext &ctx) {
     if (ctx.fetchBudget != 0 && ctx.getFolderUids) {
         const auto localUids = ctx.getFolderUids(ctx.cxn->email(), ctx.folderName);
         const QSet localSet(localUids.begin(), localUids.end());
-        const QSet newSet(newUids.begin(), newUids.end());
+        QSet<QString> newSet;
+        newSet.reserve(static_cast<qsizetype>(incUids.size()));
+        for (const qint32 v : incUids)
+            newSet.insert(QString::number(v));
 
         bool skipSearchAll = false;
         if (ctx.remoteExists >= 0) {
@@ -974,11 +967,7 @@ executeIncremental(SyncContext &ctx) {
             // Build Gmail category hints for backfill UIDs so they get the correct
             // category folder edge (Social, Promotions, etc.) instead of bare INBOX.
             if (!backfillCandidates.empty()) {
-                qint32 minBf = backfillCandidates.front(), maxBf = backfillCandidates.front();
-                for (const qint32 u : backfillCandidates) {
-                    if (u < minBf) minBf = u;
-                    if (u > maxBf) maxBf = u;
-                }
+                const auto [minBf, maxBf] = std::ranges::minmax(backfillCandidates);
                 buildCategoryHints(ctx, state, minBf, maxBf);
             }
 
@@ -1107,9 +1096,7 @@ executeFull(SyncContext &ctx) {
             pendingUidSet.clear(); return;
         }
 
-        std::vector<qint32> pending;
-        pending.reserve(pendingUidSet.size());
-        for (const qint32 v : pendingUidSet) pending.push_back(v);
+        std::vector<qint32> pending(pendingUidSet.cbegin(), pendingUidSet.cend());
         std::ranges::sort(pending, std::greater<qint32>());
         if (!unlimited && pending.size() > static_cast<size_t>(remainingBudget))
             pending.resize(static_cast<size_t>(remainingBudget));

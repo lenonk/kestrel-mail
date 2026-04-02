@@ -39,6 +39,8 @@
 #include <QProcess>
 #include <QSemaphore>
 #include <QtConcurrentRun>
+#include <algorithm>
+#include <ranges>
 
 #include "sync/idlewatcher.h"
 #include "sync/kestreltimer.h"
@@ -261,12 +263,11 @@ ImapService::initializeConnectionPool() {
         QMutexLocker lock(&g_poolMutex);
         g_poolTokenRefresher = [this](const QString &email) -> QString {
             if (!m_accounts) return {};
-            for (const auto &a : m_accounts->accounts()) {
-                const auto acc = a.toMap();
-                if (acc.value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0)
-                    return refreshAccessToken(acc, email);
-            }
-            return {};
+            const auto accounts = m_accounts->accounts();
+            auto it = std::ranges::find_if(accounts, [&](const QVariant &a) {
+                return a.toMap().value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0;
+            });
+            return (it != accounts.end()) ? refreshAccessToken(it->toMap(), email) : QString{};
         };
     }
 
@@ -399,15 +400,9 @@ ImapService::waitForActiveWatchers(const qint32 timeoutMs) {
 
         if (snapshot.isEmpty()) return;
 
-        bool anyRunning = false;
-        for (const QFutureWatcherBase *watcher : snapshot) {
-            if (!watcher)
-                continue;
-
-            if (watcher->isRunning()) {
-                anyRunning = true;
-            }
-        }
+        const bool anyRunning = std::ranges::any_of(snapshot, [](const QFutureWatcherBase *w) {
+            return w && w->isRunning();
+        });
 
         if (!anyRunning)
             return;
@@ -692,9 +687,9 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
     // run per message — prevents N concurrent pool acquisitions when QML fires
     // one prefetchAttachments call per candidate folder.
     QStringList partIds;
-    for (const auto &a : toFetch)
-        partIds.push_back(a.toMap().value("partId"_L1).toString());
-    std::sort(partIds.begin(), partIds.end());
+    std::ranges::transform(toFetch, std::back_inserter(partIds),
+                           [](const QVariant &a) { return a.toMap().value("partId"_L1).toString(); });
+    std::ranges::sort(partIds);
     const QString taskKey = "task:"_L1 + accountEmail + "|"_L1 + partIds.join(","_L1);
 
     {
@@ -804,13 +799,11 @@ ImapService::prefetchImageAttachments(const QString &accountEmail, const QString
         return;
 
     QVariantList toFetch;
-    for (const auto &a : attachments) {
+    std::ranges::copy_if(attachments, std::back_inserter(toFetch), [&](const QVariant &a) {
         const auto am = a.toMap();
-        if (!isImageAttachment(am))
-            continue;
-        if (cachedAttachmentPath(accountEmail, uid, am.value("partId"_L1).toString()).isEmpty())
-            toFetch.push_back(a);
-    }
+        return isImageAttachment(am)
+            && cachedAttachmentPath(accountEmail, uid, am.value("partId"_L1).toString()).isEmpty();
+    });
     if (toFetch.isEmpty())
         return;
 
@@ -1748,13 +1741,13 @@ ImapService::refreshGoogleCalendars() {
     }
 
     runBackgroundTask([this, accounts]() {
-        QString accessToken;
-        for (const auto &info : resolveAccounts(accounts)) {
-            if (info.host.contains("gmail", Qt::CaseInsensitive)) {
-                accessToken = info.accessToken;
-                break;
-            }
-        }
+        const auto resolved = resolveAccounts(accounts);
+        auto it = std::ranges::find_if(resolved, [](const AccountInfo &info) {
+            return info.host.contains("gmail", Qt::CaseInsensitive);
+        });
+        if (it == resolved.end())
+            return;
+        const QString accessToken = it->accessToken;
         if (accessToken.isEmpty())
             return;
 
@@ -1840,13 +1833,13 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
     }
 
     runBackgroundTask([this, accounts, calendarIds, weekStartIso, weekEndIso, calendarColorMap]() {
-        QString accessToken;
-        for (const auto &info : resolveAccounts(accounts)) {
-            if (info.host.contains("gmail", Qt::CaseInsensitive)) {
-                accessToken = info.accessToken;
-                break;
-            }
-        }
+        const auto resolved = resolveAccounts(accounts);
+        auto it = std::ranges::find_if(resolved, [](const AccountInfo &info) {
+            return info.host.contains("gmail", Qt::CaseInsensitive);
+        });
+        if (it == resolved.end())
+            return;
+        const QString accessToken = it->accessToken;
         if (accessToken.isEmpty())
             return;
 
@@ -2046,12 +2039,10 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
     }
 
     const auto accountList = m_accounts->accounts();
-    QVariantMap account;
-    for (const auto &a : accountList) {
-        if (account = a.toMap(); account.value("email"_L1).toString() == emailNorm) {
-            break;
-        }
-    }
+    auto acctIt = std::ranges::find_if(accountList, [&](const QVariant &a) {
+        return a.toMap().value("email"_L1).toString() == emailNorm;
+    });
+    const QVariantMap account = (acctIt != accountList.end()) ? acctIt->toMap() : QVariantMap{};
 
     if (account.isEmpty()) {
         {

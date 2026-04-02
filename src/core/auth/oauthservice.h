@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QVariantMap>
 
+class QNetworkAccessManager;
 class QTcpServer;
 
 class TokenVault;
@@ -20,7 +21,7 @@ public:
     QString lastStatus() const;
 
     Q_INVOKABLE QString startAuthorization(const QVariantMap &provider, const QString &email);
-    Q_INVOKABLE bool completeAuthorization(const QString &callbackOrCode);
+    Q_INVOKABLE void completeAuthorization(const QString &callbackOrCode);
     Q_INVOKABLE bool hasStoredRefreshToken(const QString &email) const;
     Q_INVOKABLE bool removeStoredRefreshToken(const QString &email);
     Q_INVOKABLE QVariantMap profileForEmail(const QString &email) const;
@@ -42,6 +43,7 @@ private:
     QString m_pendingClientId;
     QString m_pendingClientSecret;
     QTcpServer *m_callbackServer = nullptr;
+    QNetworkAccessManager *m_nam = nullptr;
     QHash<QString, QVariantMap> m_profileByEmail;
 
     static QString randomBase64Url(int bytes);

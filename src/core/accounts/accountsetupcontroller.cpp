@@ -77,18 +77,10 @@ void AccountSetupController::beginOAuth()
     emit statusMessageChanged();
 }
 
-bool AccountSetupController::completeOAuth(const QString &callbackOrCode)
+void AccountSetupController::completeOAuth(const QString &callbackOrCode)
 {
-    if (!m_oauth) return false;
-    const bool ok = m_oauth->completeAuthorization(callbackOrCode);
-    m_statusMessage = m_oauth->lastStatus();
-    const bool ready = m_oauth->hasStoredRefreshToken(m_email);
-    if (m_oauthReady != ready) {
-        m_oauthReady = ready;
-        emit oauthReadyChanged();
-    }
-    emit statusMessageChanged();
-    return ok;
+    if (!m_oauth) return;
+    m_oauth->completeAuthorization(callbackOrCode);
 }
 
 bool AccountSetupController::saveCurrentAccount(const QString &accountName, const QString &encryption)
