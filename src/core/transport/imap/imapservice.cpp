@@ -2100,8 +2100,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
         const QString htmlTrim = html.trimmed();
         const QString htmlLower = htmlTrim.left(1024).toLower();
-        const bool hasHtmlish = QRegularExpression("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
-                                                 QRegularExpression::CaseInsensitiveOption).match(htmlTrim).hasMatch();
+        const bool hasHtmlish = Kestrel::htmlishRe().match(htmlTrim).hasMatch();
         const bool hasMarkdownLinks = QRegularExpression("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"_L1,
                                                          QRegularExpression::CaseInsensitiveOption).match(htmlTrim).hasMatch();
         const bool hasMimeHeaders = htmlLower.contains("content-type:"_L1)

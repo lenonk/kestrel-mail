@@ -9,7 +9,7 @@
 #include <glib.h>
 #define signals Q_SIGNALS
 
-static const SecretSchema kSchema = {
+static constexpr SecretSchema kSchema = {
     "com.kestrelmail.RefreshToken",
     SECRET_SCHEMA_NONE,
     {
@@ -21,40 +21,29 @@ static const SecretSchema kSchema = {
 
 LibSecretTokenVault::LibSecretTokenVault() = default;
 
-bool LibSecretTokenVault::storeRefreshToken(const QString &accountEmail, const QString &refreshToken)
-{
-    const QByteArray account = Kestrel::normalizeEmail(accountEmail).toUtf8();
-    const QByteArray token   = refreshToken.toUtf8();
+bool
+LibSecretTokenVault::storeRefreshToken(const QString &accountEmail, const QString &refreshToken) {
+    const auto account = Kestrel::normalizeEmail(accountEmail).toUtf8();
+    const auto token   = refreshToken.toUtf8();
 
     GError *error = nullptr;
-    const gboolean ok = secret_password_store_sync(
-        &kSchema,
-        SECRET_COLLECTION_DEFAULT,
-        "Kestrel Mail refresh token",
-        token.constData(),
-        nullptr,
-        &error,
-        "account", account.constData(),
-        nullptr);
+    const auto ok = secret_password_store_sync( &kSchema, SECRET_COLLECTION_DEFAULT, "Kestrel Mail refresh token",
+        token.constData(), nullptr, &error, "account", account.constData(), nullptr);
 
     if (error) {
         qWarning("LibSecretTokenVault::store failed: %s", error->message);
         g_error_free(error);
     }
+
     return ok == TRUE;
 }
 
-QString LibSecretTokenVault::loadRefreshToken(const QString &accountEmail)
-{
-    const QByteArray account = Kestrel::normalizeEmail(accountEmail).toUtf8();
+QString
+LibSecretTokenVault::loadRefreshToken(const QString &accountEmail) {
+    const auto account = Kestrel::normalizeEmail(accountEmail).toUtf8();
 
     GError *error = nullptr;
-    gchar *password = secret_password_lookup_sync(
-        &kSchema,
-        nullptr,
-        &error,
-        "account", account.constData(),
-        nullptr);
+    auto *password = secret_password_lookup_sync( &kSchema, nullptr, &error, "account", account.constData(), nullptr);
 
     if (error) {
         qWarning("LibSecretTokenVault::load failed: %s", error->message);
@@ -62,29 +51,25 @@ QString LibSecretTokenVault::loadRefreshToken(const QString &accountEmail)
         return {};
     }
 
-    if (!password)
-        return {};
+    if (!password) { return {}; }
 
-    const QString result = QString::fromUtf8(password);
+    const auto result = QString::fromUtf8(password);
     secret_password_free(password);
+
     return result;
 }
 
-bool LibSecretTokenVault::removeRefreshToken(const QString &accountEmail)
-{
-    const QByteArray account = Kestrel::normalizeEmail(accountEmail).toUtf8();
+bool
+LibSecretTokenVault::removeRefreshToken(const QString &accountEmail) {
+    const auto account = Kestrel::normalizeEmail(accountEmail).toUtf8();
 
     GError *error = nullptr;
-    const gboolean ok = secret_password_clear_sync(
-        &kSchema,
-        nullptr,
-        &error,
-        "account", account.constData(),
-        nullptr);
+    const auto ok = secret_password_clear_sync( &kSchema, nullptr, &error, "account", account.constData(), nullptr);
 
     if (error) {
         qWarning("LibSecretTokenVault::remove failed: %s", error->message);
         g_error_free(error);
     }
+
     return ok == TRUE;
 }

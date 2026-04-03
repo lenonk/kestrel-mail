@@ -3,8 +3,7 @@
 #include <QObject>
 #include <QVariantList>
 
-class ProviderProfileService : public QObject
-{
+class ProviderProfileService : public QObject {
     Q_OBJECT
 public:
     explicit ProviderProfileService(QObject *parent = nullptr);

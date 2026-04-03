@@ -167,10 +167,10 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/Search/SearchBarFolderScope.qml
         qml/components/Search/RecentSearchesDropdown.qml
         qml/components/Search/SearchFilterPopup.qml
-        qml/important.svg
-        qml/flag.svg
-        qml/trash.svg
-        qml/gmail_account_icon.svg
+        qml/images/important.svg
+        qml/images/flag.svg
+        qml/images/trash.svg
+        qml/images/gmail_account_icon.svg
 )
 
 set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json")

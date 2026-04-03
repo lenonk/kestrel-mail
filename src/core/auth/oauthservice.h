@@ -17,13 +17,13 @@ class OAuthService : public QObject
 public:
     explicit OAuthService(TokenVault *vault, QObject *parent = nullptr);
 
-    QString pendingAuthUrl() const;
-    QString lastStatus() const;
+    [[nodiscard]] QString pendingAuthUrl() const;
+    [[nodiscard]] QString lastStatus() const;
 
     Q_INVOKABLE QString startAuthorization(const QVariantMap &provider, const QString &email);
     Q_INVOKABLE void completeAuthorization(const QString &callbackOrCode);
     Q_INVOKABLE bool hasStoredRefreshToken(const QString &email) const;
-    Q_INVOKABLE bool removeStoredRefreshToken(const QString &email);
+    Q_INVOKABLE bool removeStoredRefreshToken(const QString &email) const;
     Q_INVOKABLE QVariantMap profileForEmail(const QString &email) const;
 
 signals:

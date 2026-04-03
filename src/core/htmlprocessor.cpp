@@ -1,4 +1,5 @@
 #include "htmlprocessor.h"
+#include "utils.h"
 #include <QRegularExpression>
 #include <QUrl>
 
@@ -265,11 +266,7 @@ QString HtmlProcessor::sanitize(const QString &rawHtml) const
     // Determine document structure and build a full HTML document.
     static const QRegularExpression htmlTagRe(R"(<html\b)", QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression bodyTagRe(R"(<body\b)", QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression htmlishRe(
-        R"(<html|<body|<div|<table|<p|<br|<span|<img|<a\b)",
-        QRegularExpression::CaseInsensitiveOption);
-
-    if (!htmlishRe.match(html).hasMatch()) {
+    if (!Kestrel::htmlishRe().match(html).hasMatch()) {
         QString escaped = html;
         escaped.replace('&', "&amp;"_L1);
         escaped.replace('<', "&lt;"_L1);

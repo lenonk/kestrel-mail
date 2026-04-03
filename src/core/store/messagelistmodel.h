@@ -148,6 +148,6 @@ private:
     QVector<Row> buildRows(const QVariantList &rows) const;
     void applyRows(QVector<Row> &&nextRows);
     static bool rowEquals(const Row &a, const Row &b);
-    QList<int> changedRoles(const Row &oldRow, const Row &newRow) const;
+    QList<int> changedRoles(const Row &oldRow, const Row &newRow) ;
     bool bucketExpanded(const QString &bucketKey) const;
 };

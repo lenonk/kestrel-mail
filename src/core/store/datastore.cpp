@@ -23,98 +23,96 @@
 #include <QPainter>
 #include <limits>
 
-#include "src/core/transport/imap/sync/kestreltimer.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <QFutureWatcher>
 
 using namespace Qt::Literals::StringLiterals;
 
 namespace {
-static const QRegularExpression kReWhitespace("\\s+"_L1);
-static const QRegularExpression kReNonAlnumSplit("[^a-z0-9]+"_L1);
-static const QRegularExpression kReHasLetters("[A-Za-z]"_L1);
-static const QRegularExpression kReCsvSemicolonOutsideQuotes("[,;](?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)"_L1);
-static const QRegularExpression kReEmailAddress("([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})"_L1,
-                                                QRegularExpression::CaseInsensitiveOption);
+const QRegularExpression kReWhitespace(R"(\s+)"_L1);
+const QRegularExpression kReNonAlnumSplit("[^a-z0-9]+"_L1);
+const QRegularExpression kReHasLetters("[A-Za-z]"_L1);
+const QRegularExpression kReCsvSemicolonOutsideQuotes(R"([,;](?=(?:[^"]*"[^"]*")*[^"]*$))"_L1);
+const QRegularExpression kReEmailAddress(R"(([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}))"_L1, QRegularExpression::CaseInsensitiveOption);
+const QRegularExpression kReSnippetUrl(R"(https?://\S+)"_L1, QRegularExpression::CaseInsensitiveOption);
+const QRegularExpression kReSnippetCharsetBoundary(R"(\b(?:charset|boundary)\s*=\s*"?[^"\s]+"?)"_L1, QRegularExpression::CaseInsensitiveOption);
+const QRegularExpression kReSnippetViewEmailInBrowser(R"((?i)view\s+(?:this\s+)?email\s+in\s+(?:a|your)?\s*browser[:!\-\s]*(?:https?://\S+)?)"_L1);
+const QRegularExpression kReSnippetViewInBrowser(R"((?i)view\s+in\s+(?:a|your)?\s*browser[:!\-\s]*(?:https?://\S+)?)"_L1);
+const QRegularExpression kReSnippetViewAsWebPage(R"((?i)view\s+as\s+(?:a\s+)?web\s+page[:!\-\s]*(?:https?://\S+)?)"_L1);
+const QRegularExpression kReSnippetTrailingPunct(R"(\s*[(){}\[\]|:;.,-]+\s*$)"_L1);
+const auto &kReHtmlish = Kestrel::htmlishRe();
+const QRegularExpression kReMarkdownLinks(R"(\[[^\]\n]{1,240}\]\(https?://[^\s)]+\))"_L1, QRegularExpression::CaseInsensitiveOption);
 
-static const QRegularExpression kReSnippetUrl("https?://\\S+"_L1,
-                                              QRegularExpression::CaseInsensitiveOption);
-static const QRegularExpression kReSnippetCharsetBoundary("\\b(?:charset|boundary)\\s*=\\s*\"?[^\"\\s]+\"?"_L1,
-                                                          QRegularExpression::CaseInsensitiveOption);
-static const QRegularExpression kReSnippetViewEmailInBrowser("(?i)view\\s+(?:this\\s+)?email\\s+in\\s+(?:a|your)?\\s*browser[:!\\-\\s]*(?:https?://\\S+)?"_L1);
-static const QRegularExpression kReSnippetViewInBrowser("(?i)view\\s+in\\s+(?:a|your)?\\s*browser[:!\\-\\s]*(?:https?://\\S+)?"_L1);
-static const QRegularExpression kReSnippetViewAsWebPage("(?i)view\\s+as\\s+(?:a\\s+)?web\\s+page[:!\\-\\s]*(?:https?://\\S+)?"_L1);
-static const QRegularExpression kReSnippetTrailingPunct("\\s*[()\\[\\]{}|:;.,-]+\\s*$"_L1);
-
-static const QRegularExpression kReHtmlish("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
-                                           QRegularExpression::CaseInsensitiveOption);
-static const QRegularExpression kReMarkdownLinks("\\[[^\\]\\n]{1,240}\\]\\(https?://[^\\s)]+\\)"_L1,
-                                                 QRegularExpression::CaseInsensitiveOption);
 // Strip markdown link syntax [text](url) → replacement captures just the link text.
 // Handles [text](url), [text]( ) and [text]( (partial — closing paren is optional).
-static const QRegularExpression kReSnippetMarkdownLink(
-    R"(\[([^\[\]\n]{1,160})\]\([^\)\n]{0,300}\)?)"_L1);
+const QRegularExpression kReSnippetMarkdownLink( R"(\[([^\[\]\n]{1,160})\]\([^\)\n]{0,300}\)?)"_L1);
+
 // Runs of 4+ repeated separator characters, or space-separated patterns like - - - - -.
-static const QRegularExpression kReSnippetSeparatorRun(
-    R"([-=_*|#~<>]{4,}|(?:[-=_*|#~<>] ){3,}[-=_*|#~<>]?)"_L1);
+const QRegularExpression kReSnippetSeparatorRun( R"([-=_*|#~<>]{4,}|(?:[-=_*|#~<>] ){3,}[-=_*|#~<>]?)"_L1);
+
 // Leftover empty or whitespace-only parentheses after URL/link stripping.
-static const QRegularExpression kReSnippetEmptyParens(
-    R"(\(\s*\))"_L1
-);
-} // namespace
+const QRegularExpression kReSnippetEmptyParens(R"(\(\s*\))"_L1);
 
 // Extract the first RFC 5322 Message-ID from a header value (e.g. References, In-Reply-To).
 // Returns a normalized (lowercase, no angle-brackets) form.
-static QString extractFirstMessageIdFromHeader(const QString &val)
-{
-    if (val.trimmed().isEmpty()) return {};
+QString
+extractFirstMessageIdFromHeader(const QString &val) {
+    if (val.trimmed().isEmpty()) { return {}; }
+
     static const QRegularExpression re("<([^>\\s]+)>"_L1);
-    const auto m = re.match(val);
-    if (m.hasMatch())
+
+    if (const auto m = re.match(val); m.hasMatch()) {
         return m.captured(1).trimmed().toLower();
+    }
+
     // Bare message-id without angle brackets — take first whitespace-delimited token.
-    const QStringList parts = val.trimmed().split(kReWhitespace, Qt::SkipEmptyParts);
+    const auto parts = val.trimmed().split(kReWhitespace, Qt::SkipEmptyParts);
+
     return parts.isEmpty() ? QString() : parts.first().toLower();
 }
 
 // Compute the canonical thread root ID from the three RFC 5322 threading headers.
 // References chain → In-Reply-To → own Message-ID.
-static QString computeThreadId(const QString &refs, const QString &irt, const QString &ownMsgId)
-{
-    const QString fromRefs = extractFirstMessageIdFromHeader(refs);
-    if (!fromRefs.isEmpty()) return fromRefs;
-    const QString fromIrt  = extractFirstMessageIdFromHeader(irt);
-    if (!fromIrt.isEmpty())  return fromIrt;
+QString
+computeThreadId(const QString &refs, const QString &irt, const QString &ownMsgId) {
+    if (auto fromRefs = extractFirstMessageIdFromHeader(refs); !fromRefs.isEmpty()) {
+        return fromRefs;
+    }
+
+    if (auto fromIrt = extractFirstMessageIdFromHeader(irt); !fromIrt.isEmpty()) {
+        return fromIrt;
+    }
+
     return extractFirstMessageIdFromHeader(ownMsgId);
 }
 
-QString extractFirstEmail(const QString &raw)
-{
+QString
+extractFirstEmail(const QString &raw) {
     const auto m = kReEmailAddress.match(raw);
     return m.hasMatch() ? Kestrel::normalizeEmail(m.captured(1)) : QString();
 }
 
-static bool computeHasTrackingPixel(const QString &bodyHtml, const QString &senderRaw)
-{
-    if (bodyHtml.isEmpty())
-        return false;
+bool
+computeHasTrackingPixel(const QString &bodyHtml, const QString &senderRaw) {
+    if (bodyHtml.isEmpty()) { return false; }
 
-    const QString email = extractFirstEmail(senderRaw);
+    const auto email = extractFirstEmail(senderRaw);
     QString senderDomain;
+
     {
-        const int at = email.lastIndexOf('@');
+        const int at = static_cast<int>(email.lastIndexOf('@'));
         if (at >= 0) {
             senderDomain = email.mid(at + 1).toLower().trimmed();
-            const int colon = senderDomain.indexOf(':');
+            const int colon = static_cast<int>(senderDomain.indexOf(':'));
             if (colon > 0) senderDomain = senderDomain.left(colon);
         }
     }
 
     static const QRegularExpression imgTagRe("<img\\b[^>]*>"_L1, QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression srcRe("\\bsrc\\s*=\\s*[\"'](https?://[^\"']+)[\"']"_L1, QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression widthRe("\\bwidth\\s*=\\s*[\"']\\s*1\\s*[\"']"_L1, QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression heightRe("\\bheight\\s*=\\s*[\"']\\s*1\\s*[\"']"_L1, QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression hostRe("^https?://([^/?#]+)"_L1, QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression srcRe(R"(\bsrc\s*=\s*["'](https?://[^"']+)["'])"_L1, QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression widthRe(R"(\bwidth\s*=\s*["']\s*1\s*["'])"_L1, QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression heightRe(R"(\bheight\s*=\s*["']\s*1\s*["'])"_L1, QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression hostRe(R"(^https?://([^/?#]+))"_L1, QRegularExpression::CaseInsensitiveOption);
 
     QRegularExpressionMatchIterator it = imgTagRe.globalMatch(bodyHtml);
     while (it.hasNext()) {
@@ -127,7 +125,7 @@ static bool computeHasTrackingPixel(const QString &bodyHtml, const QString &send
         const auto hostM = hostRe.match(src);
         if (!hostM.hasMatch()) continue;
         QString pixelHost = hostM.captured(1).toLower().trimmed();
-        const int colon = pixelHost.indexOf(':');
+        const int colon = static_cast<int>(pixelHost.indexOf(':'));
         if (colon > 0) pixelHost = pixelHost.left(colon);
         if (!senderDomain.isEmpty() && !pixelHost.isEmpty()
                 && (pixelHost == senderDomain || pixelHost.endsWith("." + senderDomain)))
@@ -153,7 +151,7 @@ int displayNameScoreForEmail(const QString &nameRaw, const QString &emailRaw)
     if (nameTokens.size() >= 2) score += 4;
 
     if (!email.isEmpty()) {
-        const int at = email.indexOf('@');
+        const int at = static_cast<int>(email.indexOf('@'));
         const QString local = (at > 0) ? email.left(at) : email;
         const QStringList localTokens = local.split(kReNonAlnumSplit, Qt::SkipEmptyParts);
         for (const QString &tok : localTokens) {
@@ -207,7 +205,7 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
             if (!email.isEmpty() && !pEmail.isEmpty() && pEmail != email) continue;
 
             QString candidate = p;
-            const int lt2 = candidate.indexOf('<');
+            const int lt2 = static_cast<int>(candidate.indexOf('<'));
             if (lt2 > 0) candidate = candidate.left(lt2).trimmed();
             candidate.remove('"');
             candidate.remove('\'');
@@ -217,7 +215,7 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
 
             const QString scoreEmail = email.isEmpty() ? pEmail : email;
             if (!scoreEmail.isEmpty()) {
-                const int at = scoreEmail.indexOf('@');
+                const int at = static_cast<int>(scoreEmail.indexOf('@'));
                 const QString local = (at > 0) ? scoreEmail.left(at) : scoreEmail;
                 if (!local.isEmpty() && candidate.compare(local, Qt::CaseInsensitive) == 0) continue;
             }
@@ -228,7 +226,7 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
         if (!best.isEmpty()) return best;
     }
 
-    const int lt = s.indexOf('<');
+    const int lt = static_cast<int>(s.indexOf('<'));
     if (lt > 0) {
         s = s.left(lt).trimmed();
     } else {
@@ -244,7 +242,7 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
 
     if (!email.isEmpty()) {
         if (s.compare(email, Qt::CaseInsensitive) == 0) return {};
-        const int at = email.indexOf('@');
+        const int at = static_cast<int>(email.indexOf('@'));
         const QString local = (at > 0) ? email.left(at) : email;
         if (!local.isEmpty() && s.compare(local, Qt::CaseInsensitive) == 0) {
             // Hard fail: local-part mirror is not a valid display name candidate.
@@ -252,32 +250,6 @@ QString extractExplicitDisplayName(const QString &raw, const QString &knownEmail
         }
     }
     return s;
-}
-
-QString faviconUrlForEmail(const QString &email)
-{
-    const QString e = Kestrel::normalizeEmail(email);
-    const int at = e.indexOf('@');
-    if (at <= 0 || at + 1 >= e.size()) return {};
-    const QString full = e.mid(at + 1).trimmed();
-    if (full.isEmpty()) return {};
-
-    QString domain = full;
-    const QStringList parts = full.split('.');
-    if (parts.size() > 2) {
-        const QString tail2 = parts.mid(parts.size() - 2).join('.');
-        static const QSet<QString> cc2 = {
-            "co.uk"_L1, "com.au"_L1, "co.jp"_L1,
-            "com.br"_L1, "com.mx"_L1
-        };
-        if (cc2.contains(tail2) && parts.size() >= 3) {
-            domain = parts.mid(parts.size() - 3).join('.');
-        } else {
-            domain = tail2;
-        }
-    }
-
-    return "https://www.google.com/s2/favicons?domain=%1&sz=128"_L1.arg(domain);
 }
 
 namespace {
@@ -710,6 +682,8 @@ int pruneFolderEdgesToUids(QSqlDatabase &database,
 }
 
 }
+
+} // namespace
 
 DataStore::DataStore(QObject *parent)
     : QObject(parent)
@@ -1423,7 +1397,7 @@ void DataStore::upsertHeader(const QVariantMap &header)
         s = normalizeSnippetWhitespace(s);
 
         const QString t = s.toLower();
-        const int alphaCount = s.count(kReHasLetters);
+        const int alphaCount = static_cast<int>(s.count(kReHasLetters));
         const bool danglingShort = s.endsWith('(') || s.endsWith(':') || s.endsWith('-');
         const bool junk = s.isEmpty()
                 || t.startsWith("* "_L1)
@@ -3198,8 +3172,8 @@ bool DataStore::hasUsableBodyForEdge(const QString &accountEmail, const QString 
 
     // Detect structurally truncated HTML: more </table> than <table> means the body
     // was cut mid-content (e.g. by the 128 KB partial IMAP fetch window).
-    const int tableOpen  = lower.count("<table"_L1);
-    const int tableClose = lower.count("</table>"_L1);
+    const int tableOpen  = static_cast<int>(lower.count("<table"_L1));
+    const int tableClose = static_cast<int>(lower.count("</table>"_L1));
     if (tableClose > tableOpen)
         return false;
 
@@ -3639,7 +3613,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
             annotateMessageFlags(out);
             return out;
         }
-        const int total = in.size();
+        const int total = static_cast<int>(in.size());
         if (safeOffset >= total) {
             if (hasMore) *hasMore = false;
             return QVariantList{};
@@ -3874,7 +3848,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                     if (hasMore) *hasMore = false;
                     return {};
                 }
-                const int end = qMin(out.size(), safeOffset + limit);
+                const int end = static_cast<int>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
                 if (hasMore) *hasMore = (out.size() > safeOffset + limit);
                 out = out.mid(safeOffset, end - safeOffset);
             } else {
@@ -4073,7 +4047,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey,
                     if (hasMore) *hasMore = false;
                     return {};
                 }
-                const int end = qMin(filtered.size(), safeOffset + limit);
+                const int end = static_cast<int>(qMin(filtered.size(), static_cast<qsizetype>(safeOffset + limit)));
                 if (hasMore) *hasMore = (filtered.size() > safeOffset + limit);
                 filtered = filtered.mid(safeOffset, end - safeOffset);
             } else {
@@ -4277,7 +4251,7 @@ QVariantList DataStore::groupedMessagesForSelection(const QString &folderKey,
         if (!dt.isValid()) return "older"_L1;
         const QDate target = dt.toLocalTime().date();
         const QDate today = QDate::currentDate();
-        const int diffDays = target.daysTo(today);
+        const int diffDays = static_cast<int>(target.daysTo(today));
         if (diffDays <= 0) return "today"_L1;
         if (diffDays == 1) return "yesterday"_L1;
 
@@ -5148,8 +5122,8 @@ QColor DataStore::avatarColor(const QString &displayName, const QString &fallbac
         h ^= static_cast<unsigned char>(c);
         h *= 16777619u;
     }
-    const qreal hue = static_cast<qreal>(h % 360) / 360.0;
-    return QColor::fromHslF(hue, 0.50, 0.45, 1.0);
+    const float hue = static_cast<float>(h % 360) / 360.0f;
+    return QColor::fromHslF(hue, 0.50f, 0.45f, 1.0f);
 }
 
 QPixmap DataStore::avatarPixmap(const QString &displayName, const QString &email, int size)
@@ -5664,7 +5638,7 @@ QVariantList DataStore::searchMessages(const QString &query, int limit, int offs
             if (hasMore) *hasMore = false;
             return {};
         }
-        const int end = qMin(out.size(), safeOffset + limit);
+        const int end = static_cast<int>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
         if (hasMore) *hasMore = (out.size() > safeOffset + limit);
         out = out.mid(safeOffset, end - safeOffset);
     } else {

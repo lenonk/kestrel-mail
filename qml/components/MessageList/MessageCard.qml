@@ -245,7 +245,7 @@ Rectangle {
                     anchors.centerIn: parent
                     fillMode: Image.PreserveAspectFit
                     layer.enabled: true
-                    source: "qrc:/qml/flag.svg"
+                    source: "qrc:/qml/images/flag.svg"
                     sourceSize: Qt.size(20, 20)
                 }
 
@@ -342,7 +342,7 @@ Rectangle {
                     Layout.preferredHeight: 16
                     Layout.alignment: Qt.AlignVCenter
                     fillMode: Image.PreserveAspectFit
-                    source: "qrc:/qml/gmail_account_icon.svg"
+                    source: "qrc:/qml/images/gmail_account_icon.svg"
                     sourceSize: Qt.size(16, 16)
                     visible: !!messageCard.modelIsSearchResult
                 }
@@ -364,7 +364,7 @@ Rectangle {
                     Layout.preferredHeight: 20
                     Layout.preferredWidth: 20
                     fillMode: Image.PreserveAspectFit
-                    source: "qrc:/qml/important.svg"
+                    source: "qrc:/qml/images/important.svg"
                     sourceSize: Qt.size(20, 20)
                     visible: !!snippetInfo.isImportant
                 }
@@ -420,7 +420,7 @@ Rectangle {
                     anchors.centerIn: parent
                     fillMode: Image.PreserveAspectFit
                     layer.enabled: true
-                    source: "qrc:/qml/trash.svg"
+                    source: "qrc:/qml/images/trash.svg"
                     sourceSize: Qt.size(20, 20)
                 }
 

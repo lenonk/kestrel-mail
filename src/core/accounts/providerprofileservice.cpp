@@ -5,6 +5,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <algorithm>
+#include <ranges>
+
 using namespace Qt::Literals::StringLiterals;
 
 ProviderProfileService::ProviderProfileService(QObject *parent)
@@ -12,34 +15,24 @@ ProviderProfileService::ProviderProfileService(QObject *parent)
     loadProfiles();
 }
 
-QVariantList ProviderProfileService::providers() const {
+QVariantList
+ProviderProfileService::providers() const {
     return m_providers;
 }
 
-QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const {
+QVariantMap
+ProviderProfileService::discoverForEmail(const QString &email) const {
     const auto domain = email.section('@', 1, 1).trimmed().toLower();
 
+    auto matchesDomain = [&](const QVariant &entry) {
+        const auto domains = entry.toMap().value("domains"_L1).toList();
+        return std::ranges::any_of(domains, [&](const QVariant &d) {
+            return d.toString().trimmed().toLower() == domain;
+        });
+    };
 
-    for (const QVariant &entry : m_providers) {
-        const QVariantMap map = entry.toMap();
-
-        QStringList domains;
-        const QVariant rawDomains = map.value("domains");
-        if (rawDomains.canConvert<QStringList>()) {
-            domains = rawDomains.toStringList();
-        } else {
-            const QVariantList list = rawDomains.toList();
-            for (const QVariant &item : list) {
-                domains << item.toString();
-            }
-        }
-
-        for (const QString &d : domains) {
-            if (d.trimmed().toLower() == domain) {
-                return map;
-            }
-        }
-    }
+    if (const auto it = std::ranges::find_if(m_providers, matchesDomain); it != m_providers.end())
+        return it->toMap();
 
     QVariantMap generic;
     generic.insert("id", "generic");
@@ -53,7 +46,8 @@ QVariantMap ProviderProfileService::discoverForEmail(const QString &email) const
     return generic;
 }
 
-void ProviderProfileService::loadProfiles() {
+void
+ProviderProfileService::loadProfiles() {
     QFile f(":/data/providers.json"_L1);
 
     if (!f.open(QIODevice::ReadOnly)) {

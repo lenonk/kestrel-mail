@@ -24,9 +24,11 @@ AccountSetupController::AccountSetupController(ProviderProfileService *profiles,
     }
 }
 
-QString AccountSetupController::email() const { return m_email; }
+QString
+AccountSetupController::email() const { return m_email; }
 
-void AccountSetupController::setEmail(const QString &value) {
+void
+AccountSetupController::setEmail(const QString &value) {
     if (m_email == value) { return; }
 
     m_email = value;
@@ -40,12 +42,20 @@ void AccountSetupController::setEmail(const QString &value) {
     emit emailChanged();
 }
 
-QVariantMap AccountSetupController::selectedProvider() const { return m_selectedProvider; }
-QString AccountSetupController::oauthUrl() const { return m_oauthUrl; }
-QString AccountSetupController::statusMessage() const { return m_statusMessage; }
-bool AccountSetupController::oauthReady() const { return m_oauthReady; }
+QVariantMap
+AccountSetupController::selectedProvider() const { return m_selectedProvider; }
 
-void AccountSetupController::discoverProvider() {
+QString
+AccountSetupController::oauthUrl() const { return m_oauthUrl; }
+
+QString
+AccountSetupController::statusMessage() const { return m_statusMessage; }
+
+bool
+AccountSetupController::oauthReady() const { return m_oauthReady; }
+
+void
+AccountSetupController::discoverProvider() {
     if (!m_profiles) { return; }
 
     m_selectedProvider = m_profiles->discoverForEmail(m_email);
@@ -60,7 +70,8 @@ void AccountSetupController::discoverProvider() {
     emit statusMessageChanged();
 }
 
-void AccountSetupController::beginOAuth() {
+void
+AccountSetupController::beginOAuth() {
     if (!m_oauth) { return; }
 
     m_oauthUrl = m_oauth->startAuthorization(m_selectedProvider, m_email);
@@ -70,13 +81,15 @@ void AccountSetupController::beginOAuth() {
     emit statusMessageChanged();
 }
 
-void AccountSetupController::completeOAuth(const QString &callbackOrCode) {
+void
+AccountSetupController::completeOAuth(const QString &callbackOrCode) {
     if (!m_oauth) { return; }
 
     m_oauth->completeAuthorization(callbackOrCode);
 }
 
-bool AccountSetupController::saveCurrentAccount(const QString &accountName, const QString &encryption) {
+bool
+AccountSetupController::saveCurrentAccount(const QString &accountName, const QString &encryption) {
     if (!m_accounts) { return false; }
 
     const auto requiresOAuth = m_selectedProvider.value("supportsOAuth2").toBool();
@@ -116,13 +129,15 @@ bool AccountSetupController::saveCurrentAccount(const QString &accountName, cons
     return true;
 }
 
-bool AccountSetupController::hasTokenForEmail(const QString &email) const {
+bool
+AccountSetupController::hasTokenForEmail(const QString &email) const {
     if (!m_oauth) { return false; }
 
     return m_oauth->hasStoredRefreshToken(email);
 }
 
-bool AccountSetupController::removeAccount(const QString &email) {
+bool
+AccountSetupController::removeAccount(const QString &email) {
     if (!m_accounts) { return false; }
 
     const auto normalized = Kestrel::normalizeEmail(email);

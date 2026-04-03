@@ -4,8 +4,7 @@
 
 #include "tokenvault.h"
 
-class KWalletTokenVault : public TokenVault
-{
+class KWalletTokenVault : public TokenVault {
 public:
     KWalletTokenVault();
 
@@ -14,5 +13,5 @@ public:
     bool removeRefreshToken(const QString &accountEmail) override;
 
 private:
-    static constexpr const char *kWalletFolder = "kestrel-mail";
+    static constexpr auto kWalletFolder = "kestrel-mail";
 };

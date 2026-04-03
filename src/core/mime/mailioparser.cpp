@@ -1,4 +1,5 @@
 #include "mailioparser.h"
+#include "../utils.h"
 
 #include <QRegularExpression>
 #include <QHash>
@@ -22,18 +23,20 @@ namespace {
 // every physical line in the entire literal to 998 bytes before parsing.
 // Base64 and quoted-printable body lines are always well under this limit,
 // so no body content is lost.
-static QByteArray truncateLongHeaderLines(const QByteArray &rfc822)
-{
+QByteArray
+truncateLongHeaderLines(const QByteArray &rfc822) {
     QByteArray out;
     out.reserve(rfc822.size());
 
-    int i = 0;
+    qsizetype i = 0;
     while (i < rfc822.size()) {
-        const int end = rfc822.indexOf("\r\n", i);
+        const auto end = rfc822.indexOf("\r\n", i);
+
         if (end < 0) {
             out += rfc822.mid(i, qMin(rfc822.size() - i, 998));
             break;
         }
+
         out += rfc822.mid(i, qMin(end - i, 998));
         out += "\r\n";
         i = end + 2;
@@ -42,16 +45,17 @@ static QByteArray truncateLongHeaderLines(const QByteArray &rfc822)
     return out;
 }
 
-QByteArray extractRfc822Literal(const QByteArray &fetchRespRaw)
-{
-    int i = 0;
+QByteArray
+extractRfc822Literal(const QByteArray &fetchRespRaw) {
+    qsizetype i = 0;
+
     while (i < fetchRespRaw.size()) {
         if (fetchRespRaw[i] != '{') {
             ++i;
             continue;
         }
 
-        int j = i + 1;
+        auto j = i + 1;
         while (j < fetchRespRaw.size() && fetchRespRaw[j] >= '0' && fetchRespRaw[j] <= '9') ++j;
         if (j <= i + 1 || j + 2 >= fetchRespRaw.size() || fetchRespRaw[j] != '}'
             || fetchRespRaw[j + 1] != '\r' || fetchRespRaw[j + 2] != '\n') {
@@ -59,15 +63,16 @@ QByteArray extractRfc822Literal(const QByteArray &fetchRespRaw)
             continue;
         }
 
-        bool ok = false;
-        const int literalLen = fetchRespRaw.mid(i + 1, j - (i + 1)).toInt(&ok);
+        auto ok = false;
+        const auto literalLen = fetchRespRaw.mid(i + 1, j - (i + 1)).toInt(&ok);
         if (!ok || literalLen <= 0) {
             ++i;
             continue;
         }
 
-        const int literalStart = j + 3;
-        const int literalEndExclusive = qMin(fetchRespRaw.size(), literalStart + literalLen);
+        const auto literalStart = j + 3;
+        const auto literalEndExclusive = qMin(fetchRespRaw.size(), literalStart + literalLen);
+
         if (literalEndExclusive <= literalStart) {
             i = j + 1;
             continue;
@@ -75,28 +80,31 @@ QByteArray extractRfc822Literal(const QByteArray &fetchRespRaw)
 
         return fetchRespRaw.mid(literalStart, literalEndExclusive - literalStart);
     }
+
     return {};
 }
 
-QString normalizeCid(QString cid)
-{
+QString
+normalizeCid(QString cid) {
     cid = cid.trimmed();
+
     if (cid.startsWith("cid:"_L1, Qt::CaseInsensitive)) {
         cid = cid.mid(4).trimmed();
     }
+
     if (cid.startsWith('<') && cid.endsWith('>') && cid.size() > 2) {
         cid = cid.mid(1, cid.size() - 2).trimmed();
     }
+
     return cid.toLower();
 }
 
-void collectMimeParts(const mailio::mime &part, QString &htmlOut, QString &plainOut, QHash<QString, QString> &cidMap)
-{
-    auto &mutablePart = const_cast<mailio::mime&>(part);
+void
+collectMimeParts(const mailio::mime &part, QString &htmlOut, QString &plainOut, QHash<QString, QString> &cidMap) {
+    auto &mutablePart = const_cast<mailio::mime &>(part);
     const auto ct = mutablePart.content_type();
-    const auto parts = part.parts();
 
-    for (const auto &child : parts) {
+    for (const auto parts = part.parts(); const auto &child : parts) {
         collectMimeParts(child, htmlOut, plainOut, cidMap);
     }
 
@@ -104,93 +112,94 @@ void collectMimeParts(const mailio::mime &part, QString &htmlOut, QString &plain
     const auto mediaType = ct.media_type();
 
     if (htmlOut.isEmpty() && mediaType == mailio::mime::media_type_t::TEXT && subtype == "html") {
-        const std::string body = part.content();
-        const QString html = QString::fromUtf8(body.c_str(), static_cast<int>(body.size())).trimmed();
-        if (!html.isEmpty()) {
+        const auto body = part.content();
+        if (const auto html = QString::fromUtf8(body.c_str(), static_cast<int>(body.size())).trimmed(); !html.isEmpty()) {
             htmlOut = html;
         }
     }
 
     if (plainOut.isEmpty() && mediaType == mailio::mime::media_type_t::TEXT && subtype == "plain") {
         const std::string body = part.content();
-        const QString text = QString::fromUtf8(body.c_str(), static_cast<int>(body.size())).trimmed();
-        if (!text.isEmpty()) {
+        if (const auto text = QString::fromUtf8(body.c_str(), static_cast<int>(body.size())).trimmed(); !text.isEmpty()) {
             plainOut = text;
         }
     }
 
     if (mediaType == mailio::mime::media_type_t::IMAGE) {
-        const std::string cidRaw = part.content_id();
-        QString cid = normalizeCid(QString::fromStdString(cidRaw));
-        if (cid.isEmpty()) return;
+        const auto cidRaw = part.content_id();
 
-        const std::string rawContent = part.content();
-        if (rawContent.empty()) return;
+        auto cid = normalizeCid(QString::fromStdString(cidRaw));
+        if (cid.isEmpty()) { return; }
+
+        const auto rawContent = part.content();
+        if (rawContent.empty()) { return; }
+
         const QByteArray bytes(rawContent.data(), static_cast<int>(rawContent.size()));
-        if (bytes.isEmpty()) return;
+        if (bytes.isEmpty()) { return; }
 
-        const QString subtypeQt = QString::fromStdString(subtype).toLower();
-        const QString mimeType = subtypeQt.isEmpty()
-                ? "image/jpeg"_L1
-                : "image/"_L1 + subtypeQt;
-        const QString dataUrl = "data:%1;base64,%2"_L1.arg(mimeType, QString::fromLatin1(bytes.toBase64()));
+        const auto subtypeQt = QString::fromStdString(subtype).toLower();
+        const auto mimeType = subtypeQt.isEmpty() ? "image/jpeg"_L1 : "image/"_L1 + subtypeQt;
+        const auto dataUrl = "data:%1;base64,%2"_L1.arg(mimeType, QString::fromLatin1(bytes.toBase64()));
         cidMap.insert(cid, dataUrl);
     }
 }
 
-QString inlineCidImages(QString html, const QHash<QString, QString> &cidMap)
-{
-    if (html.isEmpty() || cidMap.isEmpty()) return html;
+QString
+inlineCidImages(QString html, const QHash<QString, QString> &cidMap) {
+    if (html.isEmpty() || cidMap.isEmpty()) { return html; }
+
     for (auto it = cidMap.constBegin(); it != cidMap.constEnd(); ++it) {
-        const QString cid = it.key();
-        const QString data = it.value();
+        const auto &cid = it.key();
+        const auto &data = it.value();
         html.replace("cid:%1"_L1.arg(cid), data, Qt::CaseInsensitive);
         html.replace("cid:<%1>"_L1.arg(cid), data, Qt::CaseInsensitive);
     }
+
     return html;
 }
 
-QString sanitizeExtractedHtml(QString html)
-{
+QString
+sanitizeExtractedHtml(QString html) {
     html = html.trimmed();
+
     if (html.isEmpty()) return {};
 
     // Note: do not perform ad-hoc quoted-printable decode here.
     // mailio part decoding already handles transfer encoding; extra decode corrupts valid '=' in HTML/URLs.
 
-    const QString lower = html.toLower();
-    const int htmlStart = lower.indexOf("<html"_L1);
-    if (htmlStart > 0) html = html.mid(htmlStart);
+    const auto lower = html.toLower();
+    if (const auto htmlStart = lower.indexOf("<html"_L1); htmlStart > 0) {
+        html = html.mid(htmlStart);
+    }
 
-    const QString lower2 = html.toLower();
-    const int htmlEnd = lower2.lastIndexOf("</html>"_L1);
-    if (htmlEnd >= 0) {
+    const auto lower2 = html.toLower();
+    if (const auto htmlEnd = lower2.lastIndexOf("</html>"_L1); htmlEnd >= 0) {
         html = html.left(htmlEnd + 7);
     }
 
-    const QString check = html.toLower();
-    if (check.contains("delivered-to:"_L1) && check.contains("received:"_L1)
-            && !check.contains("<body"_L1)) {
+    const auto check = html.toLower();
+    if (check.contains("delivered-to:"_L1) && check.contains("received:"_L1) && !check.contains("<body"_L1)) {
         return {};
     }
 
-    if (!html.contains(QRegularExpression("<html|<body|<div|<table|<p|<br|<span|<img|<a\\b"_L1,
-                                          QRegularExpression::CaseInsensitiveOption))) {
+    if (!html.contains(Kestrel::htmlishRe())) {
         return {};
     }
+
     return html.trimmed();
 }
 
 } // namespace
 
-QString extractHtmlWithMailio(const QByteArray &fetchRespRaw)
-{
+QString
+extractHtmlWithMailio(const QByteArray &fetchRespRaw) {
     try {
-        const QByteArray rfc822 = extractRfc822Literal(fetchRespRaw);
+        const auto rfc822 = extractRfc822Literal(fetchRespRaw);
         if (rfc822.isEmpty()) {
             qWarning().noquote() << "[mime] no-rfc822-literal fetched=" << fetchRespRaw.size() << "bytes";
             return {};
         }
+
         mailio::message msg;
         msg.parse(truncateLongHeaderLines(rfc822).toStdString(), false);
 
@@ -201,12 +210,13 @@ QString extractHtmlWithMailio(const QByteArray &fetchRespRaw)
 
         if (html.trimmed().isEmpty()) {
             // Some providers keep HTML in top-level content.
-            const std::string top = msg.content();
+            const auto top = msg.content();
             html = QString::fromUtf8(top.c_str(), static_cast<int>(top.size())).trimmed();
         }
 
         html = inlineCidImages(html, cidMap);
         html = sanitizeExtractedHtml(html);
+
         return html;
     } catch (const std::exception &e) {
         qWarning().noquote() << "[mime] mailio-html-exception:" << e.what();
@@ -217,11 +227,14 @@ QString extractHtmlWithMailio(const QByteArray &fetchRespRaw)
     }
 }
 
-QString extractPlainTextWithMailio(const QByteArray &fetchRespRaw)
-{
+QString
+extractPlainTextWithMailio(const QByteArray &fetchRespRaw) {
     try {
-        const QByteArray rfc822 = extractRfc822Literal(fetchRespRaw);
-        if (rfc822.isEmpty()) return {};
+        const auto rfc822 = extractRfc822Literal(fetchRespRaw);
+        if (rfc822.isEmpty()) {
+            qWarning().noquote() << "[mime] no-rfc822-literal fetched=" << fetchRespRaw.size() << "bytes";
+            return {};
+        }
 
         mailio::message msg;
         msg.parse(truncateLongHeaderLines(rfc822).toStdString(), false);
@@ -232,7 +245,7 @@ QString extractPlainTextWithMailio(const QByteArray &fetchRespRaw)
         collectMimeParts(msg, html, plain, cidMap);
 
         if (plain.trimmed().isEmpty()) {
-            const std::string top = msg.content();
+            const auto top = msg.content();
             plain = QString::fromUtf8(top.c_str(), static_cast<int>(top.size())).trimmed();
         }
         return plain.trimmed();
@@ -245,38 +258,42 @@ QString extractPlainTextWithMailio(const QByteArray &fetchRespRaw)
     }
 }
 
-QVariantList extractAttachmentsWithMailio(const QByteArray &fetchRespRaw)
-{
+QVariantList
+extractAttachmentsWithMailio(const QByteArray &fetchRespRaw) {
     QVariantList out;
     try {
-        const QByteArray rfc822 = extractRfc822Literal(fetchRespRaw);
-        if (rfc822.isEmpty())
+        const auto rfc822 = extractRfc822Literal(fetchRespRaw);
+        if (rfc822.isEmpty()) {
+            qWarning().noquote() << "[mime] no-rfc822-literal fetched=" << fetchRespRaw.size() << "bytes";
             return out;
+        }
 
         mailio::message msg;
         msg.parse(truncateLongHeaderLines(rfc822).toStdString(), false);
 
         int index = 0;
         std::function<void(const mailio::mime&)> walk = [&](const mailio::mime &part) {
-            auto &mutablePart = const_cast<mailio::mime&>(part);
+            auto &mutablePart = const_cast<mailio::mime &>(part);
             const auto ct = mutablePart.content_type();
             const auto mediaType = ct.media_type();
             const auto subtype = QString::fromStdString(ct.media_subtype()).toLower();
 
-            const QString fileName = QString::fromStdString(mutablePart.name()).trimmed();
-            const std::string body = part.content();
-            const int sizeBytes = static_cast<int>(body.size());
+            const auto fileName = QString::fromStdString(mutablePart.name()).trimmed();
+            const auto body = part.content();
+            const auto sizeBytes = static_cast<int>(body.size());
 
-            const bool hasFileName = !fileName.isEmpty();
-            const bool isMultipart = mediaType == mailio::mime::media_type_t::MULTIPART;
-            const bool nonTextLeaf = mediaType != mailio::mime::media_type_t::TEXT;
+            const auto hasFileName = !fileName.isEmpty();
+            const auto isMultipart = mediaType == mailio::mime::media_type_t::MULTIPART;
+            const auto nonTextLeaf = mediaType != mailio::mime::media_type_t::TEXT;
+
             if (!isMultipart && (hasFileName || nonTextLeaf)) {
-                const int rowIndex = index++;
+                const auto rowIndex = index++;
                 QVariantMap row;
                 row.insert("index", rowIndex);
                 row.insert("partId", QString::number(rowIndex));
                 row.insert("name", hasFileName ? fileName : "Attachment"_L1);
                 QString mediaName = "application";
+
                 switch (mediaType) {
                     case mailio::mime::media_type_t::TEXT: mediaName = "text"; break;
                     case mailio::mime::media_type_t::IMAGE: mediaName = "image"; break;
@@ -287,6 +304,7 @@ QVariantList extractAttachmentsWithMailio(const QByteArray &fetchRespRaw)
                     case mailio::mime::media_type_t::MESSAGE: mediaName = "message"; break;
                     default: break;
                 }
+
                 row.insert("mimeType", "%1/%2"_L1.arg(mediaName, subtype));
                 row.insert("bytes", sizeBytes);
                 row.insert("canPreview", mediaType == mailio::mime::media_type_t::IMAGE);
@@ -304,12 +322,14 @@ QVariantList extractAttachmentsWithMailio(const QByteArray &fetchRespRaw)
     }
 }
 
-QByteArray extractAttachmentDataWithMailio(const QByteArray &fetchRespRaw, const int index)
-{
+QByteArray
+extractAttachmentDataWithMailio(const QByteArray &fetchRespRaw, const int index) {
     try {
-        const QByteArray rfc822 = extractRfc822Literal(fetchRespRaw);
-        if (rfc822.isEmpty())
+        const auto rfc822 = extractRfc822Literal(fetchRespRaw);
+        if (rfc822.isEmpty()) {
+            qWarning().noquote() << "[mime] no-rfc822-literal fetched=" << fetchRespRaw.size() << "bytes";
             return {};
+        }
 
         mailio::message msg;
         msg.parse(truncateLongHeaderLines(rfc822).toStdString(), false);
@@ -323,14 +343,15 @@ QByteArray extractAttachmentDataWithMailio(const QByteArray &fetchRespRaw, const
             auto &mutablePart = const_cast<mailio::mime&>(part);
             const auto ct = mutablePart.content_type();
             const auto mediaType = ct.media_type();
-            const QString fileName = QString::fromStdString(mutablePart.name()).trimmed();
+            const auto fileName = QString::fromStdString(mutablePart.name()).trimmed();
             const bool hasFileName = !fileName.isEmpty();
             const bool nonTextLeaf = mediaType != mailio::mime::media_type_t::TEXT;
 
             if (hasFileName || nonTextLeaf) {
                 if (current == index) {
-                    const std::string body = part.content();
+                    const auto body = part.content();
                     out = QByteArray(body.data(), static_cast<int>(body.size()));
+
                     return;
                 }
                 ++current;

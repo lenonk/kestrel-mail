@@ -4,8 +4,7 @@
 
 #include "tokenvault.h"
 
-class LibSecretTokenVault : public TokenVault
-{
+class LibSecretTokenVault : public TokenVault {
 public:
     LibSecretTokenVault();
 
