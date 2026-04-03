@@ -15,12 +15,12 @@ using namespace Qt::Literals::StringLiterals;
 
 namespace {
 
-constexpr auto kBucketToday       = "today";
-constexpr auto kBucketYesterday   = "yesterday";
-constexpr auto kBucketWeekday     = "weekday-";
-constexpr auto kBucketLastWeek    = "lastWeek";
-constexpr auto kBucketTwoWeeksAgo = "twoWeeksAgo";
-constexpr auto kBucketOlder       = "older";
+constexpr QLatin1StringView kBucketToday       {"today"};
+constexpr QLatin1StringView kBucketYesterday   {"yesterday"};
+constexpr QLatin1StringView kBucketWeekday     {"weekday-"};
+constexpr QLatin1StringView kBucketLastWeek    {"lastWeek"};
+constexpr QLatin1StringView kBucketTwoWeeksAgo {"twoWeeksAgo"};
+constexpr QLatin1StringView kBucketOlder       {"older"};
 
 enum MailAge : int8_t {
     Today       = 0,
@@ -33,43 +33,41 @@ enum MailAge : int8_t {
 QString
 bucketKeyForDate(const QString &dateValue) {
     const auto dt = QDateTime::fromString(dateValue, Qt::ISODate);
-    if (!dt.isValid()) {
-        return QString::fromLatin1(kBucketOlder);
-    }
+    if (!dt.isValid()) { return QString(kBucketOlder); }
 
     const auto target = dt.toLocalTime().date();
     const auto today = QDate::currentDate();
     const auto diffDays = target.daysTo(today);
 
-    if (diffDays <= MailAge::Today) { return QString::fromLatin1(kBucketToday); }
-    if (diffDays == MailAge::Yesterday) { return QString::fromLatin1(kBucketYesterday); }
+    if (diffDays <= MailAge::Today) { return QString(kBucketToday); }
+    if (diffDays == MailAge::Yesterday) { return QString(kBucketYesterday); }
 
     if (const auto weekStart = today.addDays(-(today.dayOfWeek() % MailAge::ThisWeek)); target >= weekStart && target < today) {
         return QStringLiteral("weekday-%1").arg(target.dayOfWeek());
     }
 
-    if (diffDays <= MailAge::LastWeek) { return QString::fromLatin1(kBucketLastWeek); }
-    if (diffDays <= MailAge::TwoWeeksAgo) { return QString::fromLatin1(kBucketTwoWeeksAgo); }
+    if (diffDays <= MailAge::LastWeek) { return QString(kBucketLastWeek); }
+    if (diffDays <= MailAge::TwoWeeksAgo) { return QString(kBucketTwoWeeksAgo); }
 
-    return QString::fromLatin1(kBucketOlder);
+    return QString(kBucketOlder);
 }
 
 QString
 bucketLabel(const QString &bucketKey) {
-    if (bucketKey == QLatin1StringView(kBucketToday)) { return "Today"_L1; }
-    if (bucketKey == QLatin1StringView(kBucketYesterday)) { return "Yesterday"_L1; }
+    if (bucketKey == kBucketToday) { return "Today"_L1; }
+    if (bucketKey == kBucketYesterday) { return "Yesterday"_L1; }
 
-    if (bucketKey.startsWith(QLatin1StringView(kBucketWeekday))) {
+    if (bucketKey.startsWith(kBucketWeekday)) {
         bool ok = false;
-        const int dow = bucketKey.mid(QLatin1StringView(kBucketWeekday).size()).toInt(&ok);
+        const auto dow = QStringView{bucketKey}.mid(kBucketWeekday.size()).toInt(&ok);
 
         if (ok && dow >= MailAge::Today && dow <= MailAge::ThisWeek) {
             return QLocale().dayName(dow, QLocale::LongFormat);
         }
     }
 
-    if (bucketKey == QLatin1StringView(kBucketLastWeek)) { return "Last Week"_L1; }
-    if (bucketKey == QLatin1StringView(kBucketTwoWeeksAgo)) { return "Two Weeks Ago"_L1; }
+    if (bucketKey == kBucketLastWeek) { return "Last Week"_L1; }
+    if (bucketKey == kBucketTwoWeeksAgo) { return "Two Weeks Ago"_L1; }
 
     return "Older"_L1;
 }
@@ -273,7 +271,7 @@ MessageListModel::setBucketExpanded(const QString &bucketKey, const bool expande
     } else if (key == "older"_L1) {
         changed = (m_olderExpanded != expanded);
         m_olderExpanded = expanded;
-    } else if (key.startsWith("weekday-"_L1)) {
+    } else if (key.startsWith(kBucketWeekday)) {
         const bool prev = m_weekdayExpanded.value(key, true);
         changed = (prev != expanded);
         m_weekdayExpanded.insert(key, expanded);
@@ -424,68 +422,92 @@ MessageListModel::loadMore() {
 
     m_isLoadingPage = true;
 
-    QVariantList nextRows;
-    auto hasMore = false;
-    if (m_dataStore) {
-        nextRows = m_dataStore->messagesForSelection(m_folderKey, m_selectedCategories, m_selectedCategoryIndex, m_pageSize, m_nextOffset, &hasMore);
+    DataStore *store = m_dataStore.data();
+    if (!store) {
+        m_isLoadingPage = false;
+        return;
     }
 
-    if (!nextRows.isEmpty()) {
-        m_loadedSourceRows.reserve(m_loadedSourceRows.size() + nextRows.size());
-        for (const QVariant &v : nextRows) {
-            m_loadedSourceRows.push_back(v);
-        }
-        m_nextOffset += nextRows.size();
-    }
+    const auto folderKey = m_folderKey;
+    const auto selectedCategories = m_selectedCategories;
+    const auto selectedCategoryIndex = m_selectedCategoryIndex;
+    const auto pageSize = m_pageSize;
+    const auto nextOffset = m_nextOffset;
 
-    const auto oldHasMore = m_hasMore;
-    m_hasMore = hasMore;
-    if (oldHasMore != m_hasMore) { emit pagingChanged(); }
+    using Result = std::pair<QVariantList, bool>;
 
-    QVector<Row> window;
-    if (!nextRows.isEmpty()) {
-        const QVector<Row> deltaRows = buildRows(nextRows);
-        QMutexLocker locker(&m_rowsMutex);
-        QSet<QString> existingHeaders;
-        QSet<QString> existingMessages;
+    auto *watcher = new QFutureWatcher<Result>(this);
+    connect(watcher, &QFutureWatcher<Result>::finished, this, [this, watcher]() {
+        watcher->deleteLater();
 
-        for (const auto &r : m_allRows) {
-            if (r.type == HeaderRow) { existingHeaders.insert(r.bucketKey); }
-            else { existingMessages.insert(r.stableKey); }
+        const auto [nextRows, hasMore] = watcher->result();
+
+        if (!nextRows.isEmpty()) {
+            m_loadedSourceRows.reserve(m_loadedSourceRows.size() + nextRows.size());
+            for (const auto &v : nextRows) {
+                m_loadedSourceRows.push_back(v);
+            }
+            m_nextOffset += nextRows.size();
         }
 
-        for (const auto &r : deltaRows) {
-            if (r.type == HeaderRow) {
-                if (existingHeaders.contains(r.bucketKey)) { continue; }
+        const auto oldHasMore = m_hasMore;
+        m_hasMore = hasMore;
+        if (oldHasMore != m_hasMore) { emit pagingChanged(); }
 
-                existingHeaders.insert(r.bucketKey);
-                Row copy = r;
-                copy.hasTopGap = !m_allRows.isEmpty();
-                m_allRows.push_back(copy);
-            } else {
-                if (existingMessages.contains(r.stableKey)) { continue; }
+        QVector<Row> window;
+        if (!nextRows.isEmpty()) {
+            const auto deltaRows = buildRows(nextRows);
+            QMutexLocker locker(&m_rowsMutex);
+            QSet<QString> existingHeaders;
+            QSet<QString> existingMessages;
 
-                existingMessages.insert(r.stableKey);
-                m_allRows.push_back(r);
+            for (const auto &r : m_allRows) {
+                if (r.type == HeaderRow) { existingHeaders.insert(r.bucketKey); }
+                else { existingMessages.insert(r.stableKey); }
+            }
+
+            for (const auto &r : deltaRows) {
+                if (r.type == HeaderRow) {
+                    if (existingHeaders.contains(r.bucketKey)) { continue; }
+
+                    existingHeaders.insert(r.bucketKey);
+                    Row copy = r;
+                    copy.hasTopGap = !m_allRows.isEmpty();
+                    m_allRows.push_back(copy);
+                } else {
+                    if (existingMessages.contains(r.stableKey)) { continue; }
+
+                    existingMessages.insert(r.stableKey);
+                    m_allRows.push_back(r);
+                }
             }
         }
-    }
 
-    {
-        QMutexLocker locker(&m_rowsMutex);
-        if (m_windowStart < 0) { m_windowStart = 0; }
+        {
+            QMutexLocker locker(&m_rowsMutex);
+            if (m_windowStart < 0) { m_windowStart = 0; }
 
-        const int effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
-        if (m_windowStart >= m_allRows.size()) { m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize); }
+            const auto effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
+            if (m_windowStart >= m_allRows.size()) { m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize); }
 
-        const auto end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
-        for (int i = m_windowStart; i < end; ++i) { window.push_back(m_allRows.at(i)); }
-    }
+            const auto end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
+            for (qsizetype i = m_windowStart; i < end; ++i) { window.push_back(m_allRows.at(i)); }
+        }
 
-    emit totalRowCountChanged();
-    applyRows(std::move(window));
+        emit totalRowCountChanged();
+        applyRows(std::move(window));
 
-    m_isLoadingPage = false;
+        m_isLoadingPage = false;
+    });
+
+    watcher->setFuture(QtConcurrent::run(
+        [store, folderKey, selectedCategories, selectedCategoryIndex, pageSize, nextOffset]() -> Result {
+            bool hasMore = false;
+            auto rows = store->messagesForSelection(
+                folderKey, selectedCategories, selectedCategoryIndex, pageSize, nextOffset, &hasMore);
+
+            return {std::move(rows), hasMore};
+        }));
 }
 
 void
@@ -912,7 +934,7 @@ bool
 MessageListModel::bucketExpanded(const QString &bucketKey) const {
     if (bucketKey == "today"_L1) return m_todayExpanded;
     if (bucketKey == "yesterday"_L1) return m_yesterdayExpanded;
-    if (bucketKey.startsWith("weekday-"_L1)) return m_weekdayExpanded.value(bucketKey, true);
+    if (bucketKey.startsWith(kBucketWeekday)) return m_weekdayExpanded.value(bucketKey, true);
     if (bucketKey == "lastWeek"_L1) return m_lastWeekExpanded;
     if (bucketKey == "twoWeeksAgo"_L1) return m_twoWeeksAgoExpanded;
     return m_olderExpanded;

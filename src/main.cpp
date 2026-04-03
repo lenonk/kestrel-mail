@@ -110,11 +110,11 @@ int main(int argc, char *argv[])
 
     KLocalizedString::setApplicationDomain("kestrel-mail");
 
-    SplashScreen *splash = nullptr;
+    std::unique_ptr<SplashScreen> splash;
     {
         QPixmap splashPixmap(":/data/assets/splash.png"_L1);
         if (!splashPixmap.isNull()) {
-            splash = new SplashScreen(splashPixmap);
+            splash = std::make_unique<SplashScreen>(splashPixmap);
             splash->show();
             app.processEvents();
         }
@@ -278,11 +278,8 @@ int main(int argc, char *argv[])
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
         &app,
-        [splash]() {
-            if (splash) {
-                splash->close();
-                splash->deleteLater();
-            }
+        [&splash]() {
+            splash.reset();
             QCoreApplication::exit(-1);
         },
         Qt::QueuedConnection);
@@ -301,8 +298,7 @@ int main(int argc, char *argv[])
         }
 
         splash->execUntilReady(app, imapService);
-        splash->close();
-        splash->deleteLater();
+        splash.reset();
 
         if (mainWindow) {
             mainWindow->show();
@@ -327,8 +323,7 @@ int main(int argc, char *argv[])
         auto *quitAction = trayMenu->addAction("Quit"_L1);
 
         auto *trayIcon = new QSystemTrayIcon(&app);
-        // const QIcon tray = QIcon::fromTheme("mail-message-new"_L1, app.windowIcon());
-        const QIcon tray = kestrelIcon;
+        const auto tray = kestrelIcon;
         trayIcon->setIcon(tray);
         trayIcon->setToolTip("Kestrel Mail"_L1);
         trayIcon->setContextMenu(trayMenu);

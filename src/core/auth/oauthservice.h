@@ -46,7 +46,7 @@ private:
     QNetworkAccessManager *m_nam = nullptr;
     QHash<QString, QVariantMap> m_profileByEmail;
 
-    static QString randomBase64Url(int bytes);
+    static QString randomBase64Url(qint32 bytes);
     static QString sha256Base64Url(const QString &value);
     static QVariantMap parseJwtPayloadClaims(const QString &jwt);
 };

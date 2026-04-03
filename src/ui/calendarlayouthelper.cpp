@@ -40,7 +40,7 @@ QVariantList CalendarLayoutHelper::computeLayout(const QVariantList &events, int
         }
 
         // Sort by start time, then longer events first.
-        std::sort(dayEvts.begin(), dayEvts.end(), [](const DayEvent &a, const DayEvent &b) {
+        std::ranges::sort(dayEvts, [](const DayEvent &a, const DayEvent &b) {
             if (a.start != b.start)
                 return a.start < b.start;
             return (b.end - b.start) < (a.end - a.start);

@@ -10,55 +10,40 @@ import "../Attachments"
 Rectangle {
     id: root
 
-    // Tracking pixel detection: scans for 1×1 external <img> tags to confirm tracking is
-    // present, then determines the vendor using headers before falling back to the pixel URL.
-    // Priority: espVendor (C++ pre-computed from X-Mailgun-Sid / Received chain / etc.) →
-    //           X-Mailer first word → pixel URL SLD → Return-Path domain → DKIM domain.
-    readonly property var _trackerInfo: {
-        const html = (root.messageBodyHtml || "").toString();
+    // Tracking pixel detection: uses the C++ pre-computed has_tracking_pixel DB flag
+    // to avoid re-scanning HTML in QML. Vendor identification runs only when the flag
+    // is set, using headers first and falling back to the pixel URL SLD.
+    readonly property bool hasTrackingPixelFromDb: root.messageData ? !!root.messageData.hasTrackingPixel : false
+
+    readonly property string _trackerVendor: {
+        if (!root.hasTrackingPixelFromDb) { return ""; }
+
         const espVendor = root.messageData ? (root.messageData.espVendor || "").toString() : "";
+        if (espVendor) { return espVendor; }
+
         const xMailer = root.messageData ? (root.messageData.xMailer || "").toString() : "";
         const returnPath = root.messageData ? (root.messageData.returnPath || "").toString() : "";
         const authResults = root.messageData ? (root.messageData.authResults || "").toString() : "";
 
-        // Scan for a 1×1 external tracking pixel — this is the trigger for the whole bar.
-        // First-party pixels (sender's own domain) are skipped UNLESS a definitive ESP header
-        // (X-Mailgun-Sid, X-SG-EID, etc.) is present: many ESPs use custom CNAME tracking
-        // domains that look first-party but route through the ESP's infrastructure.
+        // Scan HTML for the pixel URL only when we know a tracking pixel exists.
+        const html = (root.messageBodyHtml || "").toString();
         const senderDom = root.senderDomain || "";
         const tagRe = /<img\b[^>]*>/gi;
         let pixelSrc = "";
         let m;
         while ((m = tagRe.exec(html)) !== null) {
             const tag = m[0];
-            if (!/\bsrc\s*=\s*["']https?:/i.test(tag))
-                continue;
-            if (!/\bwidth\s*=\s*["']\s*1\s*["']/i.test(tag))
-                continue;
-            if (!/\bheight\s*=\s*["']\s*1\s*["']/i.test(tag))
-                continue;
+            if (!/\bsrc\s*=\s*["']https?:/i.test(tag)) { continue; }
+            if (!/\bwidth\s*=\s*["']\s*1\s*["']/i.test(tag)) { continue; }
+            if (!/\bheight\s*=\s*["']\s*1\s*["']/i.test(tag)) { continue; }
             const srcM = tag.match(/\bsrc\s*=\s*["']([^"']+)/i);
-            if (!srcM)
-                continue;
-            const candidateSrc = srcM[1];
-            if (isFirstPartyUrl(candidateSrc, senderDom)) {
-                continue;
-            }
-            pixelSrc = candidateSrc;
+            if (!srcM) { continue; }
+            if (isFirstPartyUrl(srcM[1], senderDom)) { continue; }
+            pixelSrc = srcM[1];
             break;
         }
-        if (!pixelSrc)
-            return ({
-                    found: false,
-                    vendor: ""
-                });
 
-        // Determine vendor from best available signal (richest first).
-        const vendor = espVendor || vendorFromXMailer(xMailer) || vendorFromUrl(pixelSrc) || vendorFromReturnPath(returnPath) || vendorFromAuthResults(authResults);
-        return ({
-                found: true,
-                vendor
-            });
+        return vendorFromXMailer(xMailer) || vendorFromUrl(pixelSrc) || vendorFromReturnPath(returnPath) || vendorFromAuthResults(authResults);
     }
 
     readonly property var activeTags: {
@@ -91,7 +76,7 @@ Rectangle {
             || /srcset\s*=\s*["']https?:\/\//i.test(html)
             || /background(-image)?\s*:\s*[^;]*url\s*\(\s*['"]?https?:\/\//i.test(html);
     }
-    readonly property bool hasTrackingPixel: root._trackerInfo.found
+    readonly property bool hasTrackingPixel: root.hasTrackingPixelFromDb
     readonly property bool hasUsableBodyHtml: {
         const html = (messageBodyHtml || "").toString().trim();
         if (!html.length)
@@ -224,7 +209,7 @@ Rectangle {
         void appRoot._bodyUpdateVersion;
         return appRoot.dataStoreObj.messagesForThread(messageData.accountEmail, threadId);
     }
-    readonly property string trackerVendor: root._trackerInfo.vendor
+    readonly property string trackerVendor: root._trackerVendor
     property bool trackingAllowed: false
 
     function _fileNameFromUrl(url) {

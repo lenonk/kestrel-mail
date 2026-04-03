@@ -94,6 +94,10 @@ qt_add_executable(kestrel-mail
     src/core/auth/oauthservice.cpp
     src/core/htmlprocessor.cpp
     src/core/store/datastore.cpp
+    src/core/store/contactstore.cpp
+    src/core/store/folderstatsstore.cpp
+    src/core/store/userprefsstore.cpp
+    src/core/store/messagestore.cpp
     src/core/store/messagelistmodel.cpp
     src/core/transport/imap/imapservice.cpp
     src/core/transport/imap/parser/responseparser.cpp

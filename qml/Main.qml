@@ -142,16 +142,9 @@ Kirigami.ApplicationWindow {
 
     property bool gmailCalendarsExpanded: true
 
-    // Calendar source list is intentionally keyed like Google Calendar list entries
-    // (id/summary/backgroundColor). Hook this to real Google list when backend lands.
-    property var calendarSources: [
-        { account: "gmail", id: "calendar", name: i18n("Calendar"), checked: true, color: "" },
-        { account: "gmail", id: "holidays", name: i18n("Holidays in United States"), checked: true, color: "" },
-        { account: "gmail", id: "mel", name: i18n("mellanyjo@gmail.com"), checked: false, color: "" },
-        { account: "gmail", id: "raven", name: i18n("Raven"), checked: true, color: "" },
-        { account: "gmail", id: "sebastian", name: i18n("Sebastian"), checked: true, color: "" },
-        { account: "gmail", id: "sandra", name: i18n("sandrmarshall1953@gmail.com"), checked: true, color: "" }
-    ]
+    // Calendar source list is keyed like Google Calendar list entries
+    // (id/summary/backgroundColor). Populated by rebuildCalendarSourcesFromGoogle().
+    property var calendarSources: []
 
     property var calendarEvents: []
 

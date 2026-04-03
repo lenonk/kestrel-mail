@@ -251,12 +251,13 @@ OAuthService::completeAuthorization(const QString &callbackOrCode) {
 }
 
 QString
-OAuthService::randomBase64Url(int bytes) {
-    QByteArray data;
-
-    data.resize(bytes);
-    for (int i = 0; i < bytes; ++i) {
-        data[i] = static_cast<char>(QRandomGenerator::global()->bounded(0, 256));
+OAuthService::randomBase64Url(const qint32 bytes) {
+    QByteArray data(bytes, Qt::Uninitialized);
+    QRandomGenerator::global()->fillRange(reinterpret_cast<quint32 *>(data.data()),
+                                          static_cast<qsizetype>(bytes) / sizeof(quint32));
+    // Fill remaining bytes (if bytes is not a multiple of 4).
+    for (auto i = (bytes / 4) * 4; i < bytes; ++i) {
+        data[i] = static_cast<char>(QRandomGenerator::global()->bounded(256));
     }
 
     return data.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
