@@ -24,10 +24,14 @@ ArrowPopup {
     readonly property bool isImagePreview: previewMimeType.toLowerCase().indexOf("image/") === 0 || previewLower.endsWith(".png") || previewLower.endsWith(".jpg") || previewLower.endsWith(".jpeg") || previewLower.endsWith(".webp") || previewLower.endsWith(".gif") || previewLower.endsWith(".bmp")
     readonly property bool isPdfPreview: previewMimeType.toLowerCase().indexOf("pdf") >= 0 || previewLower.endsWith(".pdf")
     readonly property bool isWebPreview: !isImagePreview && !isPdfPreview && (previewLower.endsWith(".txt") || previewLower.endsWith(".md") || previewLower.endsWith(".html") || previewLower.endsWith(".htm"))
-    readonly property bool shown: targetHovered || hoverProbe.hovered
+    readonly property bool shown: targetHovered || bridgeHovered || contentHovered
 
     signal openTriggered
     signal saveTriggered
+
+    onTargetHoveredChanged: {
+        if (targetHovered) _enteredContent = false
+    }
 
     function borderForTheme() {
         const c = Kirigami.Theme.backgroundColor;
@@ -40,11 +44,6 @@ ArrowPopup {
     visible: shown
     implicitWidth: 258
     width: implicitWidth
-
-    HoverHandler {
-        id: hoverProbe
-        margin: Math.max(0, root.anchorGap)
-    }
 
     ColumnLayout {
         anchors.left: parent.left

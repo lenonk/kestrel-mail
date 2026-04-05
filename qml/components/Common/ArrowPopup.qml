@@ -17,6 +17,14 @@ Item {
 
     default property alias popupContent: contentContainer.data
 
+    // Gap-bridge hover: covers from the trigger's bottom edge through the
+    // arrow to the content box so the cursor can traverse the gap without
+    // the popup vanishing.  Disabled once the mouse enters the content area
+    // (so leaving the popup upward through the gap closes it immediately).
+    property bool _enteredContent: false
+    readonly property bool bridgeHovered: _gapBridgeHover.hovered
+    readonly property bool contentHovered: _contentAreaHover.hovered
+
     readonly property point anchorPos: visible && anchorItem
         ? anchorItem.mapToItem(QQC2.Overlay.overlay, 0, 0)
         : Qt.point(0, 0)
@@ -43,6 +51,20 @@ Item {
     onArrowLeftPxChanged: backgroundCanvas.requestPaint()
     onArrowWidthChanged: backgroundCanvas.requestPaint()
     onArrowHeightChanged: backgroundCanvas.requestPaint()
+
+    Item {
+        id: _gapBridge
+        x: 0
+        y: -root.anchorGap
+        width: root.width
+        height: root.anchorGap + root.arrowHeight + root.contentPadding + 2
+        z: 2
+
+        HoverHandler {
+            id: _gapBridgeHover
+            enabled: !root._enteredContent
+        }
+    }
 
     Canvas {
         id: backgroundCanvas
@@ -108,5 +130,12 @@ Item {
         anchors.topMargin: root.arrowHeight + root.contentPadding
         implicitHeight: childrenRect.height
         z: 1
+
+        HoverHandler {
+            id: _contentAreaHover
+            onHoveredChanged: {
+                if (hovered) root._enteredContent = true
+            }
+        }
     }
 }

@@ -155,6 +155,17 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/Layout/PaneIconButton.qml
         qml/components/Layout/PaneIconStrip.qml
         qml/components/Layout/TitleBarIconButton.qml
+        qml/components/Layout/WindowResizeHandles.qml
+        qml/components/Layout/TitleBar.qml
+        qml/components/Layout/MailToolbar.qml
+        qml/components/Layout/FolderPane.qml
+        qml/components/Layout/RightPane.qml
+        qml/components/Layout/SplitViewOverlay.qml
+        qml/utils/ColorUtilities.js
+        qml/utils/FolderUtils.js
+        qml/utils/DisplayUtils.js
+        qml/utils/ComposeUtils.js
+        qml/utils/MailActions.js
         qml/components/MessageContent/ContactHoverPopup.qml
         qml/components/MessageContent/MessageContentPane.qml
         qml/components/MessageContent/MessageInfoBars.qml

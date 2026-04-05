@@ -22,21 +22,19 @@ ArrowPopup {
     signal secondaryTriggered()
 
     property bool dismissedByAction: false
-    readonly property bool shown: !dismissedByAction && (targetHovered || hoverProbe.hovered)
+    readonly property bool shown: !dismissedByAction && (targetHovered || bridgeHovered || contentHovered)
 
     visible: shown && titleText.length > 0
 
     onTargetHoveredChanged: {
-        if (targetHovered) dismissedByAction = false
+        if (targetHovered) {
+            dismissedByAction = false
+            _enteredContent = false
+        }
     }
 
     implicitWidth: 280
     width: implicitWidth
-
-    HoverHandler {
-        id: hoverProbe
-        margin: Math.max(0, root.anchorGap)
-    }
 
     ColumnLayout {
         anchors.left: parent.left
