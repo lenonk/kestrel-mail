@@ -1,7 +1,5 @@
 #include "avatarresolver.h"
 
-#include <qcache.h>
-
 #include "../../../utils.h"
 #include "../parser/responseparser.h"
 #include <QNetworkAccessManager>

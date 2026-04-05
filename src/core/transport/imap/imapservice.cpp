@@ -113,13 +113,13 @@ QString stripGmailPrefix(const QString &folder) {
 }
 
 std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString &email, const QString &owner) {
-    int slotIndex = -1;
+    qint32 slotIndex = -1;
     const auto deadline = QDateTime::currentMSecsSinceEpoch() + kPoolAcquireTimeoutMs;
 
     QMutexLocker lock(&g_poolMutex);
     while (true) {
-        int freeForEmail = 0;
-        for (int i = 0; i < static_cast<int>(g_poolSlots.size()); ++i) {
+        qint32 freeForEmail = 0;
+        for (qsizetype i = 0; i < static_cast<qsizetype>(g_poolSlots.size()); ++i) {
             if (!email.isEmpty() && g_poolSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
                 continue;
             if (!g_poolSlots[i].busy)
@@ -129,7 +129,7 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
         const bool reserveForUser = isBackgroundOwner(owner) && freeForEmail <= 1;
 
         if (!reserveForUser) {
-            for (int i = 0; i < static_cast<int>(g_poolSlots.size()); ++i) {
+            for (qsizetype i = 0; i < static_cast<qsizetype>(g_poolSlots.size()); ++i) {
                 if (g_poolSlots[i].busy)
                     continue;
                 if (!email.isEmpty() && g_poolSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
@@ -146,7 +146,7 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
             break;
 
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        const int remaining = static_cast<int>(deadline - now);
+        const qint32 remaining = static_cast<qint32>(deadline - now);
         if (remaining <= 0)
             return {};
         g_poolWait.wait(&g_poolMutex, remaining);
@@ -177,7 +177,7 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
 
     return {raw, [slotIndex](Imap::Connection *) {
         QMutexLocker rel(&g_poolMutex);
-        if (slotIndex >= 0 && slotIndex < static_cast<int>(g_poolSlots.size())) {
+        if (slotIndex >= 0 && slotIndex < static_cast<qint32>(g_poolSlots.size())) {
             g_poolSlots[slotIndex].busy = false;
             g_poolSlots[slotIndex].owner.clear();
             g_poolSlots[slotIndex].leasedAtMs = 0;
@@ -188,10 +188,10 @@ std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString
 
 std::shared_ptr<Imap::Connection>
 ImapService::getDedicatedHydrateConnection(const QString &email) {
-    int slotIndex = -1;
+    qint32 slotIndex = -1;
     {
         QMutexLocker lock(&g_hydrateMutex);
-        for (int i = 0; i < static_cast<int>(g_hydrateSlots.size()); ++i) {
+        for (qsizetype i = 0; i < static_cast<qsizetype>(g_hydrateSlots.size()); ++i) {
             if (g_hydrateSlots[i].email.compare(email, Qt::CaseInsensitive) == 0 && !g_hydrateSlots[i].busy) {
                 g_hydrateSlots[i].busy = true;
                 g_hydrateSlots[i].owner = "hydrate-dedicated"_L1;
@@ -228,7 +228,7 @@ ImapService::getDedicatedHydrateConnection(const QString &email) {
 
     return {raw, [slotIndex](Imap::Connection *) {
         QMutexLocker rel(&g_hydrateMutex);
-        if (slotIndex >= 0 && slotIndex < static_cast<int>(g_hydrateSlots.size())) {
+        if (slotIndex >= 0 && slotIndex < static_cast<qint32>(g_hydrateSlots.size())) {
             g_hydrateSlots[slotIndex].busy = false;
             g_hydrateSlots[slotIndex].owner.clear();
             g_hydrateSlots[slotIndex].leasedAtMs = 0;
@@ -304,7 +304,7 @@ ImapService::initializeConnectionPool() {
             g_poolInitialized.store(false);
             return;
         }
-        m_expectedPoolSize = static_cast<int>(accounts.size()) * (1 + kOperationalPoolMax);
+        m_expectedPoolSize = static_cast<qint32>(accounts.size()) * (1 + kOperationalPoolMax);
 
         // Establish dedicated hydration connections FIRST (one per account).
         // These are reserved for user-click-initiated hydration to guarantee availability.
@@ -328,7 +328,7 @@ ImapService::initializeConnectionPool() {
 
         // Then establish the general-purpose operational pool.
         for (const auto &[email, host, accessToken, port] : accounts) {
-            for (int i = 0; i < kOperationalPoolMax; ++i) {
+            for (qint32 i = 0; i < kOperationalPoolMax; ++i) {
                 runBackgroundTask([this, host, email, port, accessToken]() {
                     if (m_destroying.load())
                         return;
@@ -349,21 +349,21 @@ ImapService::initializeConnectionPool() {
     }
 }
 
-int
+qint32
 ImapService::expectedPoolConnections() const {
     return m_expectedPoolSize;
 }
 
-int
+qint32
 ImapService::poolConnectionsReady() const {
-    int count = 0;
+    qint32 count = 0;
     {
         QMutexLocker lock(&g_hydrateMutex);
-        count += static_cast<int>(g_hydrateSlots.size());
+        count += static_cast<qint32>(g_hydrateSlots.size());
     }
     {
         QMutexLocker lock(&g_poolMutex);
-        count += static_cast<int>(g_poolSlots.size());
+        count += static_cast<qint32>(g_poolSlots.size());
     }
     return count;
 }
@@ -547,7 +547,7 @@ ImapService::dataUriSha256(const QString &dataUri) const {
     if (!src.startsWith("data:"_L1, Qt::CaseInsensitive))
         return {};
 
-    const int comma = src.indexOf(',');
+    const qint32 comma = static_cast<qint32>(src.indexOf(','));
     if (comma <= 0)
         return {};
 
@@ -920,7 +920,7 @@ ImapService::drainPendingSync() {
 void
 ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const SyncResult&)> onDone) {
     m_cancelRequested.store(false);
-    const int prev = m_syncInProgress.fetch_add(1);
+    const qint32 prev = m_syncInProgress.fetch_add(1);
     if (prev == 0)
         emit syncActivityChanged(true);
 
@@ -933,7 +933,7 @@ ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const
         if (!m_destroying && onDone)
             onDone(r);
 
-        const int now = m_syncInProgress.fetch_sub(1) - 1;
+        const qint32 now = m_syncInProgress.fetch_sub(1) - 1;
         if (now <= 0)
             emit syncActivityChanged(false);
 
@@ -1215,8 +1215,8 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     }
 
     bool ok = false;
-    const int configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
-    const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
+    const qint32 configuredLimit = qEnvironmentVariableIntValue("KESTREL_BG_BODY_FETCH_LIMIT", &ok);
+    const qint32 limit = ok && configuredLimit > 0 ? configuredLimit : 8;
 
     runBackgroundTask([this, email, folderNorm, key, limit]() {
         hydrateFolderBodies(email, folderNorm, key, limit);
@@ -1225,13 +1225,13 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
 
 void
 ImapService::hydrateFolderBodies(const QString &email, const QString &folder,
-                                 const QString &key, const int limit) {
-    int noProgressPasses = 0;
-    int processedThisRun = 0;
+                                 const QString &key, const qint32 limit) {
+    qint32 noProgressPasses = 0;
+    qint32 processedThisRun = 0;
 
     bool chunkOk = false;
-    const int configuredChunk = qEnvironmentVariableIntValue("KESTREL_BG_HYDRATE_PER_LOOP", &chunkOk);
-    const int maxPerLoop = chunkOk ? qBound(25, configuredChunk, 50) : 40;
+    const qint32 configuredChunk = qEnvironmentVariableIntValue("KESTREL_BG_HYDRATE_PER_LOOP", &chunkOk);
+    const qint32 maxPerLoop = chunkOk ? qBound(25, configuredChunk, 50) : 40;
 
     while (!m_destroying.load() && processedThisRun < maxPerLoop) {
         QStringList candidates;
@@ -1243,7 +1243,7 @@ ImapService::hydrateFolderBodies(const QString &email, const QString &folder,
             break;
         }
 
-        int hydratedThisPass = 0;
+        qint32 hydratedThisPass = 0;
         for (const auto &uid : candidates) {
             if (m_destroying.load() || processedThisRun >= maxPerLoop) {
                 break;
@@ -1426,7 +1426,7 @@ ImapService::fetchFolderHeaders(const QString &email,
                                 const std::function<void(const QVariantMap &)> &onHeader,
                                 qint64 minUidExclusive,
                                 bool reconcileDeletes,
-                                int fetchBudget) {
+                                qint32 fetchBudget) {
     auto pooled = getPooledConnection(email, "fetch-folder-headers");
     if (!pooled) {
         if (statusOut)
@@ -1509,8 +1509,8 @@ ImapService::makeSyncFlushLambda(QVariantList &pendingHeaders,
         pendingHeaders.clear();
 
         // Write headers directly from the worker thread (DataStore is thread-safe).
-        static constexpr int kDbChunk = 5;
-        for (int start = 0; start < batch.size(); start += kDbChunk) {
+        static constexpr qsizetype kDbChunk = 5;
+        for (qsizetype start = 0; start < batch.size(); start += kDbChunk) {
             const QVariantList chunk = batch.mid(start, kDbChunk);
             if (m_store) {
                 m_store->upsertHeaders(chunk);
@@ -1547,8 +1547,8 @@ QVariantList
 ImapService::syncFolderInternal(const AccountInfo &account,
                                   const QString &target,
                                   const SyncFolderOptions &options,
-                                  int &seqNum,
-                                  int &inboxInserted,
+                                  qint32 &seqNum,
+                                  qint32 &inboxInserted,
                                   QVariantList &pendingHeaders,
                                   QVariantList &resultHeaders,
                                   QElapsedTimer &flushTimer,
@@ -1573,8 +1573,8 @@ ImapService::syncFolderInternal(const AccountInfo &account,
     }
 
     const bool reconcileDeletes = !announce && !hadIdleHint && minUid > 0;
-    const int fetchTarget = Imap::SyncUtils::recentFetchCount();
-    int budget;
+    const qint32 fetchTarget = Imap::SyncUtils::recentFetchCount();
+    qint32 budget;
     if (minUid == 0) {
         // First sync: fetch up to fetchTarget newest messages (-1 = unlimited).
         budget = fetchTarget;
@@ -1752,7 +1752,7 @@ ImapService::refreshGoogleCalendars() {
         const QByteArray payload = reply->readAll();
         const bool ok = reply->error() == QNetworkReply::NoError;
         const QString err = reply->errorString();
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const qint32 httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QString bodyText = QString::fromUtf8(payload).trimmed();
         reply->deleteLater();
         if (!ok) {
@@ -1857,7 +1857,7 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
             const QByteArray payload = reply->readAll();
             const bool ok = reply->error() == QNetworkReply::NoError;
             const QString err = reply->errorString();
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const qint32 httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const QString bodyText = QString::fromUtf8(payload).trimmed();
             reply->deleteLater();
             if (!ok) {
@@ -1925,8 +1925,8 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                 if (isAllDay) {
                     const qint64 rawStart = weekStart.date().daysTo(startDt.date());
                     const qint64 rawEnd   = weekStart.date().daysTo(endDt.date().addDays(-1));
-                    const int visStart = qMax(0, static_cast<int>(rawStart));
-                    const int visEnd   = qMin(6, static_cast<int>(rawEnd));
+                    const qint32 visStart = qMax(0, static_cast<qint32>(rawStart));
+                    const qint32 visEnd   = qMin(6, static_cast<qint32>(rawEnd));
                     if (visStart > 6 || visEnd < 0)
                         continue;
 
@@ -1949,12 +1949,12 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                     if (dayIndex < 0 || dayIndex > 6)
                         continue;
 
-                    const int minutes = startDt.time().hour() * 60 + startDt.time().minute();
-                    const int durMinutes = qMax(15, static_cast<int>(startDt.secsTo(endDt) / 60));
+                    const qint32 minutes = startDt.time().hour() * 60 + startDt.time().minute();
+                    const qint32 durMinutes = qMax(15, static_cast<qint32>(startDt.secsTo(endDt) / 60));
 
                     QVariantMap row;
                     row.insert("calendarId"_L1, calendarId);
-                    row.insert("dayIndex"_L1, static_cast<int>(dayIndex));
+                    row.insert("dayIndex"_L1, static_cast<qint32>(dayIndex));
                     row.insert("spanDays"_L1, 1);
                     row.insert("startHour"_L1, static_cast<double>(minutes) / 60.0);
                     row.insert("durationHours"_L1, static_cast<double>(durMinutes) / 60.0);
@@ -2164,9 +2164,9 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         // a fresh OAuth token and try once more (up to 60 s total).
         constexpr int kHydrateRetryDelayMs = 3000;
         constexpr int kHydrateMaxTotalMs   = 60000;
-        const int maxAttempts = userInitiated ? 3 : 1;
+        const qint32 maxAttempts = userInitiated ? 3 : 1;
 
-        for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+        for (qint32 attempt = 0; attempt < maxAttempts; ++attempt) {
             if (m_destroying)
                 return QString{};
             if (attempt > 0 && hydrateTimer.elapsed() >= kHydrateMaxTotalMs)
@@ -2238,7 +2238,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         return;
 
     qint64 messageId = -1;
-    int    unreadVal = 0;
+    qint32 unreadVal = 0;
     if (m_store) {
         const QVariantMap edge = m_store->folderMapRowForEdge(accountEmail, folder, uid);
         messageId = edge.value("messageId"_L1, -1LL).toLongLong();
@@ -2390,7 +2390,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
         return;
 
     qint64 messageId = -1;
-    int unreadVal = 0;
+    qint32 unreadVal = 0;
     if (m_store) {
         const QVariantMap edge = m_store->folderMapRowForEdge(accountEmail, folder, uid);
         messageId = edge.value("messageId"_L1, -1LL).toLongLong();
@@ -2608,8 +2608,8 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             } fsgGuard{isBgSync};
 
             SyncResult result;
-            int inboxInserted = 0;
-            int seqNum = 0;
+            qint32 inboxInserted = 0;
+            qint32 seqNum = 0;
             QVariantList pendingHeaders;
             QElapsedTimer flushTimer;
             flushTimer.start();
@@ -2645,7 +2645,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
                 if (!uid.isEmpty())
                     uniqueUids.insert(uid);
             }
-            const int syncedCount = uniqueUids.isEmpty() ? r.headers.size() : uniqueUids.size();
+            const qint32 syncedCount = uniqueUids.isEmpty() ? static_cast<qint32>(r.headers.size()) : static_cast<qint32>(uniqueUids.size());
 
             if (announce) {
                 if (!r.ok)
@@ -2698,7 +2698,7 @@ ImapService::syncAll(bool announce) {
     runAsync(
         [this, accounts, announce]() -> SyncResult {
             SyncResult result;
-            int inboxInserted = 0;
+            qint32 inboxInserted = 0;
             QVariantList pendingHeaders;
             QElapsedTimer flushTimer;
             flushTimer.start();
@@ -2737,7 +2737,7 @@ ImapService::syncAll(bool announce) {
                 QSet<QString> parentContainers;
                 for (const auto &fv : folders) {
                     const auto name = fv.toMap().value("name"_L1).toString().trimmed();
-                    const int slash = name.indexOf('/');
+                    const qint32 slash = static_cast<qint32>(name.indexOf('/'));
                     if (slash > 0)
                         parentContainers.insert(name.left(slash).toLower());
                 }
@@ -2773,7 +2773,7 @@ ImapService::syncAll(bool announce) {
                 }
 
                 // Sync each folder through the same canonical folder-sync path.
-                int seqNum = 0;
+                qint32 seqNum = 0;
                 for (const auto &folderTarget : targets) {
                     if (m_cancelRequested)
                         break;
@@ -2790,7 +2790,7 @@ ImapService::syncAll(bool announce) {
                         if (!u.isEmpty())
                             uniqueUids.insert(u);
                     }
-                    const int syncedCount = uniqueUids.size();
+                    const qint32 syncedCount = static_cast<qint32>(uniqueUids.size());
                     if (syncedCount <= 0)
                         continue;
 

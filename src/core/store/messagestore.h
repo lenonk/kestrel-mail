@@ -61,7 +61,7 @@ public:
     QString folderUidForMessageId(const QString &accountEmail, const QString &folder,
                                   qint64 messageId) const;
     void insertFolderEdge(const QString &accountEmail, qint64 messageId,
-                          const QString &folder, const QString &uid, int unread) const;
+                          const QString &folder, const QString &uid, qint32 unread) const;
     QMap<QString, qint64> lookupByMessageIdHeaders(const QString &accountEmail,
                                                    const QStringList &messageIdHeaders) const;
     void removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId) const;

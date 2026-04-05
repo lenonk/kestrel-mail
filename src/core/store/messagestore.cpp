@@ -106,10 +106,10 @@ computeHasTrackingPixel(const QString &bodyHtml, const QString &senderRaw) {
     QString senderDomain;
 
     {
-        const int at = static_cast<int>(email.lastIndexOf('@'));
+        const qint32 at = static_cast<qint32>(email.lastIndexOf('@'));
         if (at >= 0) {
             senderDomain = email.mid(at + 1).toLower().trimmed();
-            const int colon = static_cast<int>(senderDomain.indexOf(':'));
+            const qint32 colon = static_cast<qint32>(senderDomain.indexOf(':'));
             if (colon > 0) { senderDomain = senderDomain.left(colon); }
         }
     }
@@ -132,7 +132,7 @@ computeHasTrackingPixel(const QString &bodyHtml, const QString &senderRaw) {
         const auto hostM = hostRe.match(src);
         if (!hostM.hasMatch()) { continue; }
         QString pixelHost = hostM.captured(1).toLower().trimmed();
-        const int colon = static_cast<int>(pixelHost.indexOf(':'));
+        const qint32 colon = static_cast<qint32>(pixelHost.indexOf(':'));
         if (colon > 0) { pixelHost = pixelHost.left(colon); }
         if (!senderDomain.isEmpty() && !pixelHost.isEmpty()
                 && (pixelHost == senderDomain || pixelHost.endsWith("." + senderDomain))) {
@@ -197,7 +197,7 @@ inferCategoryFromLabels(const QString &rawLabels) {
     return {};
 }
 
-int
+qint32
 folderEdgeCount(const QSqlDatabase &database, const QString &accountEmail, const QString &folder) {
     QSqlQuery q(database);
     q.prepare(R"(
@@ -213,7 +213,7 @@ folderEdgeCount(const QSqlDatabase &database, const QString &accountEmail, const
     return q.value(0).toInt();
 }
 
-int
+qint32
 folderOverlapCount(const QSqlDatabase &database,
                    const QString &accountEmail,
                    const QString &folder,
@@ -238,7 +238,7 @@ folderOverlapCount(const QSqlDatabase &database,
     return q.value(0).toInt();
 }
 
-int
+qint32
 allMailOverlapCount(const QSqlDatabase &database,
                     const QString &accountEmail,
                     const QStringList &uids) {
@@ -269,7 +269,7 @@ allMailOverlapCount(const QSqlDatabase &database,
 bool
 upsertFolderEdge(const QSqlDatabase &database,
                  const QString &accountEmail,
-                 int messageId,
+                 qint32 messageId,
                  const QString &folder,
                  const QString &uid,
                  const QVariant &unread) {
@@ -302,7 +302,7 @@ upsertFolderEdge(const QSqlDatabase &database,
     return isNew;
 }
 
-int
+qint32
 removeOrphanMessages(const QSqlDatabase &database) {
     QSqlQuery q(database);
     q.exec("DELETE FROM messages WHERE id NOT IN (SELECT DISTINCT message_id FROM message_folder_map)"_L1);
@@ -524,7 +524,7 @@ messagesForInboxesView(const QSqlDatabase &database, const bool unreadOnly,
 
     QSet<QString> seenKeys;
     QVariantList out;
-    int rawOffset = 0;
+    qint32 rawOffset = 0;
     bool exhausted = false;
 
     while (!exhausted) {
@@ -545,7 +545,7 @@ messagesForInboxesView(const QSqlDatabase &database, const bool unreadOnly,
         q.bindValue(":limit"_L1, chunkSize);
         q.bindValue(":offset"_L1, rawOffset);
 
-        int fetchedRaw = 0;
+        qint32 fetchedRaw = 0;
         if (q.exec()) {
             while (q.next()) {
                 ++fetchedRaw;
@@ -573,7 +573,7 @@ messagesForInboxesView(const QSqlDatabase &database, const bool unreadOnly,
             if (hasMore) { *hasMore = false; }
             return {};
         }
-        const auto end = static_cast<int>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
+        const auto end = static_cast<qint32>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
         if (hasMore) { *hasMore = (out.size() > safeOffset + limit); }
         out = out.mid(safeOffset, end - safeOffset);
     } else {
@@ -598,7 +598,7 @@ messagesForFolderView(const QSqlDatabase &database, const QString &selectedFolde
 
     QSet<QString> seenKeys;
     QVariantList out;
-    int rawOffset = 0;
+    qint32 rawOffset = 0;
     bool exhausted = false;
 
     while (!exhausted) {
@@ -624,7 +624,7 @@ messagesForFolderView(const QSqlDatabase &database, const QString &selectedFolde
         q.bindValue(":limit"_L1, chunkSize);
         q.bindValue(":offset"_L1, rawOffset);
 
-        int fetchedRaw = 0;
+        qint32 fetchedRaw = 0;
         if (q.exec()) {
             while (q.next()) {
                 ++fetchedRaw;
@@ -652,7 +652,7 @@ messagesForFolderView(const QSqlDatabase &database, const QString &selectedFolde
             if (hasMore) { *hasMore = false; }
             return {};
         }
-        const auto end = static_cast<int>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
+        const auto end = static_cast<qint32>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
         if (hasMore) { *hasMore = (out.size() > safeOffset + limit); }
         out = out.mid(safeOffset, end - safeOffset);
     } else {
@@ -777,7 +777,7 @@ messagesForCategoryView(const QSqlDatabase &database,
     return out;
 }
 
-int
+qint32
 deleteFolderEdge(const QSqlDatabase &database,
                  const QString &accountEmail,
                  const QString &folder,
@@ -795,7 +795,7 @@ deleteFolderEdge(const QSqlDatabase &database,
     return qMap.numRowsAffected();
 }
 
-int
+qint32
 pruneFolderEdgesToUids(const QSqlDatabase &database,
                        const QString &accountEmail,
                        const QString &folder,
@@ -873,7 +873,7 @@ sanitizeSnippet(const QString &snippetRaw, const QString &subjectRaw) {
 
         QString out;
         out.reserve(s.size());
-        int spaceRun = 0;
+        qint32 spaceRun = 0;
         for (const QChar ch : s) {
             if (ch.isSpace()) {
                 ++spaceRun;
@@ -922,7 +922,7 @@ sanitizeSnippet(const QString &snippetRaw, const QString &subjectRaw) {
     s = normalizeSnippetWhitespace(s);
 
     const QString t = s.toLower();
-    const int alphaCount = static_cast<int>(s.count(kReHasLetters));
+    const qint32 alphaCount = static_cast<qint32>(s.count(kReHasLetters));
     const bool danglingShort = s.endsWith('(') || s.endsWith(':') || s.endsWith('-');
     const bool junk = s.isEmpty()
             || t.startsWith("* "_L1)
@@ -1088,7 +1088,7 @@ tryReuseWeakIdentity(const QSqlDatabase &database,
                      const QString &folder,
                      const QString &uid,
                      const QString &bodyHtml,
-                     const int unread) {
+                     const qint32 unread) {
     QSqlQuery qExisting(database);
     qExisting.prepare(R"(
         SELECT m.id, m.sender
@@ -1226,7 +1226,7 @@ dispatchNewMailNotification(const MessageStoreCallbacks &callbacks,
                             const QString &accountEmail,
                             const QString &folder,
                             const QString &uid,
-                            const int unread,
+                            const qint32 unread,
                             const QString &senderDisplayName,
                             const QString &senderEmail,
                             const QString &senderRaw,
@@ -1546,9 +1546,9 @@ MessageStore::pruneFolderToUids(const QString &accountEmail, const QString &fold
         return;
     }
     if (FolderStatsStore::isCategoryFolderName(fld) && !uids.isEmpty()) {
-        const int existingCount = folderEdgeCount(database, acc, fld);
-        const int overlapCount = folderOverlapCount(database, acc, fld, uids);
-        const int allMailOverlap = allMailOverlapCount(database, acc, uids);
+        const qint32 existingCount = folderEdgeCount(database, acc, fld);
+        const qint32 overlapCount = folderOverlapCount(database, acc, fld, uids);
+        const qint32 allMailOverlap = allMailOverlapCount(database, acc, uids);
         const double overlapRatio = uids.isEmpty() ? 0.0 : static_cast<double>(overlapCount) / static_cast<double>(uids.size());
         const double allMailRatio = uids.isEmpty() ? 0.0 : static_cast<double>(allMailOverlap) / static_cast<double>(uids.size());
 
@@ -1567,7 +1567,7 @@ MessageStore::pruneFolderToUids(const QString &accountEmail, const QString &fold
         }
     }
 
-    const int removedFolderRows = pruneFolderEdgesToUids(database, acc, fld, uids);
+    const qint32 removedFolderRows = pruneFolderEdgesToUids(database, acc, fld, uids);
 
     const auto removedCanonicalRows = removeOrphanMessages(database);
 
@@ -1612,12 +1612,12 @@ MessageStore::removeAccountUidsEverywhere(const QString &accountEmail, const QSt
             edgesToDelete.emplace_back(qFind.value(0).toString(), qFind.value(1).toString());
         }
     }
-    int removedFolderRows = 0;
+    qint32 removedFolderRows = 0;
     for (const auto &[folder, uid] : edgesToDelete) {
         removedFolderRows += deleteFolderEdge(database, acc, folder, uid);
     }
 
-    int removedCanonicalRows = 0;
+    qint32 removedCanonicalRows = 0;
     if (!skipOrphanCleanup) {
         removedCanonicalRows = removeOrphanMessages(database);
     }
@@ -1709,7 +1709,7 @@ MessageStore::reconcileReadFlags(const QString &accountEmail, const QString &fol
     bindPlaceholders(qMsg, readUids);
     qMsg.exec();
 
-    const int edgesUpdated = qMap.numRowsAffected();
+    const qint32 edgesUpdated = qMap.numRowsAffected();
     if (edgesUpdated > 0) {
         qInfo().noquote() << "[reconcile-flags]" << "acc=" << acc
                           << "folder=" << folder
@@ -1727,7 +1727,7 @@ MessageStore::markMessageFlagged(const QString &accountEmail, const QString &uid
     const QString acc = accountEmail.trimmed();
     if (acc.isEmpty() || uid.trimmed().isEmpty()) { return; }
 
-    const int val = flagged ? 1 : 0;
+    const qint32 val = flagged ? 1 : 0;
     QSqlQuery qMsg(database);
     qMsg.prepare(
         "UPDATE messages SET flagged=:val "
@@ -1858,7 +1858,7 @@ MessageStore::deleteFolderEdgesForMessage(const QString &accountEmail, const QSt
 
 void
 MessageStore::insertFolderEdge(const QString &accountEmail, const qint64 messageId,
-                               const QString &folder, const QString &uid, const int unread) const {
+                               const QString &folder, const QString &uid, const qint32 unread) const {
     auto database = m_db();
     if (!database.isValid() || !database.isOpen()) { return; }
 
@@ -2062,7 +2062,7 @@ MessageStore::bodyFetchCandidates(const QString &accountEmail, const QString &fo
         return out;
     }
 
-    const int boundedLimit = qBound(1, limit, 100);
+    const qint32 boundedLimit = qBound(1, limit, 100);
 
     QSqlQuery q(database);
     q.prepare(R"(
@@ -2109,7 +2109,7 @@ MessageStore::bodyFetchCandidatesByAccount(const QString &accountEmail, const qi
         return out;
     }
 
-    const int boundedLimit = qBound(1, limit, 100);
+    const qint32 boundedLimit = qBound(1, limit, 100);
 
     const auto acc = accountEmail.trimmed();
     QSet<qint64> seenMessageIds;
@@ -2280,8 +2280,8 @@ MessageStore::hasUsableBodyForEdge(const QString &accountEmail, const QString &f
         return false;
     }
 
-    const int tableOpen  = static_cast<int>(lower.count("<table"_L1));
-    const int tableClose = static_cast<int>(lower.count("</table>"_L1));
+    const qint32 tableOpen  = static_cast<qint32>(lower.count("<table"_L1));
+    const qint32 tableClose = static_cast<qint32>(lower.count("</table>"_L1));
     if (tableClose > tableOpen) {
         return false;
     }
@@ -2415,9 +2415,9 @@ MessageStore::messagesForThread(const QString &accountEmail, const QString &thre
     if (!q.exec()) { return {}; }
 
     QVariantList result;
-    QSet<int> seen;
+    QSet<qint32> seen;
     while (q.next()) {
-        const int msgId = q.value(3).toInt();
+        const qint32 msgId = q.value(3).toInt();
         if (seen.contains(msgId)) { continue; }
         seen.insert(msgId);
         QVariantMap row;
@@ -2456,8 +2456,8 @@ MessageStore::updateBodyForKey(const QString &accountEmail,
     auto database = m_db();
     if (!database.isValid() || !database.isOpen()) { return false; }
 
-    int prevLen = -1;
-    int prevTP = 0;
+    qint32 prevLen = -1;
+    qint32 prevTP = 0;
     QString senderForTP;
     {
         QSqlQuery qPrev(database);
@@ -2484,7 +2484,7 @@ MessageStore::updateBodyForKey(const QString &accountEmail,
         }
     }
 
-    const int hasTP = computeHasTrackingPixel(html, senderForTP) ? 1 : 0;
+    const qint32 hasTP = computeHasTrackingPixel(html, senderForTP) ? 1 : 0;
 
     QSqlQuery q(database);
     q.prepare(R"(
@@ -2612,7 +2612,7 @@ MessageStore::groupedMessagesForSelection(const QString &folderKey,
         if (!dt.isValid()) { return "older"_L1; }
         const QDate target = dt.toLocalTime().date();
         const QDate today = QDate::currentDate();
-        const int diffDays = static_cast<int>(target.daysTo(today));
+        const qint32 diffDays = static_cast<qint32>(target.daysTo(today));
         if (diffDays <= 0) { return "today"_L1; }
         if (diffDays == 1) { return "yesterday"_L1; }
 
@@ -2717,7 +2717,7 @@ MessageStore::upsertAttachments(const qint64 messageId, const QString &accountEm
         const QString partId   = a.value("partId"_L1).toString().trimmed();
         const QString name     = a.value("name"_L1).toString().trimmed();
         const QString mimeType = a.value("mimeType"_L1).toString().trimmed();
-        const int encodedBytes = a.value("encodedBytes"_L1).toInt();
+        const qint32 encodedBytes = a.value("encodedBytes"_L1).toInt();
         const QString encoding = a.value("encoding"_L1).toString().trimmed();
 
         if (partId.isEmpty()) { continue; }
@@ -2770,10 +2770,10 @@ MessageStore::attachmentsForMessage(const QString &accountEmail, const QString &
 
     while (q.next()) {
         const QString encoding = q.value(4).toString();
-        const int encodedBytes = q.value(3).toInt();
-        const int displayBytes = (encoding.compare("base64"_L1, Qt::CaseInsensitive) == 0)
-                                 ? static_cast<int>(encodedBytes * 3 / 4)
-                                 : encodedBytes;
+        const qint32 encodedBytes = q.value(3).toInt();
+        const qint32 displayBytes = (encoding.compare("base64"_L1, Qt::CaseInsensitive) == 0)
+                                    ? static_cast<qint32>(encodedBytes * 3 / 4)
+                                    : encodedBytes;
 
         QVariantMap row;
         row.insert("partId"_L1,   q.value(0).toString());
@@ -2800,13 +2800,13 @@ MessageStore::searchMessages(const QString &query, const qint32 limit, const qin
 
     const QString pattern = "%"_L1 + term + "%"_L1;
 
-    const int safeOffset = qMax(0, offset);
-    const int chunkSize = (limit > 0) ? qMax(200, limit * 4) : 5000;
-    const int targetCount = (limit > 0) ? (safeOffset + limit + 1) : -1;
+    const qint32 safeOffset = qMax(0, offset);
+    const qint32 chunkSize = (limit > 0) ? qMax(200, limit * 4) : 5000;
+    const qint32 targetCount = (limit > 0) ? (safeOffset + limit + 1) : -1;
 
     QSet<QString> seenKeys;
     QVariantList out;
-    int rawOffset = 0;
+    qint32 rawOffset = 0;
     bool exhausted = false;
 
     while (!exhausted) {
@@ -2824,7 +2824,7 @@ MessageStore::searchMessages(const QString &query, const qint32 limit, const qin
         q.bindValue(":limit"_L1, chunkSize);
         q.bindValue(":offset"_L1, rawOffset);
 
-        int fetchedRaw = 0;
+        qint32 fetchedRaw = 0;
         if (q.exec()) {
             while (q.next()) {
                 ++fetchedRaw;
@@ -2859,7 +2859,7 @@ MessageStore::searchMessages(const QString &query, const qint32 limit, const qin
             if (hasMore) { *hasMore = false; }
             return {};
         }
-        const int end = static_cast<int>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
+        const qint32 end = static_cast<qint32>(qMin(out.size(), static_cast<qsizetype>(safeOffset + limit)));
         if (hasMore) { *hasMore = (out.size() > safeOffset + limit); }
         out = out.mid(safeOffset, end - safeOffset);
     } else {

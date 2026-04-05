@@ -15,20 +15,17 @@ BodyStructureParser::parsePreferredTextParts() {
     QList<BodyPart> out;
 
     auto pos = m_text.indexOf("BODYSTRUCTURE"_L1);
-    if (pos < 0)
-        return out;
+    if (pos < 0) { return out; }
 
     pos = m_text.indexOf('(', pos);
-    if (pos < 0)
-        return out;
+    if (pos < 0) { return out; }
 
     m_i = pos;
 
     parseBody(QString(), out);
 
     std::ranges::sort(out, [](const BodyPart &a, const BodyPart &b) {
-        if (a.score != b.score)
-            return a.score > b.score;
+        if (a.score != b.score) { return a.score > b.score; }
         return a.partId < b.partId;
     });
 
@@ -55,8 +52,7 @@ QString
 BodyStructureParser::parseAtomOrQuoted() {
     skipWs();
 
-    if (m_i >= m_text.size())
-        return {};
+    if (m_i >= m_text.size()) { return {}; }
 
     if (m_text[m_i] == '"') {
         ++m_i;
@@ -82,16 +78,16 @@ void
 BodyStructureParser::skipAny() {
     skipWs();
 
-    if (m_i >= m_text.size())
-        return;
+    if (m_i >= m_text.size()) { return; }
 
     if (m_text[m_i] == '(') {
         qint32 depth = 0;
         do {
-            if (m_text[m_i] == '(')
+            if (m_text[m_i] == '(') {
                 ++depth;
-            else if (m_text[m_i] == ')')
+            } else if (m_text[m_i] == ')') {
                 --depth;
+            }
             ++m_i;
         } while (m_i < m_text.size() && depth > 0);
 
@@ -170,10 +166,12 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
 
     if (m_i < m_text.size() && m_text[m_i] == '(') {
         const QString paramsRaw = readParenBlock();
-        if (const auto mm = charsetRe.match(paramsRaw); mm.hasMatch())
+        if (const auto mm = charsetRe.match(paramsRaw); mm.hasMatch()) {
             charset = mm.captured(1).trimmed();
-        if (const auto fm = nameRe.match(paramsRaw); fm.hasMatch())
+        }
+        if (const auto fm = nameRe.match(paramsRaw); fm.hasMatch()) {
             filename = fm.captured(1).trimmed();
+        }
     } else {
         skipAny(); // NIL
     }
@@ -185,14 +183,14 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
     const auto sizeToken = parseAtomOrQuoted();
 
     // TEXT parts have an extra 'lines' field after size.
-    if (type == "TEXT"_L1)
-        skipAny();
+    if (type == "TEXT"_L1) { skipAny(); }
 
     // Optional md5: atom or quoted string (never a list).
     // If the next non-ws token is '(' it must be disposition — don't consume it as md5.
     skipWs();
-    if (m_i < m_text.size() && m_text[m_i] != '(' && m_text[m_i] != ')')
+    if (m_i < m_text.size() && m_text[m_i] != '(' && m_text[m_i] != ')') {
         skipAny();
+    }
 
     // Content-Disposition: always parse — type (inline vs attachment) affects isAttachment.
     bool isInlineDisp = false;
@@ -202,11 +200,13 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
             static const QRegularExpression dispTypeRe(
                 "^\\(\\s*\"([^\"]+)\""_L1,
                 QRegularExpression::CaseInsensitiveOption);
-            if (const auto dm = dispTypeRe.match(dispRaw); dm.hasMatch())
+            if (const auto dm = dispTypeRe.match(dispRaw); dm.hasMatch()) {
                 isInlineDisp = dm.captured(1).compare("inline"_L1, Qt::CaseInsensitive) == 0;
+            }
             if (filename.isEmpty()) {
-                if (const auto fm = nameRe.match(dispRaw); fm.hasMatch())
+                if (const auto fm = nameRe.match(dispRaw); fm.hasMatch()) {
                     filename = fm.captured(1).trimmed();
+                }
             }
         }
     }
@@ -223,32 +223,32 @@ BodyStructureParser::parseSinglepart(const QString &partPrefix, QList<BodyPart> 
         part.filename = filename;
         part.isInline = isInlineDisp;
 
-        if (!part.filename.isEmpty() && !isInlineDisp)
+        if (!part.filename.isEmpty() && !isInlineDisp) {
             part.isAttachment = true;
+        }
 
         auto okBytes = false;
         part.bytes = sizeToken.toInt(&okBytes);
 
-        if (!okBytes)
-            part.bytes = 0;
+        if (!okBytes) { part.bytes = 0; }
 
         int score = 0;
         if (type == "TEXT"_L1) {
-            if (subtype == "PLAIN"_L1)
+            if (subtype == "PLAIN"_L1) {
                 score += 300;
-            else if (subtype == "HTML"_L1)
+            } else if (subtype == "HTML"_L1) {
                 score += 200;
-            else
+            } else {
                 score += 100;
+            }
 
-            if (!part.isAttachment)
-                score += 50;
+            if (!part.isAttachment) { score += 50; }
 
-            if (part.charset == "utf-8"_L1)
-                score += 20;
+            if (part.charset == "utf-8"_L1) { score += 20; }
 
-            if (encoding == "quoted-printable"_L1 || encoding == "7bit"_L1 || encoding == "8bit"_L1)
+            if (encoding == "quoted-printable"_L1 || encoding == "7bit"_L1 || encoding == "8bit"_L1) {
                 score += 10;
+            }
         }
 
         part.score = score;
@@ -303,8 +303,7 @@ parseAttachmentParts(const QString &bodyStructureResponse) {
     QList<BodyPart> all = parsePreferredTextParts(bodyStructureResponse);
     QList<BodyPart> out;
     for (const BodyPart &p : all) {
-        if (p.isInline)
-            continue;
+        if (p.isInline) { continue; }
         if (p.isAttachment
                 || (p.type != "TEXT"_L1
                     && p.type != "MULTIPART"_L1
@@ -380,8 +379,7 @@ decodeTransferEncoded(const QByteArray &raw) {
         }
         else {
             start = src.indexOf("\n\n");
-            if (start >= 0)
-                start += 2;
+            if (start >= 0) { start += 2; }
         }
 
         QByteArray payload = start > 0 ? src.mid(start) : src;
@@ -392,8 +390,9 @@ decodeTransferEncoded(const QByteArray &raw) {
 
     if (lower.contains("content-transfer-encoding: base64")) {
         const auto payload = stripPayload(raw);
-        if (const auto decoded = QByteArray::fromBase64(payload); !decoded.isEmpty())
+        if (const auto decoded = QByteArray::fromBase64(payload); !decoded.isEmpty()) {
             return decoded;
+        }
     }
 
     if (lower.contains("content-transfer-encoding: quoted-printable")) {
@@ -417,21 +416,17 @@ extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw) {
     const QString rawLatin1 = QString::fromLatin1(fetchRespRaw);
     auto extractRawHtmlDoc = [](const QString &raw) -> QString {
         const int start = raw.indexOf("<html"_L1, 0, Qt::CaseInsensitive);
-        if (start < 0)
-            return {};
+        if (start < 0) { return {}; }
         const int end = raw.lastIndexOf("</html>"_L1, -1, Qt::CaseInsensitive);
-        if (end <= start)
-            return {};
+        if (end <= start) { return {}; }
         const int endIncl = end + "</html>"_L1.size();
         const QString doc = raw.mid(start, endIncl - start).trimmed();
         return doc.size() >= 256 ? doc : QString();
     };
 
     html = extractRawHtmlDoc(rawUtf8);
-    if (html.isEmpty())
-        html = extractRawHtmlDoc(rawLatin1);
-    if (!html.isEmpty())
-        return html;
+    if (html.isEmpty()) { html = extractRawHtmlDoc(rawLatin1); }
+    if (!html.isEmpty()) { return html; }
 
     if (const QString plain = Mime::extractPlainTextWithMailio(fetchRespRaw).trimmed(); !plain.isEmpty()) {
         QString escaped = plain.toHtmlEscaped();
@@ -555,15 +550,15 @@ extractBodyTextForSnippet(const QByteArray &fetchRespRaw) {
         for (int k = 0; k < checkLen; ++k) {
             if (plain[k] == u'{' || plain[k] == u'}') ++braceCount;
         }
-        if (braceCount < 3)
-            return cleanPlainTextForSnippet(plain);
+        if (braceCount < 3) { return cleanPlainTextForSnippet(plain); }
     }
 
     // HTML path: use the element-aware flattener
     QString html = Mime::extractHtmlWithMailio(fetchRespRaw).trimmed();
     // If mailio gave us nothing but "plain" is actually HTML, use it directly
-    if (html.isEmpty() && !plain.isEmpty() && plain.startsWith(u'<'))
+    if (html.isEmpty() && !plain.isEmpty() && plain.startsWith(u'<')) {
         html = plain;
+    }
     if (html.isEmpty()) return {};
 
     // Prefer hidden preheader text (display:none preview spans used by newsletters)
@@ -596,8 +591,7 @@ extractHiddenPreheader(const QString &html) {
     pre.replace(spacesRe, " "_L1);
 
     pre = pre.trimmed();
-    if (pre.size() > 200)
-        pre = pre.left(200);
+    if (pre.size() > 200) { pre = pre.left(200); }
 
     return pre;
 }

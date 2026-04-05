@@ -49,8 +49,8 @@ public:
 
     Q_INVOKABLE void initialize();
     void initializeConnectionPool();
-    int expectedPoolConnections() const;
-    int poolConnectionsReady() const;
+    qint32 expectedPoolConnections() const;
+    qint32 poolConnectionsReady() const;
     Q_INVOKABLE void shutdown();
     Q_INVOKABLE void openAttachmentUrl(const QString &url);
     Q_INVOKABLE bool saveAttachmentUrl(const QString &url, const QString &suggestedFileName = QString());
@@ -132,7 +132,7 @@ private:
 
     QHash<QString, bool>      m_accountThrottleState;
     bool                       m_offlineMode = false;
-    int                        m_expectedPoolSize = 0;
+    qint32                     m_expectedPoolSize = 0;
 
     struct AttachmentCacheEntry { QString localPath; qint64 expiresAt = 0; };
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;
@@ -161,7 +161,7 @@ private:
     void backgroundFetchBodies(const QVariantMap &account, const QString &email,
                                const QString &folder, const QString &accessToken);
     void hydrateFolderBodies(const QString &email, const QString &folder,
-                             const QString &key, int limit);
+                             const QString &key, qint32 limit);
     void saveFolderStatusSnapshot(const QString &accountEmail, const QString &folder,
                                   qint64 uidNext, qint64 highestModSeq, qint64 messages);
     void registerWatcher(QFutureWatcherBase *watcher);
@@ -186,13 +186,13 @@ private:
                                    const std::function<void(const QVariantMap &)> &onHeader = {},
                                    qint64 minUidExclusive = -1,
                                    bool reconcileDeletes = false,
-                                   int fetchBudget = -1);
+                                   qint32 fetchBudget = -1);
 
     QVariantList syncFolderInternal(const AccountInfo &account,
                                     const QString &folder,
                                     const SyncFolderOptions &options,
-                                    int &seqNum,
-                                    int &inboxInserted,
+                                    qint32 &seqNum,
+                                    qint32 &inboxInserted,
                                     QVariantList &pendingHeaders,
                                     QVariantList &resultHeaders,
                                     QElapsedTimer &flushTimer,

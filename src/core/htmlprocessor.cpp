@@ -34,28 +34,23 @@ QString HtmlProcessor::extractTrackingRedirectUrl(const QString &href)
         R"([?&](?:redirect|url|to|link|target|dest|goto)=(https?(?:%3A%2F%2F|://)[^&]*))",
         QRegularExpression::CaseInsensitiveOption);
     const auto m = re.match(href);
-    if (!m.hasMatch())
-        return {};
+    if (!m.hasMatch()) { return {}; }
     return QUrl::fromPercentEncoding(m.captured(1).toUtf8());
 }
 
 bool HtmlProcessor::isFirstPartyUrl(const QString &url, const QString &senderDomain)
 {
-    if (url.isEmpty() || senderDomain.isEmpty())
-        return false;
+    if (url.isEmpty() || senderDomain.isEmpty()) { return false; }
     static const QRegularExpression re(
         R"(^https?://([^/?#]+))",
         QRegularExpression::CaseInsensitiveOption);
     const auto m = re.match(url);
-    if (!m.hasMatch())
-        return false;
+    if (!m.hasMatch()) { return false; }
     const QStringList urlParts = m.captured(1).split('.');
-    if (urlParts.size() < 2)
-        return false;
+    if (urlParts.size() < 2) { return false; }
     const QString urlSld = urlParts[urlParts.size() - 2].toLower();
     const QStringList senderParts = senderDomain.toLower().split('.');
-    if (senderParts.size() < 2)
-        return false;
+    if (senderParts.size() < 2) { return false; }
     return urlSld == senderParts[senderParts.size() - 2];
 }
 
@@ -63,8 +58,7 @@ bool HtmlProcessor::isFirstPartyUrl(const QString &url, const QString &senderDom
 
 QString HtmlProcessor::decodeQuotedPrintable(const QString &input) const
 {
-    if (input.isEmpty())
-        return input;
+    if (input.isEmpty()) { return input; }
     QString s = input;
     static const QRegularExpression softBreakRe(R"(=\r?\n)");
     s.remove(softBreakRe);
@@ -85,8 +79,9 @@ QString HtmlProcessor::sanitizeTrackingLinks(const QString &html) const
         QRegularExpression::CaseInsensitiveOption);
     return applyToEachMatch(html, re, [](const QRegularExpressionMatch &m) -> QString {
         const QString dest = extractTrackingRedirectUrl(m.captured(3));
-        if (!dest.isEmpty())
+        if (!dest.isEmpty()) {
             return m.captured(1) + m.captured(2) + dest + m.captured(2);
+        }
         return m.captured(0);
     });
 }
@@ -166,8 +161,7 @@ if(document.readyState==='complete'||document.readyState==='interactive')run();e
 
 QString HtmlProcessor::sanitize(const QString &rawHtml) const
 {
-    if (rawHtml.isEmpty())
-        return "<html><body></body></html>"_L1;
+    if (rawHtml.isEmpty()) { return "<html><body></body></html>"_L1; }
 
     QString html = rawHtml;
     html.replace("\r\n"_L1, "\n"_L1);
@@ -203,8 +197,9 @@ QString HtmlProcessor::sanitize(const QString &rawHtml) const
     const QString trimmed = html.trimmed();
     static const QRegularExpression htmlOpenRe(R"(<html\b)", QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression htmlCloseEndRe(R"(</html>\s*$)", QRegularExpression::CaseInsensitiveOption);
-    if (htmlOpenRe.match(trimmed).hasMatch() && htmlCloseEndRe.match(trimmed).hasMatch())
+    if (htmlOpenRe.match(trimmed).hasMatch() && htmlCloseEndRe.match(trimmed).hasMatch()) {
         return trimmed;
+    }
 
     // If we got MIME-ish payload, cut to content after the first header break.
     static const QRegularExpression mimeHeaderRe(
@@ -212,8 +207,9 @@ QString HtmlProcessor::sanitize(const QString &rawHtml) const
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
     if (mimeHeaderRe.match(html).hasMatch()) {
         const qsizetype splitAt = html.indexOf("\n\n"_L1);
-        if (splitAt >= 0 && splitAt < html.size() - 2)
+        if (splitAt >= 0 && splitAt < html.size() - 2) {
             html = html.mid(splitAt + 2);
+        }
     }
 
     // Drop IMAP protocol lines that occasionally leak into payload.
@@ -237,8 +233,9 @@ QString HtmlProcessor::sanitize(const QString &rawHtml) const
 
     // Decode quoted-printable artifacts when present.
     static const QRegularExpression qpCheckRe(R"(=\r?\n|=[0-9A-Fa-f]{2})");
-    if (qpCheckRe.match(html).hasMatch())
+    if (qpCheckRe.match(html).hasMatch()) {
         html = decodeQuotedPrintable(html);
+    }
 
     // Strip MIME preamble lines that sometimes leak into body content.
     {
@@ -252,8 +249,9 @@ QString HtmlProcessor::sanitize(const QString &rawHtml) const
             const QString t = lines[i].trimmed();
             if (stripping) {
                 if (headerLikeRe.match(t).hasMatch() || boundaryLikeRe.match(t).hasMatch() || t.isEmpty()) {
-                    if (t.isEmpty() && i > 0)
+                    if (t.isEmpty() && i > 0) {
                         stripping = false;
+                    }
                     continue;
                 }
             }
@@ -304,8 +302,9 @@ QString HtmlProcessor::sanitize(const QString &rawHtml) const
         return html;
     }
 
-    if (hasBodyTag)
+    if (hasBodyTag) {
         return "<!doctype html><html><head><meta charset='utf-8'></head>"_L1 + html + "</html>"_L1;
+    }
 
     return "<!doctype html><html><head><meta charset='utf-8'></head><body>"_L1 + html + "</body></html>"_L1;
 }
@@ -352,13 +351,10 @@ QString HtmlProcessor::neutralizeExternalImages(const QString &html) const
     QString result = applyToEachMatch(html, imgRe, [&](const QRegularExpressionMatch &m) -> QString {
         QString tag = m.captured(0);
         const auto srcM = srcRe.match(tag);
-        if (!srcM.hasMatch())
-            return tag;
+        if (!srcM.hasMatch()) { return tag; }
         const QString src = srcM.captured(2);
-        if (localSrcRe.match(src).hasMatch())
-            return tag;
-        if (!httpSrcRe.match(src).hasMatch())
-            return tag;
+        if (localSrcRe.match(src).hasMatch()) { return tag; }
+        if (!httpSrcRe.match(src).hasMatch()) { return tag; }
         const QChar q = srcM.captured(1).at(0);
         return tag.left(srcM.capturedStart()) + "src="_L1 + q + blank + q + tag.mid(srcM.capturedEnd());
     });
