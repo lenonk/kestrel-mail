@@ -160,6 +160,8 @@ private:
                                        const QString &folder, const QString &accessToken);
     void backgroundFetchBodies(const QVariantMap &account, const QString &email,
                                const QString &folder, const QString &accessToken);
+    void hydrateFolderBodies(const QString &email, const QString &folder,
+                             const QString &key, int limit);
     void saveFolderStatusSnapshot(const QString &accountEmail, const QString &folder,
                                   qint64 uidNext, qint64 highestModSeq, qint64 messages);
     void registerWatcher(QFutureWatcherBase *watcher);

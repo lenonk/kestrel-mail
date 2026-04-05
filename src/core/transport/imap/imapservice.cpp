@@ -1172,26 +1172,30 @@ ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &,
 void
 ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
                                    const QString &) {
-    if (!m_store)
+    if (!m_store) {
         return;
+    }
 
     const QString folderNorm = folder.trimmed();
-    if (folderNorm.isEmpty())
+    if (folderNorm.isEmpty()) {
         return;
+    }
 
-    const QString folderLower = folderNorm.toLower();
+    const auto folderLower = folderNorm.toLower();
     const bool isInboxish = (folderLower == "inbox"_L1
                              || folderLower == "[gmail]/inbox"_L1
                              || folderLower == "[google mail]/inbox"_L1
                              || folderLower.endsWith("/inbox"_L1));
     // Product policy: background body hydration only for Inbox-class folders.
-    if (!isInboxish)
+    if (!isInboxish) {
         return;
+    }
 
+    // Throttle gate — rate-limit the skip log to once per minute per account.
     if (m_accountThrottleState.value(Kestrel::normalizeEmail(email), false)) {
         static QHash<QString, qint64> s_lastThrottleSkipLogMs;
-        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-        const QString k = Kestrel::normalizeEmail(email);
+        const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+        const auto k = Kestrel::normalizeEmail(email);
         if (!s_lastThrottleSkipLogMs.contains(k) || (nowMs - s_lastThrottleSkipLogMs.value(k)) > 60000) {
             s_lastThrottleSkipLogMs.insert(k, nowMs);
             qInfo().noquote() << "[bg-hydrate]" << "account=" << email << "paused=true reason=throttled";
@@ -1199,7 +1203,8 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
         return;
     }
 
-    const QString key = Kestrel::normalizeEmail(email) + "|" + folderNorm.toLower();
+    // Dedup — only one background hydration per account+folder at a time.
+    const auto key = Kestrel::normalizeEmail(email) + "|"_L1 + folderLower;
     {
         QMutexLocker lock(&m_bgHydrateMutex);
         if (m_activeBgHydrateFolders.contains(key)) {
@@ -1214,91 +1219,102 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     const int limit = ok && configuredLimit > 0 ? configuredLimit : 8;
 
     runBackgroundTask([this, email, folderNorm, key, limit]() {
-        int noProgressPasses = 0;
-        int processedThisRun = 0;
-
-        bool chunkOk = false;
-        const int configuredChunk = qEnvironmentVariableIntValue("KESTREL_BG_HYDRATE_PER_LOOP", &chunkOk);
-        const int maxPerLoop = chunkOk ? qBound(25, configuredChunk, 50) : 40;
-
-        while (!m_destroying.load() && processedThisRun < maxPerLoop) {
-            QStringList candidates;
-            if (m_store)
-                candidates = m_store->bodyFetchCandidates(email, folderNorm, limit);
-
-            if (candidates.isEmpty())
-                break;
-
-            int hydratedThisPass = 0;
-            for (const QString &uid : candidates) {
-                if (m_destroying.load() || processedThisRun >= maxPerLoop)
-                    break;
-
-                const QString inFlightKey = email.trimmed() + "|"_L1 + folderNorm.toLower() + "|"_L1 + uid.trimmed();
-
-                QMetaObject::invokeMethod(this,
-                                          [this, email, folderNorm, uid]() {
-                                              hydrateMessageBodyInternal(email, folderNorm, uid, false);
-                                          },
-                                          Qt::QueuedConnection);
-
-                // Pace hydration and keep exactly one background fetch active at a time.
-                // Wait for this UID's in-flight marker to clear before moving on.
-                const qint64 waitStartMs = QDateTime::currentMSecsSinceEpoch();
-                while (!m_destroying.load()) {
-                    bool stillInFlight = false;
-                    {
-                        QMutexLocker inFlightLock(&m_inFlightBodyHydrationsMutex);
-                        stillInFlight = m_inFlightBodyHydrations.contains(inFlightKey);
-                    }
-                    if (!stillInFlight)
-                        break;
-                    if ((QDateTime::currentMSecsSinceEpoch() - waitStartMs) > 90'000)
-                        break;
-                    QThread::msleep(120);
-                }
-
-                ++processedThisRun;
-
-                if (m_store) {
-                    const QVariantMap row = m_store->messageByKey(email, folderNorm, uid);
-                    const QString body = row.value("bodyHtml"_L1).toString();
-                    if (!body.trimmed().isEmpty()
-                        && !body.contains("ok success [throttled]"_L1, Qt::CaseInsensitive)
-                        && !body.contains("authenticationfailed"_L1, Qt::CaseInsensitive)) {
-                        ++hydratedThisPass;
-                    }
-                }
-
-                QThread::msleep(500);
-            }
-
-            if (hydratedThisPass <= 0) {
-                ++noProgressPasses;
-                if (noProgressPasses >= 3) {
-                    qInfo().noquote() << "[bg-hydrate]" << "account=" << email
-                                      << "folder=" << folderNorm
-                                      << "stopping=true reason=no-progress";
-                    break;
-                }
-                QThread::msleep(2500);
-            } else {
-                noProgressPasses = 0;
-                QThread::msleep(1200);
-            }
-        }
-
-        if (processedThisRun >= maxPerLoop) {
-            qInfo().noquote() << "[bg-hydrate]" << "account=" << email
-                              << "folder=" << folderNorm
-                              << "processed=" << processedThisRun
-                              << "maxPerLoop=" << maxPerLoop;
-        }
-
-        QMutexLocker lock(&m_bgHydrateMutex);
-        m_activeBgHydrateFolders.remove(key);
-        m_pendingBgHydrateFolders.remove(key);
+        hydrateFolderBodies(email, folderNorm, key, limit);
     });
+}
+
+void
+ImapService::hydrateFolderBodies(const QString &email, const QString &folder,
+                                 const QString &key, const int limit) {
+    int noProgressPasses = 0;
+    int processedThisRun = 0;
+
+    bool chunkOk = false;
+    const int configuredChunk = qEnvironmentVariableIntValue("KESTREL_BG_HYDRATE_PER_LOOP", &chunkOk);
+    const int maxPerLoop = chunkOk ? qBound(25, configuredChunk, 50) : 40;
+
+    while (!m_destroying.load() && processedThisRun < maxPerLoop) {
+        QStringList candidates;
+        if (m_store) {
+            candidates = m_store->bodyFetchCandidates(email, folder, limit);
+        }
+
+        if (candidates.isEmpty()) {
+            break;
+        }
+
+        int hydratedThisPass = 0;
+        for (const auto &uid : candidates) {
+            if (m_destroying.load() || processedThisRun >= maxPerLoop) {
+                break;
+            }
+
+            const auto inFlightKey = email.trimmed() + "|"_L1 + folder.toLower() + "|"_L1 + uid.trimmed();
+
+            QMetaObject::invokeMethod(this,
+                                      [this, email, folder, uid]() {
+                                          hydrateMessageBodyInternal(email, folder, uid, false);
+                                      },
+                                      Qt::QueuedConnection);
+
+            // Pace hydration and keep exactly one background fetch active at a time.
+            // Wait for this UID's in-flight marker to clear before moving on.
+            const auto waitStartMs = QDateTime::currentMSecsSinceEpoch();
+            while (!m_destroying.load()) {
+                bool stillInFlight = false;
+                {
+                    QMutexLocker inFlightLock(&m_inFlightBodyHydrationsMutex);
+                    stillInFlight = m_inFlightBodyHydrations.contains(inFlightKey);
+                }
+                if (!stillInFlight) {
+                    break;
+                }
+                if ((QDateTime::currentMSecsSinceEpoch() - waitStartMs) > 90'000) {
+                    break;
+                }
+                QThread::msleep(120);
+            }
+
+            ++processedThisRun;
+
+            if (m_store) {
+                const auto row = m_store->messageByKey(email, folder, uid);
+                const auto body = row.value("bodyHtml"_L1).toString();
+                if (!body.trimmed().isEmpty()
+                    && !body.contains("ok success [throttled]"_L1, Qt::CaseInsensitive)
+                    && !body.contains("authenticationfailed"_L1, Qt::CaseInsensitive)) {
+                    ++hydratedThisPass;
+                }
+            }
+
+            QThread::msleep(500);
+        }
+
+        if (hydratedThisPass <= 0) {
+            ++noProgressPasses;
+            if (noProgressPasses >= 3) {
+                qInfo().noquote() << "[bg-hydrate]" << "account=" << email
+                                  << "folder=" << folder
+                                  << "stopping=true reason=no-progress";
+                break;
+            }
+            QThread::msleep(2500);
+        } else {
+            noProgressPasses = 0;
+            QThread::msleep(1200);
+        }
+    }
+
+    if (processedThisRun >= maxPerLoop) {
+        qInfo().noquote() << "[bg-hydrate]" << "account=" << email
+                          << "folder=" << folder
+                          << "processed=" << processedThisRun
+                          << "maxPerLoop=" << maxPerLoop;
+    }
+
+    QMutexLocker lock(&m_bgHydrateMutex);
+    m_activeBgHydrateFolders.remove(key);
+    m_pendingBgHydrateFolders.remove(key);
 }
 
 

@@ -1070,6 +1070,183 @@ cleanupTrashEdges(const QSqlDatabase &database, const QString &accountEmail, con
     }
 }
 
+// ─── upsertHeader helpers ──────────────────────────────────────────
+
+/// Result from tryReuseWeakIdentity: whether a strong row was found and reused,
+/// and whether the folder edge was newly inserted (not just updated).
+struct WeakReuseResult {
+    bool reused = false;
+    bool newEdge = false;
+};
+
+/// When we have no sender/subject/messageId/gmMsgId, try to attach a body
+/// update and folder edge to an existing strong row (matched by account+folder+uid).
+/// Returns {true} if reuse succeeded and the caller should return early.
+WeakReuseResult
+tryReuseWeakIdentity(const QSqlDatabase &database,
+                     const QString &accountEmail,
+                     const QString &folder,
+                     const QString &uid,
+                     const QString &bodyHtml,
+                     const int unread) {
+    QSqlQuery qExisting(database);
+    qExisting.prepare(R"(
+        SELECT m.id, m.sender
+        FROM message_folder_map mfm
+        JOIN messages m ON m.id = mfm.message_id AND m.account_email = mfm.account_email
+        WHERE mfm.account_email=:account_email
+          AND lower(mfm.folder)=lower(:folder)
+          AND mfm.uid=:uid
+          AND (
+            length(trim(COALESCE(m.sender, ''))) > 0
+            OR length(trim(COALESCE(m.subject, ''))) > 0
+            OR length(trim(COALESCE(m.message_id_header, ''))) > 0
+            OR length(trim(COALESCE(m.gm_msg_id, ''))) > 0
+          )
+        ORDER BY mfm.rowid DESC
+        LIMIT 1
+    )"_L1);
+    qExisting.bindValue(":account_email"_L1, accountEmail);
+    qExisting.bindValue(":folder"_L1, folder);
+    qExisting.bindValue(":uid"_L1, uid);
+    if (!qExisting.exec() || !qExisting.next()) {
+        return {false};
+    }
+
+    const auto existingMessageId = qExisting.value(0).toInt();
+    const auto existingSender = qExisting.value(1).toString();
+    qInfo().noquote() << "[upsert-weak-reuse]"
+                      << "account=" << accountEmail
+                      << "folder=" << folder
+                      << "uid=" << uid
+                      << "messageId=" << existingMessageId
+                      << "hasBody=" << (!bodyHtml.trimmed().isEmpty());
+
+    if (!bodyHtml.trimmed().isEmpty()) {
+        const auto hasTP = computeHasTrackingPixel(bodyHtml, existingSender) ? 1 : 0;
+        QSqlQuery qBody(database);
+        qBody.prepare(R"(
+            UPDATE messages
+            SET body_html = CASE
+                              WHEN :body_html IS NOT NULL
+                                   AND length(trim(:body_html)) > length(trim(COALESCE(body_html, '')))
+                              THEN :body_html
+                              ELSE body_html
+                            END,
+                has_tracking_pixel = :has_tp,
+                unread = :unread
+            WHERE id=:message_id AND account_email=:account_email
+        )"_L1);
+        qBody.bindValue(":body_html"_L1, bodyHtml);
+        qBody.bindValue(":has_tp"_L1, hasTP);
+        qBody.bindValue(":unread"_L1, unread);
+        qBody.bindValue(":message_id"_L1, existingMessageId);
+        qBody.bindValue(":account_email"_L1, accountEmail);
+        qBody.exec();
+    }
+
+    const auto newEdge = upsertFolderEdge(database, accountEmail, existingMessageId, folder, uid, unread);
+    return {true, newEdge};
+}
+
+/// Propagates a Gmail thread_id to all sibling messages that share the same
+/// gm_thr_id but have a stale or missing thread_id.
+void
+backfillSiblingThreadIds(const QSqlDatabase &database,
+                         const QString &accountEmail,
+                         const QString &gmThrId) {
+    if (gmThrId.isEmpty()) { return; }
+
+    const auto newTid = "gm:"_L1 + gmThrId;
+    QSqlQuery sibQ(database);
+    sibQ.prepare(
+        "UPDATE messages SET thread_id=:tid WHERE account_email=:acct "
+        "AND gm_thr_id=:gm_thr_id AND (thread_id IS NULL OR thread_id != :tid)"_L1);
+
+    sibQ.bindValue(":tid"_L1,        newTid);
+    sibQ.bindValue(":acct"_L1,       accountEmail);
+    sibQ.bindValue(":gm_thr_id"_L1,  gmThrId);
+    sibQ.exec();
+}
+
+/// Persists all observed Gmail labels and the explicit Primary label for a message.
+void
+persistGmailLabels(const QSqlDatabase &database,
+                   const QString &accountEmail,
+                   const qint32 messageId,
+                   const QString &rawGmailLabels,
+                   const bool primaryLabelObserved,
+                   FolderStatsStore &folderStats) {
+    if (!rawGmailLabels.trimmed().isEmpty()) {
+        static const QRegularExpression tokenRe("\"([^\"]+)\"|([^\\s()]+)"_L1);
+        auto it = tokenRe.globalMatch(rawGmailLabels);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            auto label = m.captured(1).trimmed();
+            if (label.isEmpty()) { label = m.captured(2).trimmed(); }
+            if (label.isEmpty()) { continue; }
+
+            persistLabelAndTag(database, accountEmail, messageId, label, "imap-label"_L1);
+        }
+    }
+
+    if (primaryLabelObserved) {
+        const auto primaryLabel = "[Gmail]/Categories/Primary"_L1;
+        if (persistLabelAndTag(database, accountEmail, messageId, QString(primaryLabel), "x-gm-labels-primary"_L1)) {
+            folderStats.incrementNewMessageCount(QString(primaryLabel));
+        }
+    }
+}
+
+/// Persists avatar URLs and display names for sender and recipient via ContactStore.
+void
+persistContactData(ContactStore &contacts,
+                   const QString &accountEmail,
+                   const QString &senderEmail,
+                   const QString &senderDisplayName,
+                   const QString &avatarUrl,
+                   const QString &avatarSource,
+                   const QString &recipientEmail,
+                   const QString &recipientDisplayName,
+                   const QString &recipientAvatarUrl,
+                   const bool recipientAvatarLookupMiss) {
+    contacts.persistSenderAvatar(senderEmail, avatarUrl, avatarSource);
+    contacts.persistRecipientAvatar(recipientEmail, recipientAvatarUrl, recipientAvatarLookupMiss);
+
+    contacts.persistDisplayName(senderEmail, senderDisplayName, "sender-header"_L1);
+    if (!recipientEmail.isEmpty()
+            && recipientEmail.compare(accountEmail.trimmed(), Qt::CaseInsensitive) != 0) {
+        contacts.persistDisplayName(recipientEmail, recipientDisplayName, "recipient-header"_L1);
+    }
+}
+
+/// Dispatches a desktop notification for a newly inserted unread inbox message.
+void
+dispatchNewMailNotification(const MessageStoreCallbacks &callbacks,
+                            const QString &accountEmail,
+                            const QString &folder,
+                            const QString &uid,
+                            const int unread,
+                            const QString &senderDisplayName,
+                            const QString &senderEmail,
+                            const QString &senderRaw,
+                            const QString &subject,
+                            const QString &snippet) {
+    if (!callbacks.desktopNotifyEnabled()) { return; }
+    if (!unread) { return; }
+    if (folder.compare("INBOX"_L1, Qt::CaseInsensitive) != 0) { return; }
+
+    QVariantMap info;
+    info["senderDisplay"_L1] = senderDisplayName.isEmpty() ? senderEmail : senderDisplayName;
+    info["senderRaw"_L1]     = senderRaw;
+    info["subject"_L1]       = subject;
+    info["snippet"_L1]       = snippet;
+    info["accountEmail"_L1]  = accountEmail;
+    info["folder"_L1]        = folder;
+    info["uid"_L1]           = uid;
+    callbacks.onNewMail(info);
+}
+
 } // anonymous namespace
 
 // ─── Construction ───────────────────────────────────────────────────
@@ -1108,101 +1285,50 @@ MessageStore::upsertHeader(const QVariantMap &header) const {
     auto database = m_db();
     if (!database.isValid() || !database.isOpen()) { return; }
 
-    const QString accountEmail = header.value("accountEmail"_L1).toString();
-    const QString folderValue = header.value("folder"_L1, "INBOX"_L1).toString();
-    const QString uidValue = header.value("uid"_L1).toString();
-    const QString subjectValue = header.value("subject"_L1).toString();
-    const QString rawSnippetValue = header.value("snippet"_L1).toString();
-    const QString senderValue = header.value("sender"_L1).toString();
-    const QString recipientValue = header.value("recipient"_L1).toString();
-    const QString recipientAvatarUrlValue = header.value("recipientAvatarUrl"_L1).toString().trimmed();
-    const bool recipientAvatarLookupMiss = header.value("recipientAvatarLookupMiss"_L1, false).toBool();
-    const QString senderEmailValue = ContactStore::extractFirstEmail(senderValue);
-    const QString recipientEmailValue = ContactStore::extractFirstEmail(recipientValue);
-    const QString senderDisplayNameValue = ContactStore::extractExplicitDisplayName(senderValue, senderEmailValue);
-    const QString recipientDisplayNameValue = ContactStore::extractExplicitDisplayName(recipientValue, recipientEmailValue);
-    const QString receivedAtValue = header.value("receivedAt"_L1, QDateTime::currentDateTimeUtc().toString(Qt::ISODate)).toString();
-    const QString snippetValue = sanitizeSnippet(rawSnippetValue, subjectValue);
-    const QString bodyHtmlValue = header.value("bodyHtml"_L1).toString().trimmed();
-    const QString avatarUrlValue = header.value("avatarUrl"_L1).toString().trimmed();
-    const QString avatarSourceValue = header.value("avatarSource"_L1).toString().trimmed().toLower();
-    const int unreadValue = header.value("unread"_L1, true).toBool() ? 1 : 0;
-    const QString messageIdHeaderValue = header.value("messageIdHeader"_L1).toString().trimmed();
-    const QString gmMsgIdValue = header.value("gmMsgId"_L1).toString().trimmed();
-    const QString gmThrIdValue = header.value("gmThrId"_L1).toString().trimmed();
-    const QString listUnsubscribeValue  = header.value("listUnsubscribe"_L1).toString().trimmed();
-    const QString replyToValue          = header.value("replyTo"_L1).toString().trimmed();
-    const QString returnPathValue       = header.value("returnPath"_L1).toString().trimmed();
-    const QString authResultsValue      = header.value("authResults"_L1).toString().trimmed();
-    const QString xMailerValue          = header.value("xMailer"_L1).toString().trimmed();
-    const QString inReplyToValue        = header.value("inReplyTo"_L1).toString().trimmed();
-    const QString referencesValue       = header.value("references"_L1).toString().trimmed();
-    const QString espVendorValue        = header.value("espVendor"_L1).toString().trimmed();
-    const QString ccValue               = header.value("cc"_L1).toString().trimmed();
-    const bool primaryLabelObserved = header.value("primaryLabelObserved"_L1, false).toBool();
-    const QString rawGmailLabels = header.value("rawGmailLabels"_L1).toString();
+    const auto accountEmail           = header.value("accountEmail"_L1).toString();
+    const auto folderValue            = header.value("folder"_L1, "INBOX"_L1).toString();
+    const auto uidValue               = header.value("uid"_L1).toString();
+    const auto subjectValue           = header.value("subject"_L1).toString();
+    const auto rawSnippetValue        = header.value("snippet"_L1).toString();
+    const auto senderValue            = header.value("sender"_L1).toString();
+    const auto recipientValue         = header.value("recipient"_L1).toString();
+    const auto recipientAvatarUrlValue = header.value("recipientAvatarUrl"_L1).toString().trimmed();
+    const auto recipientAvatarLookupMiss = header.value("recipientAvatarLookupMiss"_L1, false).toBool();
+    const auto senderEmailValue       = ContactStore::extractFirstEmail(senderValue);
+    const auto recipientEmailValue    = ContactStore::extractFirstEmail(recipientValue);
+    const auto senderDisplayNameValue = ContactStore::extractExplicitDisplayName(senderValue, senderEmailValue);
+    const auto recipientDisplayNameValue = ContactStore::extractExplicitDisplayName(recipientValue, recipientEmailValue);
+    const auto receivedAtValue        = header.value("receivedAt"_L1, QDateTime::currentDateTimeUtc().toString(Qt::ISODate)).toString();
+    const auto snippetValue           = sanitizeSnippet(rawSnippetValue, subjectValue);
+    const auto bodyHtmlValue          = header.value("bodyHtml"_L1).toString().trimmed();
+    const auto avatarUrlValue         = header.value("avatarUrl"_L1).toString().trimmed();
+    const auto avatarSourceValue      = header.value("avatarSource"_L1).toString().trimmed().toLower();
+    const auto unreadValue            = header.value("unread"_L1, true).toBool() ? 1 : 0;
+    const auto messageIdHeaderValue   = header.value("messageIdHeader"_L1).toString().trimmed();
+    const auto gmMsgIdValue           = header.value("gmMsgId"_L1).toString().trimmed();
+    const auto gmThrIdValue           = header.value("gmThrId"_L1).toString().trimmed();
+    const auto listUnsubscribeValue   = header.value("listUnsubscribe"_L1).toString().trimmed();
+    const auto replyToValue           = header.value("replyTo"_L1).toString().trimmed();
+    const auto returnPathValue        = header.value("returnPath"_L1).toString().trimmed();
+    const auto authResultsValue       = header.value("authResults"_L1).toString().trimmed();
+    const auto xMailerValue           = header.value("xMailer"_L1).toString().trimmed();
+    const auto inReplyToValue         = header.value("inReplyTo"_L1).toString().trimmed();
+    const auto referencesValue        = header.value("references"_L1).toString().trimmed();
+    const auto espVendorValue         = header.value("espVendor"_L1).toString().trimmed();
+    const auto ccValue                = header.value("cc"_L1).toString().trimmed();
+    const auto primaryLabelObserved   = header.value("primaryLabelObserved"_L1, false).toBool();
+    const auto rawGmailLabels         = header.value("rawGmailLabels"_L1).toString();
 
-    // Guardrail: avoid creating synthetic/empty canonical rows when we only have
-    // a folder+uid edge.
+    // ── Phase 1: weak identity detection / orphan reuse ────────────
     const bool weakIdentity = senderValue.trimmed().isEmpty()
             && subjectValue.trimmed().isEmpty()
             && messageIdHeaderValue.isEmpty()
             && gmMsgIdValue.isEmpty();
     if (weakIdentity && !uidValue.trimmed().isEmpty()) {
-        QSqlQuery qExisting(database);
-        qExisting.prepare(R"(
-            SELECT m.id, m.sender
-            FROM message_folder_map mfm
-            JOIN messages m ON m.id = mfm.message_id AND m.account_email = mfm.account_email
-            WHERE mfm.account_email=:account_email
-              AND lower(mfm.folder)=lower(:folder)
-              AND mfm.uid=:uid
-              AND (
-                length(trim(COALESCE(m.sender, ''))) > 0
-                OR length(trim(COALESCE(m.subject, ''))) > 0
-                OR length(trim(COALESCE(m.message_id_header, ''))) > 0
-                OR length(trim(COALESCE(m.gm_msg_id, ''))) > 0
-              )
-            ORDER BY mfm.rowid DESC
-            LIMIT 1
-        )"_L1);
-        qExisting.bindValue(":account_email"_L1, accountEmail);
-        qExisting.bindValue(":folder"_L1, folderValue);
-        qExisting.bindValue(":uid"_L1, uidValue);
-        if (qExisting.exec() && qExisting.next()) {
-            const int existingMessageId = qExisting.value(0).toInt();
-            const QString existingSender = qExisting.value(1).toString();
-            qInfo().noquote() << "[upsert-weak-reuse]"
-                              << "account=" << accountEmail
-                              << "folder=" << folderValue
-                              << "uid=" << uidValue
-                              << "messageId=" << existingMessageId
-                              << "hasBody=" << (!bodyHtmlValue.trimmed().isEmpty());
-
-            if (!bodyHtmlValue.trimmed().isEmpty()) {
-                const int hasTP = computeHasTrackingPixel(bodyHtmlValue, existingSender) ? 1 : 0;
-                QSqlQuery qBody(database);
-                qBody.prepare(R"(
-                    UPDATE messages
-                    SET body_html = CASE
-                                      WHEN :body_html IS NOT NULL
-                                           AND length(trim(:body_html)) > length(trim(COALESCE(body_html, '')))
-                                      THEN :body_html
-                                      ELSE body_html
-                                    END,
-                        has_tracking_pixel = :has_tp,
-                        unread = :unread
-                    WHERE id=:message_id AND account_email=:account_email
-                )"_L1);
-                qBody.bindValue(":body_html"_L1, bodyHtmlValue);
-                qBody.bindValue(":has_tp"_L1, hasTP);
-                qBody.bindValue(":unread"_L1, unreadValue);
-                qBody.bindValue(":message_id"_L1, existingMessageId);
-                qBody.bindValue(":account_email"_L1, accountEmail);
-                qBody.exec();
-            }
-
-            if (upsertFolderEdge(database, accountEmail, existingMessageId, folderValue, uidValue, unreadValue)) {
+        const auto result = tryReuseWeakIdentity(database, accountEmail, folderValue,
+                                                 uidValue, bodyHtmlValue, unreadValue);
+        if (result.reused) {
+            if (result.newEdge) {
                 m_folderStats.incrementNewMessageCount(folderValue);
             }
             m_callbacks.scheduleDataChanged();
@@ -1218,6 +1344,7 @@ MessageStore::upsertHeader(const QVariantMap &header) const {
                              << "reason=no-existing-strong-row";
     }
 
+    // ── Phase 2: main INSERT...ON CONFLICT ─────────────────────────
     const auto lkey = logicalMessageKey(accountEmail, senderValue, subjectValue, receivedAtValue);
 
     QSqlQuery qCanon(database);
@@ -1335,20 +1462,10 @@ MessageStore::upsertHeader(const QVariantMap &header) const {
     }
     qCanon.exec();
 
-    // Backfill sibling thread IDs when Gmail thread ID is known.
-    if (!gmThrIdValue.isEmpty()) {
-        const QString newTid = "gm:"_L1 + gmThrIdValue;
-        QSqlQuery sibQ(database);
-        sibQ.prepare(
-            "UPDATE messages SET thread_id=:tid WHERE account_email=:acct "
-            "AND gm_thr_id=:gm_thr_id AND (thread_id IS NULL OR thread_id != :tid)"_L1);
+    // ── Phase 3: thread ID backfill ────────────────────────────────
+    backfillSiblingThreadIds(database, accountEmail, gmThrIdValue);
 
-        sibQ.bindValue(":tid"_L1,      newTid);
-        sibQ.bindValue(":acct"_L1,     accountEmail);
-        sibQ.bindValue(":gm_thr_id"_L1, gmThrIdValue);
-        sibQ.exec();
-    }
-
+    // Look up the canonical message ID for subsequent phases.
     QSqlQuery idQ(database);
     idQ.prepare("SELECT id FROM messages WHERE account_email=:account_email AND logical_key=:logical_key LIMIT 1"_L1);
 
@@ -1357,32 +1474,24 @@ MessageStore::upsertHeader(const QVariantMap &header) const {
     if (!idQ.exec() || !idQ.next()) {
         return;
     }
-    const int messageId = idQ.value(0).toInt();
 
+    const auto messageId = idQ.value(0).toInt();
+
+    // ── Phase 4: folder edge management ────────────────────────────
     const bool isCategoryFolder = folderValue.contains("/Categories/"_L1, Qt::CaseInsensitive);
     if (!isCategoryFolder) {
         if (upsertFolderEdge(database, accountEmail, messageId, folderValue, uidValue, unreadValue)) {
             m_folderStats.incrementNewMessageCount(folderValue);
             if (!rawGmailLabels.isEmpty()) {
-                const QString catFolder = inferCategoryFromLabels(rawGmailLabels);
+                const auto catFolder = inferCategoryFromLabels(rawGmailLabels);
                 if (!catFolder.isEmpty()) {
                     m_folderStats.incrementNewMessageCount(catFolder);
                 }
             }
-            // Desktop notification for new unread inbox messages.
-            if (m_callbacks.desktopNotifyEnabled()
-                && unreadValue
-                && folderValue.compare("INBOX"_L1, Qt::CaseInsensitive) == 0) {
-                QVariantMap info;
-                info["senderDisplay"_L1] = senderDisplayNameValue.isEmpty() ? senderEmailValue : senderDisplayNameValue;
-                info["senderRaw"_L1]     = senderValue;
-                info["subject"_L1]       = subjectValue;
-                info["snippet"_L1]       = snippetValue;
-                info["accountEmail"_L1]  = accountEmail;
-                info["folder"_L1]        = folderValue;
-                info["uid"_L1]           = uidValue;
-                m_callbacks.onNewMail(info);
-            }
+            // Phase 7: notification dispatch.
+            dispatchNewMailNotification(m_callbacks, accountEmail, folderValue, uidValue,
+                                       unreadValue, senderDisplayNameValue, senderEmailValue,
+                                       senderValue, subjectValue, snippetValue);
         }
     } else {
         if (persistLabelAndTag(database, accountEmail, messageId, folderValue, "category-folder-sync"_L1)) {
@@ -1390,45 +1499,24 @@ MessageStore::upsertHeader(const QVariantMap &header) const {
         }
     }
 
+    // ── Phase 6: participant + contact persistence ─────────────────
     persistParticipants(database, accountEmail, messageId,
                         senderDisplayNameValue, senderEmailValue,
                         recipientDisplayNameValue, recipientEmailValue);
 
-    // Persist avatar and display-name data via ContactStore.
-    m_contacts.persistSenderAvatar(senderEmailValue, avatarUrlValue, avatarSourceValue);
-    m_contacts.persistRecipientAvatar(recipientEmailValue, recipientAvatarUrlValue, recipientAvatarLookupMiss);
+    persistContactData(m_contacts, accountEmail,
+                       senderEmailValue, senderDisplayNameValue,
+                       avatarUrlValue, avatarSourceValue,
+                       recipientEmailValue, recipientDisplayNameValue,
+                       recipientAvatarUrlValue, recipientAvatarLookupMiss);
 
-    m_contacts.persistDisplayName(senderEmailValue, senderDisplayNameValue, "sender-header"_L1);
-    if (!recipientEmailValue.isEmpty()
-            && recipientEmailValue.compare(accountEmail.trimmed(), Qt::CaseInsensitive) != 0) {
-        m_contacts.persistDisplayName(recipientEmailValue, recipientDisplayNameValue, "recipient-header"_L1);
-    }
+    // ── Phase 5: label / tag persistence ───────────────────────────
+    persistGmailLabels(database, accountEmail, messageId,
+                       rawGmailLabels, primaryLabelObserved, m_folderStats);
 
-    // Persist observed Gmail labels with provenance.
-    if (!rawGmailLabels.trimmed().isEmpty()) {
-        static const QRegularExpression tokenRe("\"([^\"]+)\"|([^\\s()]+)"_L1);
-        auto it = tokenRe.globalMatch(rawGmailLabels);
-        while (it.hasNext()) {
-            const auto m = it.next();
-            auto label = m.captured(1).trimmed();
-            if (label.isEmpty()) { label = m.captured(2).trimmed(); }
-            if (label.isEmpty()) { continue; }
-
-            persistLabelAndTag(database, accountEmail, messageId, label, "imap-label"_L1);
-        }
-    }
-
-    // Protect direct Primary evidence.
-    if (primaryLabelObserved) {
-        const auto primaryLabel = "[Gmail]/Categories/Primary"_L1;
-        if (persistLabelAndTag(database, accountEmail, messageId, QString(primaryLabel), "x-gm-labels-primary"_L1)) {
-            m_folderStats.incrementNewMessageCount(QString(primaryLabel));
-        }
-    }
-
-    // Attachment metadata from BODYSTRUCTURE.
+    // ── Phase 8: attachment upsert ─────────────────────────────────
     {
-        const QVariantList attachments = header.value("attachments"_L1).toList();
+        const auto attachments = header.value("attachments"_L1).toList();
         if (!attachments.isEmpty()) {
             upsertAttachments(messageId, accountEmail, attachments);
         }

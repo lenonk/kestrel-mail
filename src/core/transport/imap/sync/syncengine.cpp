@@ -222,6 +222,169 @@ buildCategoryHints(SyncContext &ctx, IngestState &state, qint64 minUid, qint64 m
     }
 }
 
+// ── Message ingestion helpers ─────────────────────────────────────────────────
+
+// Resolve the best sender email using the From → Sender → Reply-To fallback chain.
+// Avoids Return-Path because it is often a VERP/bounce address from an ESP, not the brand.
+QString
+resolveSenderEmail(const QString &fromHeader, const QString &senderHeader, const QString &replyToHeader) {
+    auto e = Kestrel::normalizeEmail(extractEmailAddress(fromHeader));
+    if (!e.isEmpty()) {
+        return e;
+    }
+    e = Kestrel::normalizeEmail(extractEmailAddress(senderHeader));
+    if (!e.isEmpty()) {
+        return e;
+    }
+    return Kestrel::normalizeEmail(extractEmailAddress(replyToHeader));
+}
+
+// Detect the sending ESP (e.g. Mailgun, Sendgrid) from headers or Received-chain relay hosts.
+// Returns an empty string when no known ESP is identified.
+//
+// Two signals, tried in order:
+//  1. Definitive X-* headers injected by the ESP -- most reliable, but Gmail strips some
+//     (X-Mailgun-Sid in particular) before storing the message in IMAP.
+//  2. Curated Received-chain whitelist -- matches only known ESP relay domains
+//     (*.mailgun.org, *.sendgrid.net, ...).  This catches the stripped-header case without
+//     the false-positives of arbitrary SLD extraction (which identified Citi, WellsFargo,
+//     Zillow, Capital One's own infrastructure as "ESPs").
+QString
+detectEspVendor(const QString &headerSource) {
+    static const struct { const char *marker; const char *vendor; } kEspMarkers[] = {
+        { "X-Mailgun-Sid:",        "Mailgun"    },  // always present, even on custom domains
+        { "X-SG-EID:",             "Sendgrid"   },  // SendGrid v3
+        { "X-SMTPAPI:",            "Sendgrid"   },  // SendGrid legacy SMTP
+        { "X-MC-User:",            "Mailchimp"  },  // Mandrill/Mailchimp Transactional
+        { "X-Klaviyo-Message-Id:", "Klaviyo"    },
+        { "X-PM-Message-Id:",      "Postmark"   },
+        { "X-SES-Outgoing:",       "Amazon SES" },
+    };
+
+    if (auto it = std::ranges::find_if(kEspMarkers, [&](const auto &sig) {
+            return headerSource.contains(QLatin1StringView(sig.marker), Qt::CaseInsensitive);
+        }); it != std::end(kEspMarkers)) {
+        return QLatin1StringView(it->vendor);
+    }
+
+    // Received-chain fallback: curated whitelist of known ESP relay domain suffixes.
+    // We iterate in reverse so the oldest (sending) hop is tested first -- that's where
+    // the ESP relay appears.
+    static const struct { const char *suffix; const char *vendor; } kEspRelays[] = {
+        { ".mailgun.org",       "Mailgun"    },
+        { ".mailgun.net",       "Mailgun"    },
+        { ".sendgrid.net",      "Sendgrid"   },
+        { ".amazonses.com",     "Amazon SES" },
+        { ".psmtp.com",         "Postmark"   },
+        { ".postmarkapp.com",   "Postmark"   },
+        { ".sparkpostmail.com", "SparkPost"  },
+        { ".klaviyoemail.com",  "Klaviyo"    },
+        { ".exacttarget.com",   "Salesforce" },
+        { ".responsys.net",     "Oracle"     },
+        { ".emarsys.net",       "Emarsys"    },
+    };
+    static const QRegularExpression receivedFromRe(
+        "\\bReceived:\\s+from\\s+(\\S+)"_L1,
+        QRegularExpression::CaseInsensitiveOption);
+
+    QStringList relayHosts;
+    auto it = receivedFromRe.globalMatch(headerSource);
+    while (it.hasNext()) {
+        relayHosts << it.next().captured(1).toLower();
+    }
+
+    for (int i = relayHosts.size() - 1; i >= 0; --i) {
+        const QString &host = relayHosts[i];
+        for (const auto &relay : kEspRelays) {
+            const auto suffix = QLatin1StringView(relay.suffix); // e.g. ".mailgun.org"
+            const auto bare   = suffix.sliced(1);                // e.g.  "mailgun.org"
+            if (host == bare || host.endsWith(suffix)) {
+                return QLatin1StringView(relay.vendor);
+            }
+        }
+    }
+
+    return {};
+}
+
+// Resolve the sender's avatar through the priority chain:
+// Google People -> Gravatar -> BIMI header -> BIMI DNS -> favicon.
+// Inserts "avatarUrl" and "avatarSource" into |h| when resolved.
+void
+resolveAvatarForMessage(QVariantMap &h, const QString &senderEmail, const QString &listIdDomain,
+                        QString bimiLogoUrl, const QString &accessToken) {
+    QString avatarUrl;
+    QString avatarSource;
+    if (!senderEmail.isEmpty()) {
+        avatarUrl = resolveGooglePeopleAvatarUrl(senderEmail, accessToken);
+        if (!avatarUrl.isEmpty()) {
+            avatarSource = "google-people"_L1;
+        }
+    }
+
+    if (avatarUrl.isEmpty() && !senderEmail.isEmpty()) {
+        avatarUrl = resolveGravatarUrl(senderEmail);
+        if (!avatarUrl.isEmpty()) {
+            avatarSource = "gravatar"_L1;
+        }
+    }
+
+    if (avatarUrl.isEmpty()) {
+        if (!bimiLogoUrl.isEmpty()) {
+            avatarUrl = bimiLogoUrl;
+            avatarSource = "bimi-header"_L1;
+        }
+        else {
+            const auto bimiDomain = !listIdDomain.isEmpty() ? listIdDomain : senderDomainFromHeader(senderEmail);
+            if (!bimiDomain.isEmpty()) {
+                bimiLogoUrl = resolveBimiLogoUrlViaDoh(bimiDomain);
+
+                if (!bimiLogoUrl.isEmpty()) {
+                    avatarUrl = bimiLogoUrl;
+                    avatarSource = "bimi-dns"_L1;
+                }
+                else {
+                    if (const auto favIconUrl = resolveFaviconLogoUrl(bimiDomain); !favIconUrl.isEmpty()) {
+                        avatarUrl = favIconUrl;
+                        avatarSource = "favicon"_L1;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!avatarUrl.isEmpty()) {
+        // Pass the access token for Google People photo URLs -- contact photos at
+        // lh3.googleusercontent.com/contacts/ require auth; without it the fetch
+        // returns HTML and the raw URL would be stored, then blocked by the UI guardrail.
+        const QString token = (avatarSource == "google-people"_L1) ? accessToken : QString{};
+        const QString avatarBlob = fetchAvatarBlob(avatarUrl, token);
+        // Google auto-generated monogram/default avatars are tiny (often < 2 KB).
+        // Reject them so the UI falls back to initials instead of a generic placeholder.
+        const bool tinyGoogleAvatar = avatarSource == "google-people"_L1
+                                      && avatarBlob.startsWith("data:"_L1)
+                                      && avatarBlob.size() < 3000;
+        // Write data URI to disk on the worker thread so upsertHeader never does file I/O
+        // on the main thread. Pass the file:// URL to the store instead of the blob.
+        const bool resolvedToDataUri = avatarBlob.startsWith("data:"_L1);
+        if (tinyGoogleAvatar) {
+            qInfo().noquote() << "[avatar] discarding tiny google-people avatar for" << senderEmail;
+        } else if (resolvedToDataUri) {
+            const QString fileUrl = writeAvatarFile(senderEmail, avatarBlob);
+            if (!fileUrl.isEmpty()) {
+                h.insert("avatarUrl"_L1,    fileUrl);
+                h.insert("avatarSource"_L1, avatarSource);
+            }
+        } else if (avatarSource != "google-people"_L1) {
+            // Defensive: non-Google sources always return data URIs; this branch shouldn't fire.
+            h.insert("avatarUrl"_L1,    avatarBlob);
+            h.insert("avatarSource"_L1, avatarSource);
+        }
+    } else if (!listIdDomain.isEmpty()) {
+        h.insert("avatarSource"_L1, "listid-domain"_L1);
+    }
+}
+
 // ── Message ingestion ─────────────────────────────────────────────────────────
 
 void
@@ -249,20 +412,10 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     const auto hasReplyTo    = !replyToHeader.isEmpty();
     const auto hasReturnPath = !returnPathHeader.isEmpty();
 
-    // Try From first, then Sender:, then Reply-To: as fallbacks.
-    // Avoid Return-Path: — it is often a VERP/bounce address from an ESP, not the brand.
-    const auto senderEmail = [&]() -> QString {
-        auto e = Kestrel::normalizeEmail(extractEmailAddress(fromHeader));
-        if (!e.isEmpty())
-            return e;
-        e = Kestrel::normalizeEmail(extractEmailAddress(senderHeader));
-        if (!e.isEmpty())
-            return e;
-        return Kestrel::normalizeEmail(extractEmailAddress(replyToHeader));
-    }();
+    const auto senderEmail = resolveSenderEmail(fromHeader, senderHeader, replyToHeader);
 
     const auto listIdDomain = extractListIdDomain(headerSource);
-    auto bimiLogoUrl        = extractBimiLogoUrl(headerSource);
+    const auto bimiLogoUrl  = extractBimiLogoUrl(headerSource);
 
     const auto senderFallback = !senderHeader.isEmpty()  ? senderHeader :
                                                            !replyToHeader.isEmpty() ? replyToHeader : returnPathHeader;
@@ -308,74 +461,11 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
         if (!v.isEmpty()) h.insert("references"_L1, v);
     }
 
-    // Derive sending ESP so the UI can show "Mailgun tracking was blocked" instead of the
-    // pixel-host domain.  Two signals, tried in order:
-    //
-    //  1. Definitive X-* headers injected by the ESP — most reliable, but Gmail strips some
-    //     (X-Mailgun-Sid in particular) before storing the message in IMAP.
-    //  2. Curated Received-chain whitelist — matches only known ESP relay domains
-    //     (*.mailgun.org, *.sendgrid.net, …).  This catches the stripped-header case without
-    //     the false-positives of arbitrary SLD extraction (which identified Citi, WellsFargo,
-    //     Zillow, Capital One's own infrastructure as "ESPs").
     {
-        static const struct { const char *marker; const char *vendor; } kEspMarkers[] = {
-            { "X-Mailgun-Sid:",        "Mailgun"    },  // always present, even on custom domains
-            { "X-SG-EID:",             "Sendgrid"   },  // SendGrid v3
-            { "X-SMTPAPI:",            "Sendgrid"   },  // SendGrid legacy SMTP
-            { "X-MC-User:",            "Mailchimp"  },  // Mandrill/Mailchimp Transactional
-            { "X-Klaviyo-Message-Id:", "Klaviyo"    },
-            { "X-PM-Message-Id:",      "Postmark"   },
-            { "X-SES-Outgoing:",       "Amazon SES" },
-        };
-
-        QString espVendor;
-        if (auto it = std::ranges::find_if(kEspMarkers, [&](const auto &sig) {
-                return headerSource.contains(QLatin1StringView(sig.marker), Qt::CaseInsensitive);
-            }); it != std::end(kEspMarkers)) {
-            espVendor = QLatin1StringView(it->vendor);
-        }
-
-        // Received-chain fallback: curated whitelist of known ESP relay domain suffixes.
-        // Only matches if no definitive header was found.  We iterate in reverse so the
-        // oldest (sending) hop is tested first — that's where the ESP relay appears.
-        if (espVendor.isEmpty()) {
-            static const struct { const char *suffix; const char *vendor; } kEspRelays[] = {
-                { ".mailgun.org",       "Mailgun"    },
-                { ".mailgun.net",       "Mailgun"    },
-                { ".sendgrid.net",      "Sendgrid"   },
-                { ".amazonses.com",     "Amazon SES" },
-                { ".psmtp.com",         "Postmark"   },
-                { ".postmarkapp.com",   "Postmark"   },
-                { ".sparkpostmail.com", "SparkPost"  },
-                { ".klaviyoemail.com",  "Klaviyo"    },
-                { ".exacttarget.com",   "Salesforce" },
-                { ".responsys.net",     "Oracle"     },
-                { ".emarsys.net",       "Emarsys"    },
-            };
-            static const QRegularExpression receivedFromRe(
-                "\\bReceived:\\s+from\\s+(\\S+)"_L1,
-                QRegularExpression::CaseInsensitiveOption);
-
-            QStringList relayHosts;
-            auto it = receivedFromRe.globalMatch(headerSource);
-            while (it.hasNext())
-                relayHosts << it.next().captured(1).toLower();
-
-            for (int i = relayHosts.size() - 1; i >= 0 && espVendor.isEmpty(); --i) {
-                const QString &host = relayHosts[i];
-                for (const auto &relay : kEspRelays) {
-                    const auto suffix = QLatin1StringView(relay.suffix); // e.g. ".mailgun.org"
-                    const auto bare   = suffix.sliced(1);                // e.g.  "mailgun.org"
-                    if (host == bare || host.endsWith(suffix)) {
-                        espVendor = QLatin1StringView(relay.vendor);
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!espVendor.isEmpty())
+        const auto espVendor = detectEspVendor(headerSource);
+        if (!espVendor.isEmpty()) {
             h.insert("espVendor"_L1, espVendor);
+        }
     }
 
     // Sent/draft folders: try to resolve the recipient's avatar.
@@ -428,82 +518,16 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     if (!listIdDomain.isEmpty())
         h.insert("avatarDomain"_L1, listIdDomain);
 
-    // Avatar resolution priority: Google People → Gravatar → BIMI header → BIMI DNS → favicon
+    // Avatar resolution priority: Google People -> Gravatar -> BIMI header -> BIMI DNS -> favicon.
     // avatarShouldRefresh returns false for file:// entries (already resolved); gate the
     // entire pipeline so we skip expensive BIMI/favicon fetches on already-resolved contacts.
-
-    bool allowAvatarLookup = true;
-    if (!senderEmail.isEmpty() && ctx.avatarShouldRefresh)
-        allowAvatarLookup = ctx.avatarShouldRefresh(senderEmail, 3600, 3);
-
-    if (allowAvatarLookup) {
-        QString avatarUrl;
-        QString avatarSource;
-        if (!senderEmail.isEmpty()) {
-            avatarUrl = resolveGooglePeopleAvatarUrl(senderEmail, ctx.cxn->accessToken());
-            if (!avatarUrl.isEmpty())
-                avatarSource = "google-people"_L1;
+    {
+        bool allowAvatarLookup = true;
+        if (!senderEmail.isEmpty() && ctx.avatarShouldRefresh) {
+            allowAvatarLookup = ctx.avatarShouldRefresh(senderEmail, 3600, 3);
         }
-
-        if (avatarUrl.isEmpty() && !senderEmail.isEmpty()) {
-            avatarUrl = resolveGravatarUrl(senderEmail);
-            if (!avatarUrl.isEmpty())
-                avatarSource = "gravatar"_L1;
-        }
-
-        if (avatarUrl.isEmpty()) {
-            if (!bimiLogoUrl.isEmpty()) {
-                avatarUrl = bimiLogoUrl;
-                avatarSource = "bimi-header"_L1;
-            }
-            else {
-                const auto bimiDomain = !listIdDomain.isEmpty() ? listIdDomain : senderDomainFromHeader(senderEmail);
-                if (!bimiDomain.isEmpty()) {
-                    bimiLogoUrl = resolveBimiLogoUrlViaDoh(bimiDomain);
-
-                    if (!bimiLogoUrl.isEmpty()) {
-                        avatarUrl = bimiLogoUrl;
-                        avatarSource = "bimi-dns"_L1;
-                    }
-                    else {
-                        if (const auto favIconUrl = resolveFaviconLogoUrl(bimiDomain); !favIconUrl.isEmpty()) {
-                            avatarUrl = favIconUrl;
-                            avatarSource = "favicon"_L1;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!avatarUrl.isEmpty()) {
-            // Pass the access token for Google People photo URLs — contact photos at
-            // lh3.googleusercontent.com/contacts/ require auth; without it the fetch
-            // returns HTML and the raw URL would be stored, then blocked by the UI guardrail.
-            const QString token = (avatarSource == "google-people"_L1) ? ctx.cxn->accessToken() : QString{};
-            const QString avatarBlob = fetchAvatarBlob(avatarUrl, token);
-            // Google auto-generated monogram/default avatars are tiny (often < 2 KB).
-            // Reject them so the UI falls back to initials instead of a generic placeholder.
-            const bool tinyGoogleAvatar = avatarSource == "google-people"_L1
-                                          && avatarBlob.startsWith("data:"_L1)
-                                          && avatarBlob.size() < 3000;
-            // Write data URI to disk on the worker thread so upsertHeader never does file I/O
-            // on the main thread. Pass the file:// URL to the store instead of the blob.
-            const bool resolvedToDataUri = avatarBlob.startsWith("data:"_L1);
-            if (tinyGoogleAvatar) {
-                qInfo().noquote() << "[avatar] discarding tiny google-people avatar for" << senderEmail;
-            } else if (resolvedToDataUri) {
-                const QString fileUrl = writeAvatarFile(senderEmail, avatarBlob);
-                if (!fileUrl.isEmpty()) {
-                    h.insert("avatarUrl"_L1,    fileUrl);
-                    h.insert("avatarSource"_L1, avatarSource);
-                }
-            } else if (avatarSource != "google-people"_L1) {
-                // Defensive: non-Google sources always return data URIs; this branch shouldn't fire.
-                h.insert("avatarUrl"_L1,    avatarBlob);
-                h.insert("avatarSource"_L1, avatarSource);
-            }
-        } else if (!listIdDomain.isEmpty()) {
-            h.insert("avatarSource"_L1, "listid-domain"_L1);
+        if (allowAvatarLookup) {
+            resolveAvatarForMessage(h, senderEmail, listIdDomain, bimiLogoUrl, ctx.cxn->accessToken());
         }
     }
 
