@@ -9,6 +9,11 @@ class QTcpServer;
 
 class TokenVault;
 
+struct TokenRefreshResult {
+    QString accessToken;
+    bool invalidGrant = false;
+};
+
 class OAuthService : public QObject
 {
     Q_OBJECT
@@ -19,6 +24,11 @@ public:
 
     [[nodiscard]] QString pendingAuthUrl() const;
     [[nodiscard]] QString lastStatus() const;
+
+    /// Synchronous OAuth2 token refresh (safe to call from worker threads).
+    [[nodiscard]] static TokenRefreshResult
+    refreshAccessToken(const QString &tokenUrl, const QString &refreshToken,
+                       const QString &clientId, const QString &clientSecret);
 
     Q_INVOKABLE QString startAuthorization(const QVariantMap &provider, const QString &email);
     Q_INVOKABLE void completeAuthorization(const QString &callbackOrCode);

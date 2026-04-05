@@ -25,10 +25,10 @@ public:
 
     // Inject baseline head (color-scheme, white bg) and optional dark-mode
     // CSS+JS.  Used for single-message view (full viewport layout).
-    Q_INVOKABLE QString prepare(const QString &html, bool darkMode) const;
+    Q_INVOKABLE QString prepare(const QString &html, const bool darkMode) const;
 
     // Like prepare() but with thread-card margins and blockquote collapsing.
-    Q_INVOKABLE QString prepareThread(const QString &html, bool darkMode) const;
+    Q_INVOKABLE QString prepareThread(const QString &html, const bool darkMode) const;
 
     // Collapse all blockquotes behind a single native <details> toggle.
     Q_INVOKABLE QString collapseBlockquotes(const QString &html) const;
@@ -45,6 +45,10 @@ private:
     QString decodeQuotedPrintable(const QString &input) const;
     QString sanitizeTrackingLinks(const QString &html) const;
     QString buildDarkModeInjection() const;
+    QString injectHeadAndDarkMode(const QString &html,
+                                  const QString &headInsert,
+                                  const bool prependIfNoHead,
+                                  const bool darkMode) const;
 
     static QString extractTrackingRedirectUrl(const QString &href);
     static bool    isFirstPartyUrl(const QString &url, const QString &senderDomain);

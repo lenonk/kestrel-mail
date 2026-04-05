@@ -4,6 +4,7 @@
 #include <QVariantMap>
 
 class AccountRepository;
+class QSslSocket;
 class TokenVault;
 
 class SmtpService : public QObject
@@ -23,7 +24,14 @@ signals:
 private:
     struct SendResult { bool ok = false; QString message; };
 
+    QVariantMap findAccountByEmail(const QString &email) const;
     SendResult doSend(const QVariantMap &params);
+    SendResult smtpConnect(QSslSocket &sock, const QString &smtpHost, int smtpPort) const;
+    SendResult smtpAuthenticate(QSslSocket &sock, const QString &fromEmail,
+                                const QString &smtpHost, int smtpPort,
+                                const QString &accessToken) const;
+    SendResult smtpSendEnvelope(QSslSocket &sock, const QString &fromEmail,
+                                const QStringList &allRecipients) const;
     QString refreshAccessToken(const QString &email);
 
     AccountRepository *m_accounts = nullptr;

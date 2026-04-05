@@ -1,7 +1,5 @@
 #include "messagehydrator.h"
 
-#include <iostream>
-
 #include "bodyprocessor.h"
 
 #include <QDebug>
@@ -116,7 +114,7 @@ QString MessageHydrator::execute(const Request &req) {
         // If bounded window produced suspiciously tiny HTML, only a plain-text
         // fallback, or unresolved CID image refs, the 128 KB window likely missed
         // related MIME parts. Retry with the full body so mailio can inline CIDs.
-        const bool isPlainTextFallback = html.contains(QLatin1String("white-space:normal"));
+        const bool isPlainTextFallback = html.contains("white-space:normal"_L1);
         const bool hasUnresolvedCidSrc = QRegularExpression("\\bsrc\\s*=\\s*[\"']\\s*cid:"_L1,
                                                             QRegularExpression::CaseInsensitiveOption)
                                              .match(html).hasMatch();

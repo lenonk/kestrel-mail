@@ -473,7 +473,7 @@ static void stripHtmlBlock(QString &s, QLatin1StringView tag)
 
 // Flatten HTML to plain text for snippet generation.
 // Uses string-based block removal (no regex backtracking) for <head>/<style>/<script>.
-static QString flattenHtmlToText(const QString &html)
+QString flattenHtmlToText(const QString &html)
 {
     auto s = html;
     stripHtmlBlock(s, "head"_L1);

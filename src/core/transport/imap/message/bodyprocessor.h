@@ -71,6 +71,13 @@ QString extractBodyHtmlFromFetch(const QByteArray &fetchRespRaw);
 QString extractBodyTextForSnippet(const QByteArray &fetchRespRaw);
 
 /**
+ * Flatten HTML to plain text: strip <head>/<style>/<script> blocks,
+ * convert break tags to newlines, decode common entities.
+ * Useful for generating plain-text alternatives from HTML bodies.
+ */
+QString flattenHtmlToText(const QString &html);
+
+/**
  * Extract hidden preheader text from HTML (display:none blocks used by newsletters).
  */
 QString extractHiddenPreheader(const QString &html);

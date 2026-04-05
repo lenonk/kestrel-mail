@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QCryptographicHash>
 #include <QDebug>
+#include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -291,6 +292,43 @@ OAuthService::profileForEmail(const QString &email) const {
     if (key.isEmpty()) { return {}; }
 
     return m_profileByEmail.value(key);
+}
+
+TokenRefreshResult
+OAuthService::refreshAccessToken(const QString &tokenUrl, const QString &refreshToken,
+                                 const QString &clientId, const QString &clientSecret) {
+    if (tokenUrl.isEmpty() || clientId.isEmpty() || refreshToken.isEmpty()) {
+        return {};
+    }
+
+    QNetworkAccessManager nam;
+    QNetworkRequest req { QUrl(tokenUrl) };
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded"_L1);
+
+    QUrlQuery body;
+    body.addQueryItem("grant_type"_L1, "refresh_token"_L1);
+    body.addQueryItem("refresh_token"_L1, refreshToken);
+    body.addQueryItem("client_id"_L1, clientId);
+
+    if (!clientSecret.isEmpty()) {
+        body.addQueryItem("client_secret"_L1, clientSecret);
+    }
+
+    auto *reply = nam.post(req, body.toString(QUrl::FullyEncoded).toUtf8());
+    QEventLoop loop;
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    const auto payload = reply->readAll();
+    const auto ok = reply->error() == QNetworkReply::NoError;
+    reply->deleteLater();
+
+    if (!ok) {
+        return { {}, payload.contains("invalid_grant") };
+    }
+
+    const auto obj = QJsonDocument::fromJson(payload).object();
+    return { obj.value("access_token"_L1).toString(), false };
 }
 
 QVariantMap

@@ -699,19 +699,6 @@ fetchUidBatch(SyncContext &ctx,
     }
 }
 
-// ── Snippet enrichment (Phases 1–3 + final sweep) ────────────────────────────
-
-void
-enrichSnippets(const SyncContext &ctx, IngestState &state) {
-    // Phases 1 and 2 (header/body enrichment) and Phase 3 (BODYSTRUCTURE + part
-    // previews) are currently disabled via their respective limit constants.
-    // They can be re-enabled here when limits are raised; the data structures in
-    // IngestState already support them (snippetEnrichCandidates, etc.).
-
-    Q_UNUSED(ctx);
-    Q_UNUSED(state);
-}
-
 // ── Cross-folder dedup pre-pass ───────────────────────────────────────────────
 
 struct PrepassResult {
@@ -925,7 +912,6 @@ executeIncremental(SyncContext &ctx) {
                 skipSearchAll = true;
         }
         if (skipSearchAll) {
-            enrichSnippets(ctx, state);
             result.success                     = true;
             result.headers                     = state.out;
             result.fetchedCount                = state.fetchedCount;
@@ -999,8 +985,6 @@ executeIncremental(SyncContext &ctx) {
             flushBackfill();
         }
     }
-
-    enrichSnippets(ctx, state);
 
     result.success                     = true;
     result.headers                     = state.out;
@@ -1119,7 +1103,6 @@ executeFull(SyncContext &ctx) {
     };
 
     flushPending();
-    enrichSnippets(ctx, state);
 
     result.success                    = true;
     result.headers                    = state.out;

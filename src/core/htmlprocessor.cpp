@@ -406,27 +406,28 @@ static const QLatin1StringView kScrollbarCss(
     "::-webkit-scrollbar-corner{background:transparent;}"
     "</style>");
 
-QString HtmlProcessor::prepare(const QString &html, bool darkMode) const
-{
-    static const QLatin1StringView baselineHead(
-        "<meta name='color-scheme' content='light only'>"
-        "<style data-kestrel-bg='baseline'>"
-        "html,body{background-color:white;min-height:calc(100vh + 1px);}"
-        "</style>");
+QString
+HtmlProcessor::injectHeadAndDarkMode(const QString &html,
+                                      const QString &headInsert,
+                                      const bool prependIfNoHead,
+                                      const bool darkMode) const {
+    auto result = html;
 
-    QString result = html;
+    // Inject head content (must come before dark mode injection so dark !important wins).
+    const auto hp = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);
+    if (hp >= 0) {
+        result.insert(hp + 6, headInsert);
+    } else if (prependIfNoHead) {
+        result = headInsert + result;
+    }
 
-    // Inject baseline head (must come before dark mode injection so dark !important wins).
-    const qsizetype hp = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);
-    if (hp >= 0)
-        result.insert(hp + 6, QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss));
-
-    if (!darkMode)
+    if (!darkMode) {
         return result;
+    }
 
     // Inject dark mode style+script.  Insert after <head> so it precedes baseline.
-    const QString injection = buildDarkModeInjection();
-    const qsizetype hp2 = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);
+    const auto injection = buildDarkModeInjection();
+    const auto hp2 = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);
     if (hp2 >= 0) {
         result.insert(hp2 + 6, injection);
     } else {
@@ -442,8 +443,20 @@ QString HtmlProcessor::prepare(const QString &html, bool darkMode) const
     return result;
 }
 
-QString HtmlProcessor::prepareThread(const QString &html, bool darkMode) const
-{
+QString
+HtmlProcessor::prepare(const QString &html, const bool darkMode) const {
+    static const QLatin1StringView baselineHead(
+        "<meta name='color-scheme' content='light only'>"
+        "<style data-kestrel-bg='baseline'>"
+        "html,body{background-color:white;min-height:calc(100vh + 1px);}"
+        "</style>");
+
+    const auto headInsert = QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss);
+    return injectHeadAndDarkMode(html, headInsert, false, darkMode);
+}
+
+QString
+HtmlProcessor::prepareThread(const QString &html, const bool darkMode) const {
     static const QLatin1StringView quoteCss(
         "<style>"
         "details.kq{margin:4px 0}"
@@ -460,31 +473,6 @@ QString HtmlProcessor::prepareThread(const QString &html, bool darkMode) const
         "html,body{background-color:white;margin:8px 12px 0 12px;}"
         "</style>");
 
-    const QString headInsert = QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss) + QLatin1StringView(quoteCss);
-
-    QString result = html;
-    const qsizetype hp = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);
-    if (hp >= 0)
-        result.insert(hp + 6, headInsert);
-    else
-        result = headInsert + result;
-
-    if (!darkMode)
-        return result;
-
-    const QString injection = buildDarkModeInjection();
-    const qsizetype hp2 = result.indexOf("<head>"_L1, 0, Qt::CaseInsensitive);
-    if (hp2 >= 0) {
-        result.insert(hp2 + 6, injection);
-    } else {
-        static const QRegularExpression htmlOpenTagRe(R"(<html[^>]*>)", QRegularExpression::CaseInsensitiveOption);
-        const auto hm = htmlOpenTagRe.match(result);
-        if (hm.hasMatch()) {
-            result.insert(hm.capturedEnd(), "<head>"_L1 + injection + "</head>"_L1);
-        } else {
-            result = "<html><head>"_L1 + injection + "</head><body>"_L1 + result + "</body></html>"_L1;
-        }
-    }
-
-    return result;
+    const auto headInsert = QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss) + QLatin1StringView(quoteCss);
+    return injectHeadAndDarkMode(html, headInsert, true, darkMode);
 }

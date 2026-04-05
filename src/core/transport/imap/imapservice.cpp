@@ -1,6 +1,7 @@
 #include "imapservice.h"
 
 #include "../../accounts/accountrepository.h"
+#include "../../auth/oauthservice.h"
 #include "../../auth/tokenvault.h"
 #include "../../store/datastore.h"
 #include "../../utils.h"
@@ -94,6 +95,20 @@ std::vector<PooledConnSlot> g_hydrateSlots;
 static bool isBackgroundOwner(const QString &owner) {
     return owner.startsWith("bg-", Qt::CaseInsensitive)
         || owner.startsWith("background", Qt::CaseInsensitive);
+}
+
+// Strip "[Gmail]/" or "[Google Mail]/" prefix and normalise "INBOX" → "Inbox".
+QString stripGmailPrefix(const QString &folder) {
+    auto label = folder;
+    if (label.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive)) {
+        label = label.mid(14); // strlen("[Google Mail]/")
+    } else if (label.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive)) {
+        label = label.mid(8); // strlen("[Gmail]/")
+    }
+    if (label.compare("INBOX"_L1, Qt::CaseInsensitive) == 0) {
+        label = "Inbox"_L1;
+    }
+    return label;
 }
 }
 
@@ -646,6 +661,16 @@ ImapService::runBackgroundTask(std::function<void()> task) {
     watcher->setFuture(QtConcurrent::run(std::move(task)));
 }
 
+// Category folders (e.g. [Gmail]/Categories/Primary) are synthetic labels —
+// the underlying messages live in INBOX.  Map to INBOX when selecting.
+static QString
+resolveSourceFolder(const QString &folder) {
+    if (folder.contains("/Categories/"_L1, Qt::CaseInsensitive)) {
+        return "INBOX"_L1;
+    }
+    return folder;
+}
+
 // Forward declaration — defined later in this file.
 static QByteArray fetchAttachmentPartById(Imap::Connection &cxn, const QString &uid,
                                           const QString &partId, const QString &encoding,
@@ -666,40 +691,58 @@ static bool isImageAttachment(const QVariantMap &am) {
 
 void
 ImapService::prefetchAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    if (m_offlineMode || !m_store)
-        return;
+    prefetchAttachmentsInternal(accountEmail, folderName, uid, false);
+}
 
-    const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
-    if (attachments.isEmpty())
+void
+ImapService::prefetchImageAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
+    prefetchAttachmentsInternal(accountEmail, folderName, uid, true);
+}
+
+void
+ImapService::prefetchAttachmentsInternal(const QString &accountEmail, const QString &folderName,
+                                         const QString &uid, const bool imagesOnly) {
+    if (m_offlineMode || !m_store) {
         return;
+    }
+
+    const auto attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
+    if (attachments.isEmpty()) {
+        return;
+    }
 
     QVariantList toFetch;
-    for (const auto &a : attachments) {
+    std::ranges::copy_if(attachments, std::back_inserter(toFetch), [&](const QVariant &a) {
         const auto am = a.toMap();
-        if (cachedAttachmentPath(accountEmail, uid, am.value("partId"_L1).toString()).isEmpty())
-            toFetch.push_back(a);
-    }
-    if (toFetch.isEmpty())
+        if (imagesOnly && !isImageAttachment(am)) {
+            return false;
+        }
+        return cachedAttachmentPath(accountEmail, uid, am.value("partId"_L1).toString()).isEmpty();
+    });
+    if (toFetch.isEmpty()) {
         return;
+    }
 
     // Dedup by (account, sorted-partIds): all folder representations of the same
-    // message have identical attachment parts. Only one background task needs to
-    // run per message — prevents N concurrent pool acquisitions when QML fires
+    // message have identical attachment parts.  Only one background task needs to
+    // run per message -- prevents N concurrent pool acquisitions when QML fires
     // one prefetchAttachments call per candidate folder.
     QStringList partIds;
     std::ranges::transform(toFetch, std::back_inserter(partIds),
                            [](const QVariant &a) { return a.toMap().value("partId"_L1).toString(); });
     std::ranges::sort(partIds);
-    const QString taskKey = "task:"_L1 + accountEmail + "|"_L1 + partIds.join(","_L1);
+    const auto taskKey = "task:"_L1 + accountEmail + "|"_L1 + partIds.join(","_L1);
 
     {
         QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-        if (m_inFlightAttachmentDownloads.contains(taskKey))
+        if (m_inFlightAttachmentDownloads.contains(taskKey)) {
             return;
+        }
         m_inFlightAttachmentDownloads.insert(taskKey);
     }
 
-    runBackgroundTask([this, accountEmail, folderName, uid, toFetch, taskKey]() {
+    const auto label = imagesOnly ? "prefetch-images" : "prefetch-attachments";
+    runBackgroundTask([this, accountEmail, folderName, uid, toFetch, taskKey, label]() {
         struct TaskGuard {
             ImapService *svc;
             QString key;
@@ -709,35 +752,37 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             }
         } taskGuard{this, taskKey};
 
-        auto cxn = getPooledConnection(accountEmail, "prefetch-attachments");
+        auto cxn = getPooledConnection(accountEmail, label);
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
             return;
         }
         if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
             if (!cxn->examine(folderName)) {
-                    return;
+                return;
             }
         }
 
-        const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                                + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
+        const auto cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                             + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
 
         for (const auto &a : toFetch) {
-            if (m_destroying.load())
+            if (m_destroying.load()) {
                 break;
+            }
 
             const auto    am       = a.toMap();
             const QString partId   = am.value("partId"_L1).toString();
             const QString encoding = am.value("encoding"_L1).toString();
             const QString name     = am.value("name"_L1).toString();
 
-            const QString key = attachmentCacheKey(accountEmail, uid, partId);
+            const auto key = attachmentCacheKey(accountEmail, uid, partId);
 
             {
                 QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-                if (m_inFlightAttachmentDownloads.contains(key))
+                if (m_inFlightAttachmentDownloads.contains(key)) {
                     continue;
+                }
                 m_inFlightAttachmentDownloads.insert(key);
             }
 
@@ -753,7 +798,7 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
             }
 
             emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
-            const QByteArray data = fetchAttachmentPartById(*cxn, uid, partId, encoding,
+            const auto data = fetchAttachmentPartById(*cxn, uid, partId, encoding,
                 [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
                     emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
                 });
@@ -763,111 +808,12 @@ ImapService::prefetchAttachments(const QString &accountEmail, const QString &fol
                 continue;
             }
 
-            const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
-            const QString partDir    = cacheBase + "/"_L1 + safePartId;
+            const auto safePartId = QString(partId).replace('/', '_').replace('.', '_');
+            const auto partDir    = cacheBase + "/"_L1 + safePartId;
             QDir().mkpath(partDir);
 
-            const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
-            const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
-
-            QSaveFile f(localPath);
-            if (!f.open(QIODevice::WriteOnly)) {
-                clearInFlight();
-                continue;
-            }
-            f.write(data);
-            if (!f.commit()) {
-                clearInFlight();
-                continue;
-            }
-
-            attachmentCacheInsert(key, localPath);
-            emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
-            emit attachmentReady(accountEmail, uid, partId, localPath);
-            clearInFlight();
-        }
-    });
-}
-
-void
-ImapService::prefetchImageAttachments(const QString &accountEmail, const QString &folderName, const QString &uid) {
-    if (m_offlineMode || !m_store)
-        return;
-
-    const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folderName, uid);
-    if (attachments.isEmpty())
-        return;
-
-    QVariantList toFetch;
-    std::ranges::copy_if(attachments, std::back_inserter(toFetch), [&](const QVariant &a) {
-        const auto am = a.toMap();
-        return isImageAttachment(am)
-            && cachedAttachmentPath(accountEmail, uid, am.value("partId"_L1).toString()).isEmpty();
-    });
-    if (toFetch.isEmpty())
-        return;
-
-    runBackgroundTask([this, accountEmail, folderName, uid, toFetch]() {
-        auto cxn = getPooledConnection(accountEmail, "prefetch-images");
-        if (!cxn) {
-            qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
-            return;
-        }
-        if (cxn->selectedFolder().compare(folderName, Qt::CaseInsensitive) != 0) {
-            if (!cxn->examine(folderName)) {
-                    return;
-            }
-        }
-
-        const QString cacheBase = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                                + "/attachments/"_L1 + accountEmail + "/"_L1 + uid;
-
-        for (const auto &a : toFetch) {
-            if (m_destroying.load())
-                break;
-
-            const auto    am       = a.toMap();
-            const QString partId   = am.value("partId"_L1).toString();
-            const QString encoding = am.value("encoding"_L1).toString();
-            const QString name     = am.value("name"_L1).toString();
-
-            const QString key = attachmentCacheKey(accountEmail, uid, partId);
-
-            {
-                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-                if (m_inFlightAttachmentDownloads.contains(key))
-                    continue;
-                m_inFlightAttachmentDownloads.insert(key);
-            }
-
-            const auto clearInFlight = [this, key]() {
-                QMutexLocker lock(&m_inFlightAttachmentDownloadsMutex);
-                m_inFlightAttachmentDownloads.remove(key);
-            };
-
-            if (!cachedAttachmentPath(accountEmail, uid, partId).isEmpty()) {
-                emit attachmentDownloadProgress(accountEmail, uid, partId, 100);
-                clearInFlight();
-                continue;
-            }
-
-            emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
-            const QByteArray data = fetchAttachmentPartById(*cxn, uid, partId, encoding,
-                [this, &accountEmail, &uid, &partId](const int percent, const qint64) {
-                    emit attachmentDownloadProgress(accountEmail, uid, partId, percent);
-                });
-            if (data.isEmpty()) {
-                emit attachmentDownloadProgress(accountEmail, uid, partId, 0);
-                clearInFlight();
-                continue;
-            }
-
-            const QString safePartId = QString(partId).replace('/', '_').replace('.', '_');
-            const QString partDir    = cacheBase + "/"_L1 + safePartId;
-            QDir().mkpath(partDir);
-
-            const QString safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
-            const QString localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
+            const auto safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
+            const auto localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
 
             QSaveFile f(localPath);
             if (!f.open(QIODevice::WriteOnly)) {
@@ -1394,64 +1340,40 @@ ImapService::saveFolderStatusSnapshot(const QString &accountEmail, const QString
 
 QString
 ImapService::refreshAccessToken(const QVariantMap &account, const QString &email) {
-    if (!m_vault)
+    if (!m_vault) {
         return {};
+    }
 
     const auto refreshToken = m_vault->loadRefreshToken(email);
     if (refreshToken.isEmpty()) {
         qWarning() << "[token-refresh] No stored refresh token for" << email;
-        if (m_idleWatcher)
+        if (m_idleWatcher) {
             m_idleWatcher->authSuspended.store(true);
+        }
         QMetaObject::invokeMethod(this, [this, email]() {
             emit accountNeedsReauth(email);
         }, Qt::QueuedConnection);
         return {};
     }
 
-    const auto tokenUrl = account.value("oauthTokenUrl"_L1).toString();
+    const auto tokenUrl      = account.value("oauthTokenUrl"_L1).toString();
+    const auto clientId      = account.value("oauthClientId"_L1).toString().trimmed();
+    const auto clientSecret  = account.value("oauthClientSecret"_L1).toString();
 
-    const auto clientId = account.value("oauthClientId"_L1).toString().trimmed();
-    const auto clientSecret = account.value("oauthClientSecret"_L1).toString();
+    const auto result = OAuthService::refreshAccessToken(tokenUrl, refreshToken,
+                                                         clientId, clientSecret);
 
-    if (tokenUrl.isEmpty() || clientId.isEmpty()) return {};
-
-    QNetworkAccessManager nam;
-    QNetworkRequest req { QUrl(tokenUrl) };
-    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded"_L1);
-
-    QUrlQuery body;
-    body.addQueryItem("grant_type"_L1, "refresh_token"_L1);
-    body.addQueryItem("refresh_token"_L1, refreshToken);
-    body.addQueryItem("client_id"_L1, clientId);
-
-    if (!clientSecret.isEmpty()) {
-        body.addQueryItem("client_secret"_L1, clientSecret);
-    }
-
-    auto *reply = nam.post(req, body.toString(QUrl::FullyEncoded).toUtf8());
-    QEventLoop loop;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
-
-    const auto payload = reply->readAll();
-    const bool ok = reply->error() == QNetworkReply::NoError;
-    reply->deleteLater();
-
-    if (!ok) {
-        // Detect revoked/expired refresh token — needs user re-authentication
-        if (payload.contains("invalid_grant")) {
-            qWarning() << "[token-refresh] Refresh token revoked for" << email;
-            if (m_idleWatcher)
-                m_idleWatcher->authSuspended.store(true);
-            QMetaObject::invokeMethod(this, [this, email]() {
-                emit accountNeedsReauth(email);
-            }, Qt::QueuedConnection);
+    if (result.accessToken.isEmpty() && result.invalidGrant) {
+        qWarning() << "[token-refresh] Refresh token revoked for" << email;
+        if (m_idleWatcher) {
+            m_idleWatcher->authSuspended.store(true);
         }
-        return {};
+        QMetaObject::invokeMethod(this, [this, email]() {
+            emit accountNeedsReauth(email);
+        }, Qt::QueuedConnection);
     }
 
-    const auto obj = QJsonDocument::fromJson(payload).object();
-    return obj.value("access_token"_L1).toString();
+    return result.accessToken;
 }
 
 QList<ImapService::AccountInfo>
@@ -1557,6 +1479,52 @@ ImapService::fetchFolderHeaders(const QString &email,
         *statusOut = syncResult.statusMessage;
 
     return syncResult.headers;
+}
+
+std::function<void()>
+ImapService::makeSyncFlushLambda(QVariantList &pendingHeaders,
+                                 QElapsedTimer &flushTimer) {
+    return [this, &pendingHeaders, &flushTimer]() {
+        if (pendingHeaders.isEmpty()) {
+            return;
+        }
+
+        const QVariantList batch = pendingHeaders;
+        pendingHeaders.clear();
+
+        // Write headers directly from the worker thread (DataStore is thread-safe).
+        static constexpr int kDbChunk = 5;
+        for (int start = 0; start < batch.size(); start += kDbChunk) {
+            const QVariantList chunk = batch.mid(start, kDbChunk);
+            if (m_store) {
+                m_store->upsertHeaders(chunk);
+            }
+        }
+
+        // Body-fetch dispatch posted to UI thread (backgroundFetchBodies needs it).
+        QMetaObject::invokeMethod(this, [this, batch]() {
+            if (!m_store) {
+                return;
+            }
+            QSet<QString> dispatched;
+            for (const QVariant &hv : batch) {
+                const QVariantMap h = hv.toMap();
+                const QString email = h.value("accountEmail"_L1).toString().trimmed();
+                const QString folder = h.value("folder"_L1).toString().trimmed();
+                if (email.isEmpty() || folder.isEmpty()) {
+                    continue;
+                }
+                const QString key = email.toLower() + "|"_L1 + folder.toLower();
+                if (dispatched.contains(key)) {
+                    continue;
+                }
+                dispatched.insert(key);
+                backgroundFetchBodies({}, email, folder, {});
+            }
+        }, Qt::QueuedConnection);
+
+        flushTimer.restart();
+    };
 }
 
 QVariantList
@@ -2261,10 +2229,10 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         unreadVal = edge.value("unread"_L1, 0).toInt();
 
         const QString tgt = targetFolder.trimmed().toLower();
-        const bool movingToTrash = tgt == QLatin1String("trash")
-                                || tgt == QLatin1String("[gmail]/trash")
-                                || tgt == QLatin1String("[google mail]/trash")
-                                || tgt.endsWith(QLatin1String("/trash"));
+        const bool movingToTrash = tgt == "trash"_L1
+                                || tgt == "[gmail]/trash"_L1
+                                || tgt == "[google mail]/trash"_L1
+                                || tgt.endsWith("/trash"_L1);
         if (movingToTrash)
             m_store->removeAccountUidsEverywhere(accountEmail, {uid}, /*skipOrphanCleanup=*/true);
         else
@@ -2282,10 +2250,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         auto cxn = getPooledConnection(accountEmail, "move-message");
         if (!cxn) return;
 
-        // Category folders (e.g. [Gmail]/Categories/Primary) are synthetic labels,
-        // not real IMAP mailboxes. The underlying messages live in INBOX.
-        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
-                                         ? "INBOX"_L1 : folder;
+        const auto sourceFolder = resolveSourceFolder(folder);
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
             if (!cxn->select(sourceFolder)) return;
@@ -2329,52 +2294,47 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
     if (m_offlineMode)
         return;
 
-    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid]() {
-        if (m_destroying.load()) return;
+    (void)QtConcurrent::run([this, accountEmail, folder, uid]() {
+        if (m_destroying.load()) { return; }
 
         auto cxn = getPooledConnection(accountEmail, "mark-read");
-        if (!cxn) return;
+        if (!cxn) { return; }
 
-        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
-                                         ? "INBOX"_L1 : folder;
+        const auto sourceFolder = resolveSourceFolder(folder);
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
-            if (!cxn->select(sourceFolder)) return;
+            if (!cxn->select(sourceFolder)) { return; }
         }
 
-        const QString result = cxn->execute("UID STORE %1 +FLAGS (\\Seen)"_L1.arg(uid));
-        Q_UNUSED(result);
+        (void)cxn->execute("UID STORE %1 +FLAGS (\\Seen)"_L1.arg(uid));
     });
 }
 
 void
-ImapService::markMessageFlagged(const QString &accountEmail, const QString &folder, const QString &uid, bool flagged) {
-    if (m_destroying || accountEmail.isEmpty() || uid.isEmpty()) return;
+ImapService::markMessageFlagged(const QString &accountEmail, const QString &folder, const QString &uid, const bool flagged) {
+    if (m_destroying || accountEmail.isEmpty() || uid.isEmpty()) { return; }
 
-    if (m_store)
+    if (m_store) {
         m_store->markMessageFlagged(accountEmail, uid, flagged);
+    }
 
-    if (m_offlineMode)
-        return;
+    if (m_offlineMode) { return; }
 
-    const QString flags = flagged ? "+FLAGS (\\Flagged)"_L1 : "-FLAGS (\\Flagged)"_L1;
-    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, flags]() {
-        if (m_destroying.load()) return;
+    const auto flags = flagged ? "+FLAGS (\\Flagged)"_L1 : "-FLAGS (\\Flagged)"_L1;
+    (void)QtConcurrent::run([this, accountEmail, folder, uid, flags]() {
+        if (m_destroying.load()) { return; }
 
         auto cxn = getPooledConnection(accountEmail, "flag-message");
-        if (!cxn) return;
+        if (!cxn) { return; }
 
-        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
-                                         ? "INBOX"_L1 : folder;
+        const auto sourceFolder = resolveSourceFolder(folder);
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
-            if (!cxn->select(sourceFolder)) return;
+            if (!cxn->select(sourceFolder)) { return; }
         }
 
-        const QString result = cxn->execute("UID STORE %1 %2"_L1.arg(uid, flags));
-        Q_UNUSED(result);
+        (void)cxn->execute("UID STORE %1 %2"_L1.arg(uid, flags));
     });
-    Q_UNUSED(retval);
 }
 
 void
@@ -2436,8 +2396,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
         auto cxn = getPooledConnection(accountEmail, "add-folder-membership");
         if (!cxn) return;
 
-        const QString sourceFolder = folder.contains("/Categories/"_L1, Qt::CaseInsensitive)
-                                         ? "INBOX"_L1 : folder;
+        const auto sourceFolder = resolveSourceFolder(folder);
 
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
             if (!cxn->select(sourceFolder)) return;
@@ -2597,9 +2556,10 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
         m_activeFolderSyncTargets.remove(syncTargetKey);
     };
 
-    if (target.contains("/Categories/"_L1, Qt::CaseInsensitive)) {
-        if (announce)
+    if (resolveSourceFolder(target) != target) {
+        if (announce) {
             emit syncFinished(true, "Category folders are managed via labels.");
+        }
         releaseSyncTarget();
         return;
     }
@@ -2637,38 +2597,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             QVariantList pendingHeaders;
             QElapsedTimer flushTimer;
             flushTimer.start();
-
-            auto flush = [&]() {
-                if (pendingHeaders.isEmpty())
-                    return;
-
-                const QVariantList batch = pendingHeaders; pendingHeaders.clear();
-
-                // Write headers directly from the worker thread (DataStore is thread-safe).
-                static constexpr int kDbChunk = 5;
-                for (int start = 0; start < batch.size(); start += kDbChunk) {
-                    const QVariantList chunk = batch.mid(start, kDbChunk);
-                    if (m_store) m_store->upsertHeaders(chunk);
-                }
-
-                // Body-fetch dispatch posted to UI thread (backgroundFetchBodies needs it).
-                QMetaObject::invokeMethod(this, [this, batch]() {
-                    if (!m_store) return;
-                    QSet<QString> dispatched;
-                    for (const QVariant &hv : batch) {
-                        const QVariantMap h = hv.toMap();
-                        const QString email = h.value("accountEmail"_L1).toString().trimmed();
-                        const QString folder = h.value("folder"_L1).toString().trimmed();
-                        if (email.isEmpty() || folder.isEmpty()) continue;
-                        const QString key = email.toLower() + "|"_L1 + folder.toLower();
-                        if (dispatched.contains(key)) continue;
-                        dispatched.insert(key);
-                        backgroundFetchBodies({}, email, folder, {});
-                    }
-                }, Qt::QueuedConnection);
-
-                flushTimer.restart();
-            };
+            auto flush = makeSyncFlushLambda(pendingHeaders, flushTimer);
 
             for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
                 if (m_cancelRequested.load()) {
@@ -2691,13 +2620,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             return result;
         },
         [this, announce, target, releaseSyncTarget](const SyncResult &r) {
-            QString folderLabel = target;
-            if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
-                folderLabel = folderLabel.mid("[Google Mail]/"_L1.size());
-            if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
-                folderLabel = folderLabel.mid("[Gmail]/"_L1.size());
-            if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
-                folderLabel = "Inbox"_L1;
+            const QString folderLabel = stripGmailPrefix(target);
 
             QSet<QString> uniqueUids;
             uniqueUids.reserve(r.headers.size());
@@ -2763,36 +2686,7 @@ ImapService::syncAll(bool announce) {
             QVariantList pendingHeaders;
             QElapsedTimer flushTimer;
             flushTimer.start();
-
-            auto flush = [&]() {
-                if (pendingHeaders.isEmpty())
-                    return;
-
-                const QVariantList batch = pendingHeaders; pendingHeaders.clear();
-
-                static constexpr int kDbChunk = 5;
-                for (int start = 0; start < batch.size(); start += kDbChunk) {
-                    const QVariantList chunk = batch.mid(start, kDbChunk);
-                    if (m_store) m_store->upsertHeaders(chunk);
-                }
-
-                QMetaObject::invokeMethod(this, [this, batch]() {
-                    if (!m_store) return;
-                    QSet<QString> dispatched;
-                    for (const QVariant &hv : batch) {
-                        const QVariantMap h = hv.toMap();
-                        const QString email = h.value("accountEmail"_L1).toString().trimmed();
-                        const QString folder = h.value("folder"_L1).toString().trimmed();
-                        if (email.isEmpty() || folder.isEmpty()) continue;
-                        const QString key = email.toLower() + "|"_L1 + folder.toLower();
-                        if (dispatched.contains(key)) continue;
-                        dispatched.insert(key);
-                        backgroundFetchBodies({}, email, folder, {});
-                    }
-                }, Qt::QueuedConnection);
-
-                flushTimer.restart();
-            };
+            auto flush = makeSyncFlushLambda(pendingHeaders, flushTimer);
 
             QString googleAccessToken;
             for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
@@ -2818,14 +2712,7 @@ ImapService::syncAll(bool announce) {
 
                 // Build ordered sync target list (INBOX first, then all non-category folders)
                 auto canonicalFolderKey = [](const QString &folderName) -> QString {
-                    QString k = folderName.trimmed().toLower();
-                    if (k.startsWith("[gmail]/"_L1))
-                        k = k.mid("[gmail]/"_L1.size());
-                    else if (k.startsWith("[google mail]/"_L1))
-                        k = k.mid("[google mail]/"_L1.size());
-                    if (k == "inbox"_L1)
-                        return "inbox"_L1;
-                    return k;
+                    return stripGmailPrefix(folderName.trimmed()).toLower();
                 };
 
                 QStringList targets = { "INBOX"_L1 };
@@ -2862,9 +2749,11 @@ ImapService::syncAll(bool announce) {
 
                 // Gmail fallback: if the folder list was empty, use known Gmail system folders
                 if (targets.size() == 1) {
-                    for (const char *f : { "[Gmail]/All Mail", "[Gmail]/Sent Mail",
-                                           "[Gmail]/Drafts", "[Gmail]/Spam", "[Gmail]/Trash" })
-                        targets << QLatin1String(f);
+                    targets << "[Gmail]/All Mail"_L1
+                            << "[Gmail]/Sent Mail"_L1
+                            << "[Gmail]/Drafts"_L1
+                            << "[Gmail]/Spam"_L1
+                            << "[Gmail]/Trash"_L1;
                 }
 
                 // Sync each folder through the same canonical folder-sync path.
@@ -2873,13 +2762,7 @@ ImapService::syncAll(bool announce) {
                     if (m_cancelRequested)
                         break;
 
-                    QString folderLabel = folderTarget;
-                    if (folderLabel.startsWith("[Google Mail]/"_L1, Qt::CaseInsensitive))
-                        folderLabel = folderLabel.mid("[Google Mail]/"_L1.size());
-                    if (folderLabel.startsWith("[Gmail]/"_L1, Qt::CaseInsensitive))
-                        folderLabel = folderLabel.mid("[Gmail]/"_L1.size());
-                    if (folderLabel.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
-                        folderLabel = "Inbox"_L1;
+                    const auto folderLabel = stripGmailPrefix(folderTarget);
 
                     const auto folderHeaders = syncFolderInternal(AccountInfo{email, host, accessToken, port},
                         folderTarget, SyncFolderOptions{announce}, seqNum, inboxInserted,

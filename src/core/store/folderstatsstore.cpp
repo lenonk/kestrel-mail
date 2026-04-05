@@ -22,7 +22,7 @@ queryThreadStats(const QSqlDatabase &database, const QString &whereClause,
 
     // Thread-total count.
     QSqlQuery qTotal(database);
-    qTotal.prepare(QStringLiteral(
+    qTotal.prepare(
         "SELECT COUNT(*) FROM ("
         "  SELECT mfm.account_email,"
         "         COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key"
@@ -30,15 +30,14 @@ queryThreadStats(const QSqlDatabase &database, const QString &whereClause,
         "  JOIN messages cm ON cm.id = mfm.message_id AND cm.account_email = mfm.account_email"
         "  WHERE %1"
         "  GROUP BY mfm.account_email, thread_key"
-        ")"
-    ).arg(whereClause));
+        ")"_L1.arg(whereClause));
 
     for (const auto &[name, value] : binds) { qTotal.bindValue(name, value); }
     if (qTotal.exec() && qTotal.next()) { result.total = qTotal.value(0).toInt(); }
 
     // Thread-unread count (same WHERE + unread filter).
     QSqlQuery qUnread(database);
-    qUnread.prepare(QStringLiteral(
+    qUnread.prepare(
         "SELECT COUNT(*) FROM ("
         "  SELECT mfm.account_email,"
         "         COALESCE(NULLIF(trim(cm.gm_thr_id),''), NULLIF(trim(cm.thread_id),''), CAST(cm.id AS TEXT)) AS thread_key"
@@ -52,8 +51,7 @@ queryThreadStats(const QSqlDatabase &database, const QString &whereClause,
         "        AND x.unread=1"
         "    )"
         "  GROUP BY mfm.account_email, thread_key"
-        ")"
-    ).arg(whereClause));
+        ")"_L1.arg(whereClause));
 
     for (const auto &[name, value] : binds) { qUnread.bindValue(name, value); }
     if (qUnread.exec() && qUnread.next()) { result.unread = qUnread.value(0).toInt(); }
@@ -257,9 +255,9 @@ FolderStatsStore::statsForFolder(const QString &folderKey, const QString &rawFol
 
     if (key == "favorites:all-inboxes"_L1 || key == "favorites:unread"_L1) {
         const auto unreadOnly = (key == "favorites:unread"_L1);
-        const auto where = QStringLiteral("(%1) AND (:unread_only=0 OR EXISTS ("
+        const auto where = "(%1) AND (:unread_only=0 OR EXISTS ("
             "SELECT 1 FROM message_folder_map u WHERE u.account_email=mfm.account_email"
-            " AND u.message_id=mfm.message_id AND u.unread=1)) AND %2")
+            " AND u.message_id=mfm.message_id AND u.unread=1)) AND %2"_L1
             .arg(kWhereInbox, kWhereTrashExclude);
 
         counts = queryThreadStats(database, where, {{":unread_only"_L1, unreadOnly ? 1 : 0}});

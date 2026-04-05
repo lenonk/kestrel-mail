@@ -196,6 +196,14 @@ private:
                                     QElapsedTimer &flushTimer,
                                     const std::function<void()> &flush);
 
+    std::function<void()> makeSyncFlushLambda(QVariantList &pendingHeaders,
+                                              QElapsedTimer &flushTimer);
+
+    void prefetchAttachmentsInternal(const QString &accountEmail,
+                                     const QString &folderName,
+                                     const QString &uid,
+                                     const bool imagesOnly);
+
     void hydrateMessageBodyInternal(const QString &accountEmail,
                                     const QString &folderName,
                                     const QString &uid,

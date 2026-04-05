@@ -1,24 +1,18 @@
 #include "smtpservice.h"
 
 #include "../../accounts/accountrepository.h"
-#include "../../auth/filetokenvault.h"
+#include "../../auth/oauthservice.h"
+#include "../../auth/tokenvault.h"
+#include "../imap/message/bodyprocessor.h"
 
+#include <QDateTime>
 #include <QDebug>
-#include <QEventLoop>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QFile>
 #include <QFileInfo>
-#include <QDateTime>
 #include <QMimeDatabase>
-#include <QNetworkAccessManager>
 #include <QRegularExpression>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QSslSocket>
 #include <QUuid>
-#include <QUrl>
-#include <QUrlQuery>
 #include <QtConcurrent>
 
 using namespace Qt::Literals::StringLiterals;
@@ -106,21 +100,6 @@ QByteArray foldBase64(const QByteArray &raw)
     return out;
 }
 
-QString stripHtmlTags(const QString &html)
-{
-    QString out = html;
-    out.replace(QRegularExpression("<style\\b[^>]*>[\\s\\S]*?</style>"_L1, QRegularExpression::CaseInsensitiveOption), " "_L1);
-    out.replace(QRegularExpression("<script\\b[^>]*>[\\s\\S]*?</script>"_L1, QRegularExpression::CaseInsensitiveOption), " "_L1);
-    out.replace(QRegularExpression("<br\\s*/?>"_L1, QRegularExpression::CaseInsensitiveOption), "\n"_L1);
-    out.replace(QRegularExpression("</p\\s*>"_L1, QRegularExpression::CaseInsensitiveOption), "\n"_L1);
-    out.replace(QRegularExpression("<[^>]+>"_L1), ""_L1);
-    out.replace("&nbsp;"_L1, " "_L1);
-    out.replace("&amp;"_L1, "&"_L1);
-    out.replace("&lt;"_L1, "<"_L1);
-    out.replace("&gt;"_L1, ">"_L1);
-    return out.trimmed();
-}
-
 bool bodyLooksHtml(const QString &body)
 {
     const QString s = body.trimmed();
@@ -154,7 +133,7 @@ QString subjectHeader(const QString &subject)
 QByteArray buildInlineBodyPart(const QString &body)
 {
     const bool isHtml = bodyLooksHtml(body);
-    const QString plain = isHtml ? stripHtmlTags(body) : body;
+    const QString plain = isHtml ? Imap::BodyProcessor::flattenHtmlToText(body) : body;
 
     if (!isHtml) {
         QByteArray part;
@@ -221,7 +200,22 @@ SmtpService::SmtpService(AccountRepository *accounts, TokenVault *vault, QObject
     : QObject(parent), m_accounts(accounts), m_vault(vault)
 {}
 
-void SmtpService::sendEmail(const QVariantMap &params) {
+QVariantMap
+SmtpService::findAccountByEmail(const QString &email) const {
+    if (!m_accounts) {
+        return {};
+    }
+    for (const auto &a : m_accounts->accounts()) {
+        const auto m = a.toMap();
+        if (m.value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0) {
+            return m;
+        }
+    }
+    return {};
+}
+
+void
+SmtpService::sendEmail(const QVariantMap &params) {
     (void)QtConcurrent::run([this, params]() {
         const auto result = doSend(params);
         QMetaObject::invokeMethod(this, [this, result]() {
@@ -230,92 +224,73 @@ void SmtpService::sendEmail(const QVariantMap &params) {
     });
 }
 
-SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
-    const QString fromEmail = params.value("fromEmail"_L1).toString().trimmed();
-    const QStringList toList  = params.value("toList"_L1).toStringList();
-    const QStringList ccList  = params.value("ccList"_L1).toStringList();
-    const QStringList bccList = params.value("bccList"_L1).toStringList();
-    const QString subject     = params.value("subject"_L1).toString();
-    const QString body        = params.value("body"_L1).toString();
-    const QStringList attachmentPaths = params.value("attachments"_L1).toStringList();
-
-    if (fromEmail.isEmpty() || toList.isEmpty())
-        return {false, "From and To addresses are required"_L1};
-
-    // Resolve account config
-    if (!m_accounts)
-        return {false, "Account repository unavailable"_L1};
-
-    QVariantMap account;
-    for (const auto &a : m_accounts->accounts()) {
-        const auto m = a.toMap();
-        if (m.value("email"_L1).toString().compare(fromEmail, Qt::CaseInsensitive) == 0) {
-            account = m;
-            break;
-        }
-    }
-    if (account.isEmpty())
-        return {false, "Account not found: "_L1 + fromEmail};
-
-    const QString smtpHost = account.value("smtpHost"_L1).toString();
-    const int     smtpPort = account.value("smtpPort"_L1).toInt();
-    if (smtpHost.isEmpty() || smtpPort <= 0)
-        return {false, "SMTP host/port not configured for "_L1 + fromEmail};
-
-    const QString accessToken = refreshAccessToken(fromEmail);
-    if (accessToken.isEmpty())
-        return {false, "Could not obtain access token for "_L1 + fromEmail};
-
-    QSslSocket sock;
+SmtpService::SendResult
+SmtpService::smtpConnect(QSslSocket &sock, const QString &smtpHost, const int smtpPort) const {
     sock.moveToThread(QThread::currentThread());
 
     const bool useSsl = (smtpPort == 465);
 
     if (useSsl) {
         sock.connectToHostEncrypted(smtpHost, static_cast<quint16>(smtpPort));
-        if (!sock.waitForEncrypted(kSmtpConnectTimeoutMs))
+        if (!sock.waitForEncrypted(kSmtpConnectTimeoutMs)) {
             return {false, "TLS connect failed: "_L1 + sock.errorString()};
+        }
     } else {
         sock.connectToHost(smtpHost, static_cast<quint16>(smtpPort));
-        if (!sock.waitForConnected(kSmtpConnectTimeoutMs))
+        if (!sock.waitForConnected(kSmtpConnectTimeoutMs)) {
             return {false, "TCP connect failed: "_L1 + sock.errorString()};
+        }
     }
 
     // Read greeting
-    QByteArray resp = smtpReadResponse(sock);
-    if (smtpCode(resp) != 220)
+    auto resp = smtpReadResponse(sock);
+    if (smtpCode(resp) != 220) {
         return {false, "Unexpected greeting: "_L1 + QString::fromLatin1(resp.trimmed())};
+    }
 
     // EHLO
     smtpSend(sock, "EHLO kestrel\r\n");
     resp = smtpReadResponse(sock);
-    if (smtpCode(resp) != 250)
+    if (smtpCode(resp) != 250) {
         return {false, "EHLO failed: "_L1 + QString::fromLatin1(resp.trimmed())};
+    }
 
     // STARTTLS on port 587
     if (!useSsl) {
         smtpSend(sock, "STARTTLS\r\n");
         resp = smtpReadLine(sock);
-        if (smtpCode(resp) != 220)
+        if (smtpCode(resp) != 220) {
             return {false, "STARTTLS failed: "_L1 + QString::fromLatin1(resp.trimmed())};
+        }
 
         sock.startClientEncryption();
-        if (!sock.waitForEncrypted(kSmtpConnectTimeoutMs))
+        if (!sock.waitForEncrypted(kSmtpConnectTimeoutMs)) {
             return {false, "TLS upgrade failed: "_L1 + sock.errorString()};
+        }
 
         // Re-EHLO after STARTTLS
         smtpSend(sock, "EHLO kestrel\r\n");
         resp = smtpReadResponse(sock);
-        if (smtpCode(resp) != 250)
+        if (smtpCode(resp) != 250) {
             return {false, "Post-STARTTLS EHLO failed: "_L1 + QString::fromLatin1(resp.trimmed())};
+        }
     }
 
-    // AUTH XOAUTH2
-    const QByteArray authPayload = buildXOAuth2Payload(fromEmail, accessToken);
+    return {true, {}};
+}
+
+SmtpService::SendResult
+SmtpService::smtpAuthenticate(QSslSocket &sock, const QString &fromEmail,
+                              const QString &smtpHost, const int smtpPort,
+                              const QString &accessToken) const {
+    Q_UNUSED(smtpHost)
+    Q_UNUSED(smtpPort)
+
+    const auto authPayload = buildXOAuth2Payload(fromEmail, accessToken);
     smtpSend(sock, "AUTH XOAUTH2 " + authPayload + "\r\n");
-    resp = smtpReadLine(sock);
+    auto resp = smtpReadLine(sock);
     if (smtpCode(resp) != 235) {
-        // Server may send a 334 base64-encoded error detail — send empty response to abort
+        // Server may send a 334 base64-encoded error detail -- send empty response to abort
         if (smtpCode(resp) == 334) {
             smtpSend(sock, "\r\n");
             resp = smtpReadLine(sock);
@@ -324,18 +299,23 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
         return {false, "SMTP authentication failed: "_L1 + QString::fromLatin1(resp.trimmed())};
     }
 
+    return {true, {}};
+}
+
+SmtpService::SendResult
+SmtpService::smtpSendEnvelope(QSslSocket &sock, const QString &fromEmail,
+                              const QStringList &allRecipients) const {
     // MAIL FROM
     smtpSend(sock, "MAIL FROM:<" + fromEmail.toUtf8() + ">\r\n");
-    resp = smtpReadLine(sock);
+    auto resp = smtpReadLine(sock);
     if (smtpCode(resp) != 250) {
         sock.disconnectFromHost();
         return {false, "MAIL FROM rejected: "_L1 + QString::fromLatin1(resp.trimmed())};
     }
 
     // RCPT TO for all recipients
-    const QStringList allRecipients = toList + ccList + bccList;
     for (const QString &recipient : allRecipients) {
-        const QString addr = extractAddrSpec(recipient);
+        const auto addr = extractAddrSpec(recipient);
         smtpSend(sock, "RCPT TO:<" + addr.toUtf8() + ">\r\n");
         resp = smtpReadLine(sock);
         if (smtpCode(resp) != 250 && smtpCode(resp) != 251) {
@@ -352,25 +332,80 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
         return {false, "DATA command rejected: "_L1 + QString::fromLatin1(resp.trimmed())};
     }
 
+    return {true, {}};
+}
+
+SmtpService::SendResult
+SmtpService::doSend(const QVariantMap &params) {
+    const auto fromEmail       = params.value("fromEmail"_L1).toString().trimmed();
+    const auto toList          = params.value("toList"_L1).toStringList();
+    const auto ccList          = params.value("ccList"_L1).toStringList();
+    const auto bccList         = params.value("bccList"_L1).toStringList();
+    const auto subject         = params.value("subject"_L1).toString();
+    const auto body            = params.value("body"_L1).toString();
+    const auto attachmentPaths = params.value("attachments"_L1).toStringList();
+
+    if (fromEmail.isEmpty() || toList.isEmpty()) {
+        return {false, "From and To addresses are required"_L1};
+    }
+
+    // Resolve account config
+    const auto account = findAccountByEmail(fromEmail);
+    if (account.isEmpty()) {
+        return {false, "Account not found: "_L1 + fromEmail};
+    }
+
+    const auto smtpHost = account.value("smtpHost"_L1).toString();
+    const auto smtpPort = account.value("smtpPort"_L1).toInt();
+    if (smtpHost.isEmpty() || smtpPort <= 0) {
+        return {false, "SMTP host/port not configured for "_L1 + fromEmail};
+    }
+
+    const auto accessToken = refreshAccessToken(fromEmail);
+    if (accessToken.isEmpty()) {
+        return {false, "Could not obtain access token for "_L1 + fromEmail};
+    }
+
+    // Connect, EHLO, and optionally STARTTLS
+    QSslSocket sock;
+    if (const auto r = smtpConnect(sock, smtpHost, smtpPort); !r.ok) {
+        return r;
+    }
+
+    // AUTH XOAUTH2
+    if (const auto r = smtpAuthenticate(sock, fromEmail, smtpHost, smtpPort, accessToken); !r.ok) {
+        return r;
+    }
+
+    // MAIL FROM + RCPT TO + DATA
+    const auto allRecipients = toList + ccList + bccList;
+    if (const auto r = smtpSendEnvelope(sock, fromEmail, allRecipients); !r.ok) {
+        return r;
+    }
+
     // Build RFC 2822 + MIME message
     QByteArray msg;
 
-    const QString fromDisplay = account.value("displayName"_L1).toString().trimmed().isEmpty()
+    const auto fromDisplay = account.value("displayName"_L1).toString().trimmed().isEmpty()
             ? account.value("accountName"_L1).toString().trimmed()
             : account.value("displayName"_L1).toString().trimmed();
-    const QString fromFormatted = fromDisplay.isEmpty()
+    const auto fromFormatted = fromDisplay.isEmpty()
         ? "<"_L1 + fromEmail + ">"_L1
         : "\""_L1 + encodeDisplayName(fromDisplay) + "\" <"_L1 + fromEmail + ">"_L1;
 
     msg += "From: " + fromFormatted.toUtf8() + "\r\n";
 
     QStringList toFormatted;
-    for (const auto &a : toList) toFormatted.append(formatAddress(a));
+    for (const auto &a : toList) {
+        toFormatted.append(formatAddress(a));
+    }
     msg += "To: " + toFormatted.join(", "_L1).toUtf8() + "\r\n";
 
     if (!ccList.isEmpty()) {
         QStringList ccFormatted;
-        for (const auto &a : ccList) ccFormatted.append(formatAddress(a));
+        for (const auto &a : ccList) {
+            ccFormatted.append(formatAddress(a));
+        }
         msg += "Cc: " + ccFormatted.join(", "_L1).toUtf8() + "\r\n";
     }
 
@@ -382,7 +417,7 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
     if (attachmentPaths.isEmpty()) {
         msg += buildInlineBodyPart(body);
     } else {
-        const QByteArray mixedBoundary = "mix-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8();
+        const auto mixedBoundary = "mix-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8();
         msg += "Content-Type: multipart/mixed; boundary=\"" + mixedBoundary + "\"\r\n\r\n";
 
         msg += "--" + mixedBoundary + "\r\n";
@@ -400,11 +435,11 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
         msg += "--" + mixedBoundary + "--\r\n";
     }
 
-    const QByteArray wireMsg = dotStuff(msg) + ".\r\n";
+    const auto wireMsg = dotStuff(msg) + ".\r\n";
     sock.write(wireMsg);
     sock.flush();
 
-    resp = smtpReadLine(sock, kSmtpDataTimeoutMs);
+    const auto resp = smtpReadLine(sock, kSmtpDataTimeoutMs);
     if (smtpCode(resp) != 250) {
         sock.disconnectFromHost();
         return {false, "Message submission failed: "_L1 + QString::fromLatin1(resp.trimmed())};
@@ -416,60 +451,26 @@ SmtpService::SendResult SmtpService::doSend(const QVariantMap &params) {
     return {true, "Message sent successfully"_L1};
 }
 
-QString SmtpService::refreshAccessToken(const QString &email) {
-    if (!m_accounts || !m_vault)
+QString
+SmtpService::refreshAccessToken(const QString &email) {
+    if (!m_vault) {
         return {};
-
-    QVariantMap account;
-    for (const auto &a : m_accounts->accounts()) {
-        const auto m = a.toMap();
-        if (m.value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0) {
-            account = m;
-            break;
-        }
     }
-    if (account.isEmpty())
+
+    const auto account = findAccountByEmail(email);
+    if (account.isEmpty()) {
         return {};
+    }
 
     const auto refreshToken = m_vault->loadRefreshToken(email);
-    if (refreshToken.isEmpty())
+    if (refreshToken.isEmpty()) {
         return {};
-
-    const auto tokenUrl    = account.value("oauthTokenUrl"_L1).toString();
-    auto clientId          = account.value("oauthClientId"_L1).toString().trimmed();
-    auto clientSecret      = account.value("oauthClientSecret"_L1).toString();
-
-    if (clientId.isEmpty() && account.value("providerId"_L1).toString() == "gmail"_L1) {
-        clientId      = QString("");
-        if (clientSecret.isEmpty())
-            clientSecret = QString("");
     }
 
-    if (tokenUrl.isEmpty() || clientId.isEmpty())
-        return {};
+    const auto tokenUrl      = account.value("oauthTokenUrl"_L1).toString();
+    const auto clientId      = account.value("oauthClientId"_L1).toString().trimmed();
+    const auto clientSecret  = account.value("oauthClientSecret"_L1).toString();
 
-    QNetworkAccessManager nam;
-    QNetworkRequest req { QUrl(tokenUrl) };
-    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded"_L1);
-
-    QUrlQuery body;
-    body.addQueryItem("grant_type"_L1, "refresh_token"_L1);
-    body.addQueryItem("refresh_token"_L1, refreshToken);
-    body.addQueryItem("client_id"_L1, clientId);
-    if (!clientSecret.isEmpty())
-        body.addQueryItem("client_secret"_L1, clientSecret);
-
-    auto *reply = nam.post(req, body.toString(QUrl::FullyEncoded).toUtf8());
-    QEventLoop loop;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
-
-    const auto payload = reply->readAll();
-    const bool ok = reply->error() == QNetworkReply::NoError;
-    reply->deleteLater();
-
-    if (!ok)
-        return {};
-
-    return QJsonDocument::fromJson(payload).object().value("access_token"_L1).toString();
+    return OAuthService::refreshAccessToken(tokenUrl, refreshToken,
+                                            clientId, clientSecret).accessToken;
 }

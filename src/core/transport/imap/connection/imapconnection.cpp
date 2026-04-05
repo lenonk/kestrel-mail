@@ -18,7 +18,7 @@ namespace {
 
 bool responseIsThrottled(const QString &resp) {
     return resp.contains("THROTTLED"_L1, Qt::CaseInsensitive)
-        || resp.contains("RATE"_L1 + " "_L1 + "LIMIT"_L1, Qt::CaseInsensitive)
+        || resp.contains("RATE LIMIT"_L1, Qt::CaseInsensitive)
         || resp.contains("TOO MANY REQUESTS"_L1, Qt::CaseInsensitive);
 }
 
@@ -652,7 +652,7 @@ Connection::reconnectAndReselect() {
 
 QString
 Connection::nextTag() {
-    return QString("a%1").arg(m_tag++, 3, 10, QLatin1Char('0'));
+    return QStringLiteral("a%1").arg(m_tag++, 3, 10, QLatin1Char('0'));
 }
 
 } // namespace Imap
