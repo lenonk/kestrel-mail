@@ -47,7 +47,7 @@ Rectangle {
     }
 
     readonly property var activeTags: {
-        const key = appRoot.selectedMessageKey || "";
+        const key = appRoot._committedMessageKey || "";
 
         if (!key.length)
             return [];
@@ -168,14 +168,12 @@ Rectangle {
     }
     property string selectedAttachmentKey: ""
     readonly property string selectedMessageEdgeKey: {
-        const k = (root.appRoot && root.appRoot.selectedMessageKey) ? root.appRoot.selectedMessageKey.toString() : "";
-        if (!k.length)
-            return "";
-        const raw = k.startsWith("msg:") ? k.slice(4) : k;
-        const p = raw.split("|");
-        if (p.length < 3)
-            return "";
-        return normalizedEdgeKey(p[0], p[1], p[2]);
+        if (!root.messageData) return "";
+        var acc = (root.messageData.accountEmail || "").toString();
+        var fld = (root.messageData.folder || "").toString();
+        var uid = (root.messageData.uid || "").toString();
+        if (!acc.length || !fld.length || !uid.length) return "";
+        return normalizedEdgeKey(acc, fld, uid);
     }
 
     // Read domain directly from messageData.sender to avoid transient binding lag

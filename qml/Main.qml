@@ -157,10 +157,21 @@ Kirigami.ApplicationWindow {
     property int _userFoldersRev: 0
     property int _bodyUpdateVersion: 0
 
+    // Cached tag folder items — rebuilt once per dataChanged instead of
+    // once per visible MessageCard (was 30+ redundant rebuilds per click).
+    property var _cachedTagFolderItems: []
+
+    function _rebuildTagCache() {
+        var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
+        var tags = (root.dataStoreObj && root.dataStoreObj.tagItems) ? root.dataStoreObj.tagItems() : []
+        root._cachedTagFolderItems = FolderUtils.tagFolderItems(folders, tags, root.tagColorForName)
+    }
+
     Connections {
         target: root.dataStoreObj
         function onFavoritesConfigChanged() { root._favoritesConfigRev++ }
         function onUserFoldersChanged()     { root._userFoldersRev++ }
+        function onDataChanged()            { root._rebuildTagCache() }
     }
 
     // ── Layout constants ──
@@ -235,9 +246,13 @@ Kirigami.ApplicationWindow {
     readonly property var selectedFolderCategories: (root.selectedFolderEntry && root.selectedFolderEntry.categories)
                                                 ? root.selectedFolderEntry.categories
                                                 : []
+    // _committedMessageKey is set one frame after selectedMessageKey via
+    // Qt.callLater so the visual highlight paints instantly, then the DB
+    // query + content pane bindings resolve in the next event-loop pass.
+    property string _committedMessageKey: ""
     readonly property var selectedMessageData: {
         void root._bodyUpdateVersion
-        return root.messageByKey(root.selectedMessageKey)
+        return root.messageByKey(root._committedMessageKey)
     }
 
     // Expose messageContentPane id to child components (e.g. MailToolbar).
@@ -322,9 +337,7 @@ Kirigami.ApplicationWindow {
     }
 
     function tagFolderItems() {
-        var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
-        var tags = (root.dataStoreObj && root.dataStoreObj.tagItems) ? root.dataStoreObj.tagItems() : []
-        return FolderUtils.tagFolderItems(folders, tags, root.tagColorForName)
+        return root._cachedTagFolderItems
     }
 
     function folderEntryByKey(key) {
@@ -606,8 +619,9 @@ Kirigami.ApplicationWindow {
 
     function moveMessageToFolder(accountEmail, folder, uid, targetFolder) {
         if (!imapServiceObj) return
+        var fk = root.selectedFolderKey
         if (root.dataStoreObj)
-            root.dataStoreObj.clearNewMessageCounts(root.selectedFolderKey)
+            Qt.callLater(function() { if (root.dataStoreObj) root.dataStoreObj.clearNewMessageCounts(fk) })
         if (root.selectedMessageKey === "msg:" + accountEmail + "|" + folder + "|" + uid)
             root.selectedMessageKey = ""
         var next = Object.assign({}, root.selectedMessageKeys)
@@ -837,6 +851,7 @@ Kirigami.ApplicationWindow {
         root.contentPaneHoverMessageListWidth = root.messageListPaneWidth
         root.rightPaneExpandedWidth = Math.max(root.rightCollapsedRailWidth, root.rightPaneExpandedWidth)
 
+        root._rebuildTagCache()
         root.syncMessageListModelSelection()
         if (root.messageListModelObj && root.messageListModelObj.setExpansionState) {
             root.messageListModelObj.setExpansionState(root.todayExpanded,
@@ -929,6 +944,7 @@ Kirigami.ApplicationWindow {
         target: root.dataStoreObj
         ignoreUnknownSignals: true
         function onFoldersChanged() {
+            root._rebuildTagCache()
             root.syncMessageListModelSelection()
             if (root.bootstrapFolderSyncRequested && root.hasFetchedFolders()) {
                 root.bootstrapFolderSyncRequested = false
@@ -1011,8 +1027,11 @@ Kirigami.ApplicationWindow {
     // ── Property change handlers ──
 
     onSelectedFolderKeyChanged: {
+        // Defer badge clearing — it emits dataChanged which triggers expensive
+        // cascading re-evaluations; let the visual update paint first.
+        var fk = root.selectedFolderKey
         if (root.dataStoreObj)
-            root.dataStoreObj.clearNewMessageCounts(root.selectedFolderKey)
+            Qt.callLater(function() { if (root.dataStoreObj) root.dataStoreObj.clearNewMessageCounts(fk) })
         root.selectedCategoryIndex = 0
         root.categorySelectionExplicit = (root.selectedFolderCategories && root.selectedFolderCategories.length > 0)
         root.lastClickedMessageIndex = -1
@@ -1021,22 +1040,33 @@ Kirigami.ApplicationWindow {
     onSelectedCategoryIndexChanged: {
         if (root.dataStoreObj && root.selectedFolderCategories && root.selectedFolderCategories.length > 0) {
             var catName = root.selectedFolderCategories[root.selectedCategoryIndex]
-            if (catName)
-                root.dataStoreObj.clearNewMessageCounts("[gmail]/categories/" + catName.toLowerCase())
+            if (catName) {
+                var catKey = "[gmail]/categories/" + catName.toLowerCase()
+                Qt.callLater(function() { if (root.dataStoreObj) root.dataStoreObj.clearNewMessageCounts(catKey) })
+            }
         }
         root.syncMessageListModelSelection()
     }
     onSelectedMessageKeyChanged: {
-        if (root.dataStoreObj && root.selectedMessageKey.length > 0)
-            root.dataStoreObj.clearNewMessageCounts(root.selectedFolderKey)
-
         markReadTimer.stop()
         if (root.selectedMessageKey.length > 0)
             markReadTimer.restart()
+        Qt.callLater(root._commitMessageSelection)
+    }
 
-        var row = root.messageByKey(root.selectedMessageKey)
+    function _commitMessageSelection() {
+        root._committedMessageKey = root.selectedMessageKey
+
+        // Badge clearing emits dataChanged (expensive cascade across all
+        // visible cards + folder stats) — defer to its own frame so the
+        // content pane paints first.
+        if (root.dataStoreObj && root.selectedMessageKey.length > 0) {
+            var fk = root.selectedFolderKey
+            Qt.callLater(function() { if (root.dataStoreObj) root.dataStoreObj.clearNewMessageCounts(fk) })
+        }
+
+        var row = root.selectedMessageData
         if (!row) {
-            console.log("[hydrate-html-db] ui-selected-no-data", "key=", root.selectedMessageKey)
             root.setContentPaneHoverExpanded(false)
             return
         }
@@ -1048,12 +1078,11 @@ Kirigami.ApplicationWindow {
             receivedAt: row.receivedAt || ""
         }
 
-        var bodyLen = (row.bodyHtml || "").toString().length
-        var hasUsableHtml = DisplayUtils.isBodyHtmlUsable(row.bodyHtml)
-        console.log("[hydrate-html-db] ui-selected", "key=", root.selectedMessageKey, "bodyLen=", bodyLen, "usable=", hasUsableHtml)
-        if (!hasUsableHtml) {
+        if (!DisplayUtils.isBodyHtmlUsable(row.bodyHtml)) {
             root.setContentPaneHoverExpanded(false)
-            root.requestHydrateForMessageKey(root.selectedMessageKey)
+            var p = DisplayUtils.parseMessageKey(root.selectedMessageKey)
+            if (p && root.imapServiceObj && root.imapServiceObj.hydrateMessageBody)
+                root.imapServiceObj.hydrateMessageBody(p.accountEmail, p.folder, p.uid)
         }
     }
     onMessageListPaneWidthChanged: {
