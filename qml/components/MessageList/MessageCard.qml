@@ -161,42 +161,92 @@ Rectangle {
         }
     }
 
+    property bool _dragStarted: false
+    property real _pressX: 0
+    property real _pressY: 0
+    property int _pressModifiers: 0
+
+    function _beginDrag() {
+        if (!appRoot) { return }
+        var keys = Object.keys(appRoot.selectedMessageKeys)
+        var dragKeys = {}
+        if (keys.length > 0 && appRoot.selectedMessageKeys[messageKeyValue]) {
+            dragKeys = Object.assign({}, appRoot.selectedMessageKeys)
+        } else {
+            dragKeys[messageKeyValue] = true
+        }
+        appRoot.messageDragKeys = dragKeys
+        appRoot.messageDragCount = Object.keys(dragKeys).length
+        appRoot.messageDragActive = true
+        if (appRoot.messageDragProxy) { appRoot.messageDragProxy.visible = true }
+    }
+
     MouseArea {
         id: messageMouseArea
 
         anchors.fill: parent
         hoverEnabled: true
 
-        onClicked: function (mouse) {
-            if (!appRoot)
-                return;
-            if (mouse.modifiers & Qt.ShiftModifier && appRoot.lastClickedMessageIndex >= 0 && appRoot.messageListModelObj) {
-                // Shift+click: range-select all message rows between anchor and here
-                const from = Math.min(modelIndex, appRoot.lastClickedMessageIndex);
-                const to = Math.max(modelIndex, appRoot.lastClickedMessageIndex);
-                const next = Object.assign({}, appRoot.selectedMessageKeys);
-                const mdl = appRoot.messageListModelObj;
-                for (let i = from; i <= to; ++i) {
-                    const row = mdl.rowAt(i);
-                    if (row && !row.isHeader && row.messageKey)
-                        next[row.messageKey] = true;
+        onPressed: function(mouse) {
+            messageCard._dragStarted = false
+            messageCard._pressX = mouse.x
+            messageCard._pressY = mouse.y
+            messageCard._pressModifiers = mouse.modifiers
+        }
+
+        onPositionChanged: function(mouse) {
+            if (!(mouse.buttons & Qt.LeftButton)) { return }
+            if (messageCard._dragStarted) {
+                if (appRoot && appRoot.messageDragProxy && appRoot.messageDragProxy.parent) {
+                    var mapped = messageCard.mapToItem(appRoot.messageDragProxy.parent, mouse.x, mouse.y)
+                    appRoot.messageDragProxy.x = mapped.x + 14
+                    appRoot.messageDragProxy.y = mapped.y + 14
                 }
-                appRoot.selectedMessageKeys = next;
-            } else if (mouse.modifiers & Qt.ControlModifier) {
-                // Ctrl+click: toggle in multiselect set without changing content view
-                appRoot.lastClickedMessageIndex = modelIndex;
-                const next = Object.assign({}, appRoot.selectedMessageKeys);
-                if (next[messageCard.messageKeyValue])
-                    delete next[messageCard.messageKeyValue];
-                else
-                    next[messageCard.messageKeyValue] = true;
-                appRoot.selectedMessageKeys = next;
+                return
+            }
+            var dx = mouse.x - messageCard._pressX
+            var dy = mouse.y - messageCard._pressY
+            if (dx * dx + dy * dy > 100) {
+                messageCard._dragStarted = true
+                preventStealing = true
+                messageCard._beginDrag()
+            }
+        }
+
+        onReleased: function(mouse) {
+            preventStealing = false
+            if (messageCard._dragStarted) {
+                messageCard._dragStarted = false
+                if (appRoot && appRoot.messageDragActive) {
+                    if (appRoot.messageDragProxy) { appRoot.messageDragProxy.Drag.drop() }
+                    appRoot.cancelMessageDrag()
+                }
+                return
+            }
+            // Normal click
+            if (!appRoot) { return }
+            var mod = messageCard._pressModifiers
+            if (mod & Qt.ShiftModifier && appRoot.lastClickedMessageIndex >= 0 && appRoot.messageListModelObj) {
+                var from = Math.min(modelIndex, appRoot.lastClickedMessageIndex)
+                var to = Math.max(modelIndex, appRoot.lastClickedMessageIndex)
+                var next = Object.assign({}, appRoot.selectedMessageKeys)
+                var mdl = appRoot.messageListModelObj
+                for (var i = from; i <= to; ++i) {
+                    var row = mdl.rowAt(i)
+                    if (row && !row.isHeader && row.messageKey) { next[row.messageKey] = true }
+                }
+                appRoot.selectedMessageKeys = next
+            } else if (mod & Qt.ControlModifier) {
+                appRoot.lastClickedMessageIndex = modelIndex
+                var next2 = Object.assign({}, appRoot.selectedMessageKeys)
+                if (next2[messageCard.messageKeyValue]) { delete next2[messageCard.messageKeyValue] }
+                else { next2[messageCard.messageKeyValue] = true }
+                appRoot.selectedMessageKeys = next2
             } else {
-                // Normal click: open message, clear multiselect
-                appRoot.lastClickedMessageIndex = modelIndex;
-                appRoot.lastMessageClickAtMs = Date.now();
-                appRoot.selectedMessageKeys = ({});
-                appRoot.selectedMessageKey = messageCard.messageKeyValue;
+                appRoot.lastClickedMessageIndex = modelIndex
+                appRoot.lastMessageClickAtMs = Date.now()
+                appRoot.selectedMessageKeys = ({})
+                appRoot.selectedMessageKey = messageCard.messageKeyValue
             }
         }
     }

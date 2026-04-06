@@ -38,6 +38,11 @@ Kirigami.ApplicationWindow {
         z: -1
         focus: true
         Keys.onPressed: (event) => {
+            if (event.key === Qt.Key_Escape && root.messageDragActive) {
+                root.cancelMessageDrag()
+                event.accepted = true
+                return
+            }
             if (event.key === Qt.Key_Shift) {
                 if (!root.shiftKeyDown) {
                     root.shiftKeyDown = true
@@ -140,6 +145,10 @@ Kirigami.ApplicationWindow {
     property var pendingDeleteKeys: ({})
     property int lastClickedMessageIndex: -1
     property bool bootstrapFolderSyncRequested: false
+
+    property bool messageDragActive: false
+    property var messageDragKeys: ({})
+    property int messageDragCount: 0
 
     property bool gmailCalendarsExpanded: true
     property var calendarSources: []
@@ -257,6 +266,7 @@ Kirigami.ApplicationWindow {
 
     // Expose messageContentPane id to child components (e.g. MailToolbar).
     readonly property alias messageContentPane: messageContentPane
+    readonly property alias messageDragProxy: messageDragProxy
 
     // ── Settings ──
 
@@ -628,6 +638,26 @@ Kirigami.ApplicationWindow {
         delete next["msg:" + accountEmail + "|" + folder + "|" + uid]
         root.selectedMessageKeys = next
         imapServiceObj.moveMessage(accountEmail, folder, uid, targetFolder)
+    }
+
+    function moveSelectedMessagesToFolder(targetRawFolder) {
+        if (!imapServiceObj || !targetRawFolder.length) { return }
+        var keys = Object.keys(root.messageDragKeys)
+        for (var i = 0; i < keys.length; i++) {
+            var p = DisplayUtils.parseMessageKey(keys[i])
+            if (!p) { continue }
+            if (p.folder.toLowerCase() === targetRawFolder.toLowerCase()) { continue }
+            moveMessageToFolder(p.accountEmail, p.folder, p.uid, targetRawFolder)
+        }
+        root.selectedMessageKeys = ({})
+        root.cancelMessageDrag()
+    }
+
+    function cancelMessageDrag() {
+        messageDragProxy.visible = false
+        root.messageDragActive = false
+        root.messageDragKeys = ({})
+        root.messageDragCount = 0
     }
 
     function toggleMessageFlagged(accountEmail, folder, uid, currentlyFlagged) {
@@ -1232,6 +1262,41 @@ Kirigami.ApplicationWindow {
         border.width: 1
         border.color: Qt.darker(Kirigami.Theme.disabledTextColor, 2)
         z: 9999
+    }
+
+    // ── Drag proxy (same pattern as /tmp/dragtest.qml) ──
+
+    Rectangle {
+        id: messageDragProxy
+        parent: QQC2.Overlay.overlay
+        visible: false
+        width: dragCountLabel.implicitWidth + 36
+        height: 28
+        radius: 6
+        color: Qt.rgba(0, 0, 0, 0.8)
+        border.color: systemPalette.highlight
+        border.width: 1
+        z: 99999
+
+        Drag.active: messageDragProxy.visible
+
+        Row {
+            anchors.centerIn: parent
+            spacing: 6
+            Kirigami.Icon {
+                source: "mail-message"
+                width: 14; height: 14
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            QQC2.Label {
+                id: dragCountLabel
+                color: "white"
+                font.pixelSize: 12
+                text: root.messageDragCount > 1
+                    ? i18n("Move %1 messages", root.messageDragCount)
+                    : i18n("Move message")
+            }
+        }
     }
 
     // ── Context menus ──

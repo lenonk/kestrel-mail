@@ -23,8 +23,13 @@ QQC2.ItemDelegate {
     property int iconSize: 17
     property int baseIndentOffset: Kirigami.Units.gridUnit * 2
 
+    property bool acceptsDrop: false
+    property string dropRawFolderName: ""
+    property bool dropHighlighted: false
+
     signal activated()
     signal toggleRequested()
+    signal dropReceived(string targetFolder)
 
     Layout.fillWidth: true
     implicitHeight: rowHeight
@@ -46,6 +51,24 @@ QQC2.ItemDelegate {
         width: parent ? parent.width + 3 : 0
         height: parent ? parent.height : 0
         color: root.selected ? Qt.lighter(Kirigami.Theme.backgroundColor, 1.5) : "transparent"
+
+        Rectangle {
+            anchors.fill: parent
+            color: Kirigami.Theme.highlightColor
+            opacity: root.dropHighlighted ? 0.3 : 0
+            Behavior on opacity { NumberAnimation { duration: 80 } }
+        }
+
+        DropArea {
+            anchors.fill: parent
+            enabled: root.acceptsDrop && root.dropRawFolderName.length > 0
+            onEntered: { root.dropHighlighted = true }
+            onExited: { root.dropHighlighted = false }
+            onDropped: {
+                root.dropHighlighted = false
+                root.dropReceived(root.dropRawFolderName)
+            }
+        }
     }
 
     contentItem: RowLayout {

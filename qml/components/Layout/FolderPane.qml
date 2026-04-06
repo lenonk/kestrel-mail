@@ -165,7 +165,10 @@ Rectangle {
                 newMessageCount: folderStats.newMessages || 0
                 selected: appRoot.selectedFolderKey === modelData.key
                 tooltipText: appRoot.folderTooltipText(modelData.name, modelData.key, rawFolderName)
+                acceptsDrop: true
+                dropRawFolderName: rawFolderName
                 onActivated: appRoot.selectedFolderKey = modelData.key
+                onDropReceived: (targetFolder) => appRoot.moveSelectedMessagesToFolder(targetFolder)
             }
         }
 
@@ -199,10 +202,13 @@ Rectangle {
                 newMessageCount: modelData.noselect ? 0 : (folderStats.newMessages || 0)
                 selected: appRoot.selectedFolderKey === modelData.key
                 tooltipText: appRoot.folderTooltipText(modelData.name, modelData.key, rawFolderName)
+                acceptsDrop: !modelData.noselect
+                dropRawFolderName: rawFolderName
                 onToggleRequested: appRoot.toggleMoreFolderExpanded(rawFolderName)
                 onActivated: {
-                    if (!modelData.noselect) appRoot.selectedFolderKey = modelData.key
+                    if (!modelData.noselect) { appRoot.selectedFolderKey = modelData.key }
                 }
+                onDropReceived: (targetFolder) => appRoot.moveSelectedMessagesToFolder(targetFolder)
             }
         }
 
