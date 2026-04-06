@@ -169,6 +169,8 @@ Rectangle {
                 dropRawFolderName: rawFolderName
                 onActivated: appRoot.selectedFolderKey = modelData.key
                 onDropReceived: (targetFolder) => appRoot.moveSelectedMessagesToFolder(targetFolder)
+                onDragEnteredTarget: appRoot.messageDragOverTarget = true
+                onDragExitedTarget: appRoot.messageDragOverTarget = false
             }
         }
 
@@ -209,6 +211,8 @@ Rectangle {
                     if (!modelData.noselect) { appRoot.selectedFolderKey = modelData.key }
                 }
                 onDropReceived: (targetFolder) => appRoot.moveSelectedMessagesToFolder(targetFolder)
+                onDragEnteredTarget: appRoot.messageDragOverTarget = true
+                onDragExitedTarget: appRoot.messageDragOverTarget = false
             }
         }
 

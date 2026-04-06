@@ -30,6 +30,8 @@ QQC2.ItemDelegate {
     signal activated()
     signal toggleRequested()
     signal dropReceived(string targetFolder)
+    signal dragEnteredTarget()
+    signal dragExitedTarget()
 
     Layout.fillWidth: true
     implicitHeight: rowHeight
@@ -62,9 +64,10 @@ QQC2.ItemDelegate {
         DropArea {
             anchors.fill: parent
             enabled: root.acceptsDrop && root.dropRawFolderName.length > 0
-            onEntered: { root.dropHighlighted = true }
-            onExited: { root.dropHighlighted = false }
-            onDropped: {
+            onEntered: { root.dropHighlighted = true; root.dragEnteredTarget() }
+            onExited: { root.dropHighlighted = false; root.dragExitedTarget() }
+            onDropped: (drop) => {
+                drop.accept()
                 root.dropHighlighted = false
                 root.dropReceived(root.dropRawFolderName)
             }

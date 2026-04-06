@@ -173,6 +173,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/MessageContent/MessageThreadView.qml
         qml/components/MessageList/MessageListPane.qml
         qml/components/MessageList/MessageCard.qml
+        qml/components/MessageList/MessageCardDragVisual.qml
         qml/components/MessageList/MessageCardAvatar.qml
         qml/components/MessageList/MessageCardIndicators.qml
         qml/components/MessageList/MessageCardStatusColumn.qml

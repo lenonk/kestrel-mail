@@ -143,11 +143,23 @@ Rectangle {
 
     border.color: "transparent"
     clip: true
-    color: isChecked ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.35) : "transparent") : (appRoot && appRoot.selectedMessageKey === messageKeyValue) ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.18) : "transparent") : "transparent"
+    color: _isDragPlaceholder ? "transparent" : isChecked ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.35) : "transparent") : (appRoot && appRoot.selectedMessageKey === messageKeyValue) ? (systemPalette ? Qt.lighter(systemPalette.highlight, 1.18) : "transparent") : "transparent"
     height: Kirigami.Units.gridUnit * 3 + Kirigami.Units.smallSpacing + 14
     radius: 0
     visible: !isHeaderRow
     width: parent.width
+
+    Rectangle {
+        visible: messageCard._isDragPlaceholder
+        anchors.fill: parent
+        anchors.leftMargin: 7
+        anchors.rightMargin: 5
+        anchors.topMargin: 5
+        anchors.bottomMargin: 5
+        color: "transparent"
+        border.width: 1
+        border.color: Kirigami.Theme.highlightColor
+    }
 
     HoverHandler {
         id: rowHover
@@ -161,10 +173,14 @@ Rectangle {
         }
     }
 
+    property bool _isDragPlaceholder: false
     property bool _dragStarted: false
     property real _pressX: 0
     property real _pressY: 0
     property int _pressModifiers: 0
+    property Item _dragVisual: null
+    property point _dragVisualStartPos: Qt.point(0, 0)
+    property point _dragOffset: Qt.point(0, 0)
 
     function _beginDrag() {
         if (!appRoot) { return }
@@ -178,7 +194,123 @@ Rectangle {
         appRoot.messageDragKeys = dragKeys
         appRoot.messageDragCount = Object.keys(dragKeys).length
         appRoot.messageDragActive = true
+
+        // Grab a pixel-perfect screenshot of the card, then create the drag visual
+        var overlay = appRoot.messageDragProxy ? appRoot.messageDragProxy.parent : null
+        if (!overlay) { return }
+
+        messageCard.grabToImage(function(result) {
+            if (!result) { return }
+
+            _dragVisual = Qt.createQmlObject(
+                'import QtQuick; import org.kde.kirigami as Kirigami;
+                 Rectangle {
+                     property real slideOffset: 0
+                     Behavior on slideOffset { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+                     scale: 0.92; opacity: 0.88; transformOrigin: Item.TopLeft
+                     radius: 4
+                     color: Kirigami.Theme.backgroundColor
+                     border.width: 1; border.color: Kirigami.Theme.highlightColor
+                     Image { id: img; anchors.fill: parent; anchors.margins: 1; source: "" }
+                 }',
+                overlay
+            )
+            _dragVisual.children[0].source = result.url
+            _dragVisual.width = messageCard.width
+            _dragVisual.height = messageCard.height
+            _dragVisual.z = 100000
+
+            var cardPos = messageCard.mapToItem(overlay, 0, 0)
+            _dragVisual.x = cardPos.x
+            _dragVisual.y = cardPos.y
+            _dragVisualStartPos = Qt.point(_dragVisual.x, _dragVisual.y)
+            _dragOffset = Qt.point(messageCard._pressX, messageCard._pressY)
+
+            // Hide content, show placeholder border
+            messageCard._isDragPlaceholder = true
+        })
+
+        // Show the invisible Drag carrier so DropArea works
         if (appRoot.messageDragProxy) { appRoot.messageDragProxy.visible = true }
+    }
+
+    function _finishDrag(dropped) {
+        if (!_dragVisual) {
+            messageCard._isDragPlaceholder = false
+            appRoot.cancelMessageDrag()
+            return
+        }
+
+        var visual = _dragVisual
+        var card = messageCard
+
+        if (dropped) {
+            // Animate toward the cursor (drop point) while scaling down — "sucked into folder"
+            var dropX = appRoot.messageDragProxy ? appRoot.messageDragProxy.x : visual.x
+            var dropY = appRoot.messageDragProxy ? appRoot.messageDragProxy.y : visual.y
+            // Target: visual center converges on the drop point
+            var targetX = dropX - (visual.width * 0.5)
+            var targetY = dropY - (visual.height * 0.5)
+
+            visual.transformOrigin = Item.Center
+            var xAnim = Qt.createQmlObject('import QtQuick; NumberAnimation { duration: 250; easing.type: Easing.InCubic }', visual)
+            var yAnim = Qt.createQmlObject('import QtQuick; NumberAnimation { duration: 250; easing.type: Easing.InCubic }', visual)
+            var scaleAnim = Qt.createQmlObject('import QtQuick; NumberAnimation { duration: 250; easing.type: Easing.InCubic }', visual)
+            var opacityAnim = Qt.createQmlObject('import QtQuick; NumberAnimation { duration: 250; easing.type: Easing.InCubic }', visual)
+
+            xAnim.target = visual; xAnim.property = "x"; xAnim.to = targetX
+            yAnim.target = visual; yAnim.property = "y"; yAnim.to = targetY
+            scaleAnim.target = visual; scaleAnim.property = "scale"; scaleAnim.to = 0.05
+            opacityAnim.target = visual; opacityAnim.property = "opacity"; opacityAnim.to = 0
+
+            var completed = 0
+            function onDropDone() {
+                completed++
+                if (completed === 4) {
+                    visual.destroy()
+                    card._dragVisual = null
+                    card._isDragPlaceholder = false
+                    xAnim.destroy(); yAnim.destroy(); scaleAnim.destroy(); opacityAnim.destroy()
+                }
+            }
+
+            xAnim.finished.connect(onDropDone)
+            yAnim.finished.connect(onDropDone)
+            scaleAnim.finished.connect(onDropDone)
+            opacityAnim.finished.connect(onDropDone)
+            xAnim.start(); yAnim.start(); scaleAnim.start(); opacityAnim.start()
+            appRoot.cancelMessageDrag()
+            return
+        }
+
+        // Snap-back animation
+        var startX = _dragVisualStartPos.x
+        var startY = _dragVisualStartPos.y
+
+        var xAnim = Qt.createQmlObject('import QtQuick; NumberAnimation { duration: 200; easing.type: Easing.OutCubic }', visual)
+        var yAnim = Qt.createQmlObject('import QtQuick; NumberAnimation { duration: 200; easing.type: Easing.OutCubic }', visual)
+        var scaleAnim2 = Qt.createQmlObject('import QtQuick; NumberAnimation { duration: 200; easing.type: Easing.OutCubic }', visual)
+
+        xAnim.target = visual; xAnim.property = "x"; xAnim.to = startX
+        yAnim.target = visual; yAnim.property = "y"; yAnim.to = startY
+        scaleAnim2.target = visual; scaleAnim2.property = "scale"; scaleAnim2.to = 1.0
+
+        var completed2 = 0
+        function onSnapDone() {
+            completed2++
+            if (completed2 === 3) {
+                visual.destroy()
+                card._dragVisual = null
+                card._isDragPlaceholder = false
+                xAnim.destroy(); yAnim.destroy(); scaleAnim2.destroy()
+            }
+        }
+
+        xAnim.finished.connect(onSnapDone)
+        yAnim.finished.connect(onSnapDone)
+        scaleAnim2.finished.connect(onSnapDone)
+        xAnim.start(); yAnim.start(); scaleAnim2.start()
+        appRoot.cancelMessageDrag()
     }
 
     MouseArea {
@@ -197,10 +329,18 @@ Rectangle {
         onPositionChanged: function(mouse) {
             if (!(mouse.buttons & Qt.LeftButton)) { return }
             if (messageCard._dragStarted) {
-                if (appRoot && appRoot.messageDragProxy && appRoot.messageDragProxy.parent) {
-                    var mapped = messageCard.mapToItem(appRoot.messageDragProxy.parent, mouse.x, mouse.y)
-                    appRoot.messageDragProxy.x = mapped.x + 14
-                    appRoot.messageDragProxy.y = mapped.y + 14
+                if (messageCard._dragVisual && appRoot && appRoot.messageDragProxy) {
+                    var overlay = appRoot.messageDragProxy.parent
+                    var mapped = messageCard.mapToItem(overlay, mouse.x, mouse.y)
+                    var normalX = mapped.x - messageCard._dragOffset.x
+                    // slideOffset animates smoothly; x is set directly each frame
+                    messageCard._dragVisual.slideOffset = appRoot.messageDragOverTarget
+                        ? (mapped.x + 15) - normalX : 0
+                    messageCard._dragVisual.x = normalX + messageCard._dragVisual.slideOffset
+                    messageCard._dragVisual.y = mapped.y - messageCard._dragOffset.y
+                    // Keep the invisible Drag carrier at the cursor for DropArea hit-testing
+                    appRoot.messageDragProxy.x = mapped.x
+                    appRoot.messageDragProxy.y = mapped.y
                 }
                 return
             }
@@ -218,8 +358,10 @@ Rectangle {
             if (messageCard._dragStarted) {
                 messageCard._dragStarted = false
                 if (appRoot && appRoot.messageDragActive) {
-                    if (appRoot.messageDragProxy) { appRoot.messageDragProxy.Drag.drop() }
-                    appRoot.cancelMessageDrag()
+                    var proxy = appRoot.messageDragProxy
+                    var dropResult = proxy ? proxy.Drag.drop() : Qt.IgnoreAction
+                    var dropped = (dropResult !== Qt.IgnoreAction)
+                    messageCard._finishDrag(dropped)
                 }
                 return
             }
@@ -255,6 +397,7 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Kirigami.Units.smallSpacing
+        visible: !messageCard._isDragPlaceholder
 
         MessageCardStatusColumn {
             // Unread dot

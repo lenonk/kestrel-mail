@@ -149,6 +149,7 @@ Kirigami.ApplicationWindow {
     property bool messageDragActive: false
     property var messageDragKeys: ({})
     property int messageDragCount: 0
+    property bool messageDragOverTarget: false
 
     property bool gmailCalendarsExpanded: true
     property var calendarSources: []
@@ -650,12 +651,14 @@ Kirigami.ApplicationWindow {
             moveMessageToFolder(p.accountEmail, p.folder, p.uid, targetRawFolder)
         }
         root.selectedMessageKeys = ({})
-        root.cancelMessageDrag()
+        // Don't call cancelMessageDrag here — the caller (_finishDrag) handles cleanup
+        // so Drag.drop() can return the correct action.
     }
 
     function cancelMessageDrag() {
         messageDragProxy.visible = false
         root.messageDragActive = false
+        root.messageDragOverTarget = false
         root.messageDragKeys = ({})
         root.messageDragCount = 0
     }
@@ -1264,39 +1267,15 @@ Kirigami.ApplicationWindow {
         z: 9999
     }
 
-    // ── Drag proxy (same pattern as /tmp/dragtest.qml) ──
+    // ── Drag carrier (invisible — the visual is created by MessageCard) ──
 
-    Rectangle {
+    Item {
         id: messageDragProxy
         parent: QQC2.Overlay.overlay
         visible: false
-        width: dragCountLabel.implicitWidth + 36
-        height: 28
-        radius: 6
-        color: Qt.rgba(0, 0, 0, 0.8)
-        border.color: systemPalette.highlight
-        border.width: 1
+        width: 1; height: 1
         z: 99999
-
         Drag.active: messageDragProxy.visible
-
-        Row {
-            anchors.centerIn: parent
-            spacing: 6
-            Kirigami.Icon {
-                source: "mail-message"
-                width: 14; height: 14
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            QQC2.Label {
-                id: dragCountLabel
-                color: "white"
-                font.pixelSize: 12
-                text: root.messageDragCount > 1
-                    ? i18n("Move %1 messages", root.messageDragCount)
-                    : i18n("Move message")
-            }
-        }
     }
 
     // ── Context menus ──
