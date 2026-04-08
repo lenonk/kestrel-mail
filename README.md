@@ -10,11 +10,11 @@ Kestrel Mail is a KDE-native email client focused on modern UX, reliable IMAP sy
 - KDE-first UX with Kirigami
 - Reliable IMAP core with incremental sync and local persistence
 - OAuth2-driven account setup for major providers
-- Integrated Google Calendar week view
+- Integrated Google Calendar with invite management
 
 ## Current Status
 
-Kestrel has active end-to-end mail and calendar plumbing in place:
+Kestrel has active end-to-end mail, calendar, and local storage plumbing in place:
 
 **Mail**
 - Qt 6 + Kirigami app shell with split-pane mail layout
@@ -27,12 +27,16 @@ Kestrel has active end-to-end mail and calendar plumbing in place:
 - Inline image loading with sender trust controls and tracking pixel detection
 - Attachment viewing, saving, and prefetching (BODYSTRUCTURE-based)
 - Message actions: mark read/flagged, move, archive, delete
+- Drag-and-drop message moving between folders with visual feedback
+- Drag-and-drop label/tag assignment (copy, not move) for Gmail labels
 - Contact avatars with multi-source resolution and caching
 - Threading via Message-ID / In-Reply-To / References headers
 - Gmail category tabs (Primary, Social, Promotions, Updates, Forums)
-- Local folders and sidebar hierarchy (collapsible sections, favorites bar)
+- Local folders with full message + attachment archival (drag to copy from server)
+- Sidebar hierarchy (collapsible sections, favorites bar, tags)
 - Search bar with full-text message search and contact lookup
 - Compose window with rich text editing and SMTP send
+- Desktop notifications with circular avatars and quick actions (Mark Read, Reply)
 - System tray integration
 
 **Calendar**
@@ -42,11 +46,15 @@ Kestrel has active end-to-end mail and calendar plumbing in place:
 - All-day event gutter
 - Calendar sidebar with per-calendar visibility toggles
 - Mini month calendar
+- Live invite cards with Accept/Decline/Tentative RSVP via Google Calendar API
+- 5-week event fetch window (ready for month view)
 
 **Infrastructure**
 - Startup splash screen with real initialization (DB integrity check, connection pool establishment)
 - OAuth2 with PKCE, automatic re-authentication on token expiry
+- Token storage: KWallet (preferred), libsecret (GNOME), or plaintext file fallback
 - SQLite with WAL mode, per-thread connections, and forward-compatible schema migrations
+- IMAP Lab tool for interactive protocol debugging
 - Privacy policy for Google API compliance
 
 ## Tech Stack
@@ -66,7 +74,7 @@ cmake --build build
 ./build/kestrel-mail
 ```
 
-Requires Qt 6, KDE Frameworks 6 (Kirigami, KI18n, KCoreAddons), and QtWebEngine.
+Requires Qt 6, KDE Frameworks 6 (Kirigami, KI18n, KCoreAddons, KWallet), and QtWebEngine.
 
 ## Screenshots
 
