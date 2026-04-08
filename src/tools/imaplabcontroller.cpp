@@ -2,6 +2,8 @@
 
 #include "../core/accounts/accountrepository.h"
 #include "../core/auth/filetokenvault.h"
+#include "../core/auth/kwallettokenvault.h"
+#include <KWallet>
 #include "../core/utils.h"
 
 #include <QByteArray>
@@ -46,7 +48,9 @@ QString xoauth2String(const QString &email, const QString &accessToken)
 ImapLabController::ImapLabController(QObject *parent)
     : QObject(parent)
     , m_accountsRepo(new AccountRepository(this))
-    , m_tokenVault(std::make_unique<FileTokenVault>())
+    , m_tokenVault(KWallet::Wallet::isEnabled()
+                       ? std::unique_ptr<TokenVault>(std::make_unique<KWalletTokenVault>())
+                       : std::unique_ptr<TokenVault>(std::make_unique<FileTokenVault>()))
 {
     m_templates = {
         QVariantMap{{"name", "CAPABILITY"}, {"command", "CAPABILITY"}},

@@ -497,6 +497,9 @@ bool DataStore::init()
         return false;
     }
 
+    // Idempotent migrations for message_attachments.
+    q.exec("ALTER TABLE message_attachments ADD COLUMN local_path TEXT DEFAULT ''"_L1);
+
     // Paging/list performance indexes.
     q.exec("CREATE INDEX IF NOT EXISTS idx_messages_received_at_id ON messages(received_at DESC, id DESC)"_L1);
     q.exec("CREATE INDEX IF NOT EXISTS idx_mfm_folder_message ON message_folder_map(folder, message_id)"_L1);
@@ -727,7 +730,7 @@ QVariantMap DataStore::folderMapRowForEdge(const QString &accountEmail, const QS
 void DataStore::deleteSingleFolderEdge(const QString &accountEmail, const QString &folder, const QString &uid) { m_messages->deleteSingleFolderEdge(accountEmail, folder, uid); }
 void DataStore::deleteFolderEdgesForMessage(const QString &accountEmail, const QString &folder, qint64 messageId) { m_messages->deleteFolderEdgesForMessage(accountEmail, folder, messageId); }
 QString DataStore::folderUidForMessageId(const QString &accountEmail, const QString &folder, qint64 messageId) const { return m_messages->folderUidForMessageId(accountEmail, folder, messageId); }
-void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread) { m_messages->insertFolderEdge(accountEmail, messageId, folder, uid, unread); }
+void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread, const QString &source) { m_messages->insertFolderEdge(accountEmail, messageId, folder, uid, unread, source); }
 QMap<QString, qint64> DataStore::lookupByMessageIdHeaders(const QString &accountEmail, const QStringList &messageIdHeaders) { return m_messages->lookupByMessageIdHeaders(accountEmail, messageIdHeaders); }
 void DataStore::removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId) { m_messages->removeAllEdgesForMessageId(accountEmail, messageId); }
 QStringList DataStore::folderUids(const QString &accountEmail, const QString &folder) const { return m_messages->folderUids(accountEmail, folder); }
@@ -753,6 +756,7 @@ QVariantList DataStore::messagesForSelection(const QString &folderKey, const QSt
 QVariantList DataStore::groupedMessagesForSelection(const QString &folderKey, const QStringList &selectedCategories, int selectedCategoryIndex, bool todayExpanded, bool yesterdayExpanded, bool lastWeekExpanded, bool twoWeeksAgoExpanded, bool olderExpanded) const { return m_messages->groupedMessagesForSelection(folderKey, selectedCategories, selectedCategoryIndex, todayExpanded, yesterdayExpanded, lastWeekExpanded, twoWeeksAgoExpanded, olderExpanded); }
 void DataStore::upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments) { m_messages->upsertAttachments(messageId, accountEmail, attachments); }
 QVariantList DataStore::attachmentsForMessage(const QString &accountEmail, const QString &folder, const QString &uid) const { return m_messages->attachmentsForMessage(accountEmail, folder, uid); }
+void DataStore::setAttachmentLocalPath(const QString &accountEmail, qint64 messageId, const QString &partId, const QString &localPath) { m_messages->setAttachmentLocalPath(accountEmail, messageId, partId, localPath); }
 QVariantList DataStore::searchMessages(const QString &query, int limit, int offset, bool *hasMore) const { return m_messages->searchMessages(query, limit, offset, hasMore); }
 
 // ─── Folder stats forwarding to FolderStatsStore ───────────────────

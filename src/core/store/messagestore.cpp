@@ -1604,6 +1604,7 @@ MessageStore::removeAccountUidsEverywhere(const QString &accountEmail, const QSt
           )
           AND lower(folder) NOT IN ('trash','[gmail]/trash','[google mail]/trash')
           AND lower(folder) NOT LIKE '%/trash'
+          AND lower(folder) NOT LIKE 'local:%'
     )"_L1.arg(placeholders.join(","_L1)));
     qFind.bindValue(":account_email"_L1, acc);
     bindPlaceholders(qFind, uids);
@@ -1858,7 +1859,8 @@ MessageStore::deleteFolderEdgesForMessage(const QString &accountEmail, const QSt
 
 void
 MessageStore::insertFolderEdge(const QString &accountEmail, const qint64 messageId,
-                               const QString &folder, const QString &uid, const qint32 unread) const {
+                               const QString &folder, const QString &uid, const qint32 unread,
+                               const QString &source) const {
     auto database = m_db();
     if (!database.isValid() || !database.isOpen()) { return; }
 
@@ -1874,11 +1876,11 @@ MessageStore::insertFolderEdge(const QString &accountEmail, const qint64 message
     q.prepare(R"(
         INSERT INTO message_folder_map
             (account_email, message_id, folder, uid, unread, source, confidence, observed_at)
-        VALUES (:acc, :mid, :folder, :uid, :unread, 'imap-label', 100, datetime('now'))
+        VALUES (:acc, :mid, :folder, :uid, :unread, :source, 100, datetime('now'))
         ON CONFLICT(account_email, folder, uid) DO UPDATE SET
           message_id=excluded.message_id,
           unread=MIN(message_folder_map.unread, excluded.unread),
-          source='imap-label', confidence=100, observed_at=datetime('now')
+          source=:source, confidence=100, observed_at=datetime('now')
     )"_L1);
 
     q.bindValue(":acc"_L1,    accountEmail);
@@ -1886,6 +1888,7 @@ MessageStore::insertFolderEdge(const QString &accountEmail, const qint64 message
     q.bindValue(":folder"_L1, folder);
     q.bindValue(":uid"_L1,    uid);
     q.bindValue(":unread"_L1, unread);
+    q.bindValue(":source"_L1, source);
     q.exec();
 
     if (isNew) {
@@ -2559,7 +2562,7 @@ MessageStore::messagesForSelection(const QString &folderKey,
     if (hasMore) { *hasMore = false; }
 
     if (key.startsWith("local:"_L1, Qt::CaseInsensitive)) {
-        return {};
+        return messagesForFolderView(database, key, limit, offset, hasMore);
     }
 
     if (key.compare("favorites:flagged"_L1, Qt::CaseInsensitive) == 0) {
@@ -2785,6 +2788,27 @@ MessageStore::attachmentsForMessage(const QString &accountEmail, const QString &
     }
 
     return out;
+}
+
+void
+MessageStore::setAttachmentLocalPath(const QString &accountEmail, const qint64 messageId,
+                                     const QString &partId, const QString &localPath) const {
+    auto database = m_db();
+    if (!database.isValid() || !database.isOpen()) { return; }
+
+    QSqlQuery q(database);
+    q.prepare(R"(
+        UPDATE message_attachments
+        SET local_path = :local_path
+        WHERE account_email = :account_email
+          AND message_id = :message_id
+          AND part_id = :part_id
+    )"_L1);
+    q.bindValue(":local_path"_L1,     localPath);
+    q.bindValue(":account_email"_L1,  accountEmail.trimmed());
+    q.bindValue(":message_id"_L1,     messageId);
+    q.bindValue(":part_id"_L1,        partId.trimmed());
+    q.exec();
 }
 
 // ─── Search ────────────────────────────────────────────────────────

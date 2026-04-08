@@ -175,6 +175,14 @@ Item {
             id: htmlView
 
             anchors.fill: parent
+
+            // Block WebEngineView's native drop acceptance during message drags
+            // so the drag proxy gets Qt.IgnoreAction and plays the snapback animation.
+            DropArea {
+                anchors.fill: parent
+                enabled: appRoot && appRoot.messageDragActive
+                onDropped: (drop) => { drop.accepted = false }
+            }
             backgroundColor: root.forceDarkHtml ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35) : "white"
             opacity: htmlContainer.bodyOpacity
             settings.autoLoadImages: true

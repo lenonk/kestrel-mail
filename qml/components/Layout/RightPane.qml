@@ -72,14 +72,29 @@ Rectangle {
 
         Repeater {
             id: invitesRepeater
-            model: [i18n("Saturday, 4:30 PM"), i18n("Sunday, 3:30 PM")]
+            model: appRoot.upcomingInvites
             delegate: Calendar.InviteCard {
-                title: i18n("D&D")
-                whenText: modelData
-                fromText: i18n("from max@example.com")
+                function formatInviteDate(isoStr, subtitle) {
+                    if (!isoStr) { return subtitle || "" }
+                    var d = new Date(isoStr)
+                    var formatted = d.toLocaleDateString(Qt.locale(), "dddd, MMMM d, yyyy")
+                    if (subtitle && subtitle !== "All day") {
+                        formatted += " " + subtitle
+                    } else if (subtitle === "All day") {
+                        formatted += ", " + subtitle
+                    }
+                    return formatted
+                }
+                title: modelData.title || ""
+                whenText: formatInviteDate(modelData.startIso, modelData.subtitle)
+                fromText: modelData.organizer ? i18n("from %1", modelData.organizer) : ""
+                accentColor: modelData.color || ""
+                responseStatus: modelData.selfResponseStatus || ""
                 sectionSpacing: appRoot.sectionSpacing
                 radiusValue: appRoot.defaultRadius
-                showBottomDivider: index < (invitesRepeater.count - 1)
+                onAccepted: appRoot.imapServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "accepted")
+                onDeclined: appRoot.imapServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "declined")
+                onTentative: appRoot.imapServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "tentative")
             }
         }
 

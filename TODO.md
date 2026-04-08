@@ -5,10 +5,11 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 ## Product / UX
 
 - [ ] Add user-facing settings to enable/disable Gmail category tabs (Purchases, Updates, Forums), default hidden.
-- [ ] Add user setting to toggle hover-expand behavior in the content pane (keep feature, make configurable).
 - [ ] Add user option: **Download all messages for offline use** (deferred; not default behavior).
-- [ ] Ensure message list pane never changes scroll position during updates (verify/follow up after current fix in `MessageListPane.qml`).
 - [ ] Replace hardcoded Gmail category handling with DB-discovered categories (discover from message labels, persist category set, and read categories from DB everywhere UI/logic iterates them).
+- [ ] Make Local Folders an option, off by default (visual clutter for most users).
+- [ ] Make Favorites section an option the user can turn off.
+- [ ] Calendar month view: fetch next/previous month's events on the fly when navigating.
 
 ## Sync / Parity / Correctness
 
@@ -30,10 +31,7 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
   - [x] CONDSTORE `CHANGEDSINCE`/modseq-aware fetch paths implemented.
   - [ ] QRESYNC/VANISHED support where the server actually advertises QRESYNC capability (Gmail does not).
   - [x] Full `UID SEARCH ALL` avoided in authoritative no-change windows.
-- [ ] Reduce no-op sync churn when nothing changed:
-  - if `UIDNEXT/HIGHESTMODSEQ/MESSAGES` unchanged, short-circuit folder sync early,
-  - avoid repeated per-category searches in no-change windows,
-  - eliminate redundant same-connection `SELECT` cycles for unchanged folders.
+- [ ] Reduce no-op sync churn: eliminate redundant same-connection `SELECT` cycles for unchanged folders.
 
 ## Notes
 

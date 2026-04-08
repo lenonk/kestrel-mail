@@ -46,6 +46,8 @@ public:
                                         const QString &uid, const QString &targetFolder);
     Q_INVOKABLE void removeMessageFromFolder(const QString &accountEmail, const QString &folder,
                                              const QString &uid, const QString &targetFolder);
+    Q_INVOKABLE void copyToLocalFolder(const QString &accountEmail, const QString &folder,
+                                       const QString &uid, const QString &localFolderKey);
 
     Q_INVOKABLE void initialize();
     void initializeConnectionPool();
@@ -70,6 +72,9 @@ public:
     Q_INVOKABLE void refreshGoogleWeekEvents(const QStringList &calendarIds,
                                              const QString &weekStartIso,
                                              const QString &weekEndIso);
+    Q_INVOKABLE void respondToCalendarInvite(const QString &calendarId,
+                                             const QString &eventId,
+                                             const QString &response);
 
     [[nodiscard]] QVariantList googleCalendarList() const { return m_googleCalendarList; }
     [[nodiscard]] QVariantList googleWeekEvents() const { return m_googleWeekEvents; }
@@ -86,6 +91,7 @@ signals:
     void attachmentDownloadProgress(const QString &accountEmail, const QString &uid, const QString &partId, int progressPercent);
     void googleCalendarListChanged();
     void googleWeekEventsChanged();
+    void calendarInviteResponded();
 
 private:
     // Internal result type for async sync work lambdas.

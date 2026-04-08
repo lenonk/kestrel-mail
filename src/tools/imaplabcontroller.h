@@ -5,8 +5,8 @@
 #include <memory>
 
 class AccountRepository;
-class FileTokenVault;
 class QSslSocket;
+class TokenVault;
 
 class ImapLabController : public QObject
 {
@@ -60,7 +60,7 @@ private:
     void closePersistentSession();
 
     AccountRepository *m_accountsRepo = nullptr;
-    std::unique_ptr<FileTokenVault> m_tokenVault;
+    std::unique_ptr<TokenVault> m_tokenVault;
     QVariantList m_accounts;
     QVariantList m_templates;
     QString m_selectedAccountEmail;

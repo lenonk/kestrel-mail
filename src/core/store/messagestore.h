@@ -61,7 +61,8 @@ public:
     QString folderUidForMessageId(const QString &accountEmail, const QString &folder,
                                   qint64 messageId) const;
     void insertFolderEdge(const QString &accountEmail, qint64 messageId,
-                          const QString &folder, const QString &uid, qint32 unread) const;
+                          const QString &folder, const QString &uid, qint32 unread,
+                          const QString &source = QStringLiteral("imap-label")) const;
     QMap<QString, qint64> lookupByMessageIdHeaders(const QString &accountEmail,
                                                    const QStringList &messageIdHeaders) const;
     void removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId) const;
@@ -111,6 +112,8 @@ public:
                            const QVariantList &attachments) const;
     QVariantList attachmentsForMessage(const QString &accountEmail, const QString &folder,
                                       const QString &uid) const;
+    void setAttachmentLocalPath(const QString &accountEmail, qint64 messageId,
+                                const QString &partId, const QString &localPath) const;
 
     // ── Search ──────────────────────────────────────────────────────
     QVariantList searchMessages(const QString &query, qint32 limit = 50,

@@ -330,23 +330,38 @@ Rectangle {
             if (!(mouse.buttons & Qt.LeftButton)) { return }
             if (messageCard._dragStarted) {
                 if (messageCard._dragVisual && appRoot && appRoot.messageDragProxy) {
-                    var overlay = appRoot.messageDragProxy.parent
-                    var mapped = messageCard.mapToItem(overlay, mouse.x, mouse.y)
-                    var normalX = mapped.x - messageCard._dragOffset.x
+                    const overlay = appRoot.messageDragProxy.parent;
+                    const mapped = messageCard.mapToItem(overlay, mouse.x, mouse.y);
+                    const normalX = mapped.x - messageCard._dragOffset.x;
                     // slideOffset animates smoothly; x is set directly each frame
-                    messageCard._dragVisual.slideOffset = appRoot.messageDragOverTarget
+                    // Slide visual out of the way when cursor enters the folder pane
+                    let overFolderPane = false;
+                    if (appRoot.folderPane) {
+                        const fp = appRoot.folderPane.mapToItem(overlay, 0, 0);
+                        overFolderPane = mapped.x >= fp.x && mapped.x < fp.x + appRoot.folderPane.width
+                    }
+                    messageCard._dragVisual.slideOffset = overFolderPane
                         ? (mapped.x + 15) - normalX : 0
-                    messageCard._dragVisual.x = normalX + messageCard._dragVisual.slideOffset
-                    messageCard._dragVisual.y = mapped.y - messageCard._dragOffset.y
+                    const visualX = normalX + messageCard._dragVisual.slideOffset;
+                    const visualY = mapped.y - messageCard._dragOffset.y;
+                    const vw = messageCard._dragVisual.width * messageCard._dragVisual.scale;
+                    const vh = messageCard._dragVisual.height * messageCard._dragVisual.scale;
+                    messageCard._dragVisual.x = Math.max(0, Math.min(visualX, overlay.width - vw))
+                    messageCard._dragVisual.y = Math.max(0, Math.min(visualY, overlay.height - vh))
                     // Keep the invisible Drag carrier at the cursor for DropArea hit-testing
                     appRoot.messageDragProxy.x = mapped.x
                     appRoot.messageDragProxy.y = mapped.y
                 }
                 return
             }
-            var dx = mouse.x - messageCard._pressX
-            var dy = mouse.y - messageCard._pressY
-            if (dx * dx + dy * dy > 100) {
+            const dx = mouse.x - messageCard._pressX;
+            const dy = mouse.y - messageCard._pressY;
+            const absDx = Math.abs(dx);
+            const absDy = Math.abs(dy);
+            // Start drag once horizontal movement exceeds 5px. Vertical
+            // movement only passes through for flicking if horizontal stays
+            // under 10px.
+            if (absDx > 5) {
                 messageCard._dragStarted = true
                 preventStealing = true
                 messageCard._beginDrag()

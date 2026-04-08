@@ -14,7 +14,7 @@ function calendarWeekBoundsIso() {
     var mondayOffset = (start.getDay() + 6) % 7
     start.setDate(start.getDate() - mondayOffset)
     var end = new Date(start)
-    end.setDate(end.getDate() + 7)
+    end.setDate(end.getDate() + 35) // 5 weeks — covers any month view
     return { startIso: start.toISOString(), endIso: end.toISOString() }
 }
 

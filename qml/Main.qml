@@ -154,6 +154,30 @@ Kirigami.ApplicationWindow {
     property bool gmailCalendarsExpanded: true
     property var calendarSources: []
     property var calendarEvents: []
+    readonly property var upcomingInvites: {
+        if (!calendarEvents || calendarEvents.length === 0) { return [] }
+        // dayIndex is days since range start (Monday of current week).
+        var now = new Date()
+        var rangeStart = new Date(now)
+        rangeStart.setHours(0, 0, 0, 0)
+        var mondayOffset = (rangeStart.getDay() + 6) % 7
+        rangeStart.setDate(rangeStart.getDate() - mondayOffset)
+        var todayIndex = Math.floor((now.getTime() - rangeStart.getTime()) / 86400000)
+        var filtered = []
+        for (var i = 0; i < calendarEvents.length; i++) {
+            var ev = calendarEvents[i]
+            // Only include actual invites: organized by someone else, and we're an attendee.
+            if (ev.organizerIsSelf) { continue }
+            if (!ev.selfResponseStatus || ev.selfResponseStatus.length === 0) { continue }
+            if (ev.dayIndex < todayIndex) { continue }
+            filtered.push(ev)
+        }
+        filtered.sort(function(a, b) {
+            if (a.dayIndex !== b.dayIndex) { return a.dayIndex - b.dayIndex }
+            return a.startHour - b.startHour
+        })
+        return filtered.slice(0, 5)
+    }
 
     property bool todayExpanded: true
     property bool yesterdayExpanded: true
@@ -248,9 +272,6 @@ Kirigami.ApplicationWindow {
 
     // ── Derived properties ──
 
-    readonly property var mockInboxMessages: [
-        { sender: "welcome@kestrel.mail", subject: "Welcome to Kestrel Mail", snippet: "Your account is set up. Press Refresh to load real mail from your provider.", receivedAt: "2026-02-17T11:00:00", unread: true }
-    ]
 
     readonly property var selectedFolderEntry: root.folderEntryByKey(root.selectedFolderKey)
     readonly property var selectedFolderCategories: (root.selectedFolderEntry && root.selectedFolderEntry.categories)
@@ -268,6 +289,7 @@ Kirigami.ApplicationWindow {
     // Expose messageContentPane id to child components (e.g. MailToolbar).
     readonly property alias messageContentPane: messageContentPane
     readonly property alias messageDragProxy: messageDragProxy
+    readonly property alias folderPane: leftPaneContainer
 
     // ── Settings ──
 
@@ -655,6 +677,27 @@ Kirigami.ApplicationWindow {
         // so Drag.drop() can return the correct action.
     }
 
+    function copySelectedMessagesToFolder(targetRawFolder) {
+        if (!imapServiceObj || !targetRawFolder.length) { return }
+        var keys = Object.keys(root.messageDragKeys)
+        for (var i = 0; i < keys.length; i++) {
+            var p = DisplayUtils.parseMessageKey(keys[i])
+            if (!p) { continue }
+            if (p.folder.toLowerCase() === targetRawFolder.toLowerCase()) { continue }
+            imapServiceObj.addMessageToFolder(p.accountEmail, p.folder, p.uid, targetRawFolder)
+        }
+    }
+
+    function copySelectedMessagesToLocalFolder(localFolderKey) {
+        if (!imapServiceObj || !localFolderKey.length) { return }
+        var keys = Object.keys(root.messageDragKeys)
+        for (var i = 0; i < keys.length; i++) {
+            var p = DisplayUtils.parseMessageKey(keys[i])
+            if (!p) { continue }
+            imapServiceObj.copyToLocalFolder(p.accountEmail, p.folder, p.uid, localFolderKey)
+        }
+    }
+
     function cancelMessageDrag() {
         messageDragProxy.visible = false
         root.messageDragActive = false
@@ -970,6 +1013,10 @@ Kirigami.ApplicationWindow {
 
         function onGoogleWeekEventsChanged() {
             root.calendarEvents = root.imapServiceObj ? root.imapServiceObj.googleWeekEvents : []
+        }
+
+        function onCalendarInviteResponded() {
+            root.refreshVisibleGoogleWeekEvents()
         }
     }
 

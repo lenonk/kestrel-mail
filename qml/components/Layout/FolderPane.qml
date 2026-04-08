@@ -118,7 +118,12 @@ Rectangle {
                 newMessageCount: folderStats.newMessages || 0
                 selected: appRoot.selectedFolderKey === modelData.key
                 tooltipText: appRoot.folderTooltipText(modelData.name, modelData.key, rawFolderName)
+                acceptsDrop: true
+                dropRawFolderName: rawFolderName
                 onActivated: appRoot.selectedFolderKey = modelData.key
+                onDropReceived: (targetFolder) => appRoot.copySelectedMessagesToFolder(targetFolder)
+                onDragEnteredTarget: appRoot.messageDragOverTarget = true
+                onDragExitedTarget: appRoot.messageDragOverTarget = false
             }
         }
 
@@ -245,7 +250,12 @@ Rectangle {
                 newMessageCount: folderStats.newMessages || 0
                 selected: appRoot.selectedFolderKey === modelData.key
                 tooltipText: appRoot.folderTooltipText(modelData.name, modelData.key, "")
+                acceptsDrop: true
+                dropRawFolderName: modelData.key
                 onActivated: appRoot.selectedFolderKey = modelData.key
+                onDropReceived: (targetFolder) => appRoot.copySelectedMessagesToLocalFolder(targetFolder)
+                onDragEnteredTarget: appRoot.messageDragOverTarget = true
+                onDragExitedTarget: appRoot.messageDragOverTarget = false
             }
         }
 

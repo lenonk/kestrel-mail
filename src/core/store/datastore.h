@@ -47,7 +47,7 @@ public:
     void deleteSingleFolderEdge(const QString &accountEmail, const QString &folder, const QString &uid);
     void deleteFolderEdgesForMessage(const QString &accountEmail, const QString &folder, qint64 messageId);
     QString folderUidForMessageId(const QString &accountEmail, const QString &folder, qint64 messageId) const;
-    void insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread);
+    void insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread, const QString &source = QStringLiteral("imap-label"));
     QMap<QString, qint64> lookupByMessageIdHeaders(const QString &accountEmail, const QStringList &messageIdHeaders);
     void removeAllEdgesForMessageId(const QString &accountEmail, qint64 messageId);
     Q_INVOKABLE QStringList folderUids(const QString &accountEmail, const QString &folder) const;
@@ -85,6 +85,7 @@ public:
     Q_INVOKABLE QVariantList attachmentsForMessage(const QString &accountEmail, const QString &folder, const QString &uid) const;
     Q_INVOKABLE QVariantList searchMessages(const QString &query, int limit = 50, int offset = 0, bool *hasMore = nullptr) const;
     void upsertAttachments(qint64 messageId, const QString &accountEmail, const QVariantList &attachments);
+    void setAttachmentLocalPath(const QString &accountEmail, qint64 messageId, const QString &partId, const QString &localPath);
 
     // ── Folder management ───────────────────────────────────────────
     Q_INVOKABLE void upsertFolder(const QVariantMap &folder);

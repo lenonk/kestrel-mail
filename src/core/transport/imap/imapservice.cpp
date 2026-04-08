@@ -1832,6 +1832,8 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
         if (!weekStart.isValid() || !weekEnd.isValid())
             return;
 
+        const qint32 totalDays = static_cast<qint32>(weekStart.date().daysTo(weekEnd.date())) - 1;
+
         QNetworkAccessManager nam;
         QVariantList out;
 
@@ -1880,6 +1882,7 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
             const auto items = doc.object().value("items").toArray();
             for (const auto &v : items) {
                 const auto o = v.toObject();
+                const QString eventId = o.value("id").toString();
                 const auto startObj = o.value("start").toObject();
                 const auto endObj = o.value("end").toObject();
 
@@ -1922,15 +1925,37 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                                              : o.value("recurrence").toArray().first().toString()
                                            : QString();
 
+                // Organizer display name or email, and whether this is someone else's event.
+                const auto organizerObj = o.value("organizer").toObject();
+                const QString organizer = organizerObj.value("displayName").toString().isEmpty()
+                    ? organizerObj.value("email").toString()
+                    : organizerObj.value("displayName").toString();
+                const bool organizerIsSelf = organizerObj.value("self").toBool(false);
+
+                // Find the current user's response status from attendees.
+                QString selfResponseStatus;
+                const auto attendees = o.value("attendees").toArray();
+                for (const auto &att : attendees) {
+                    const auto a = att.toObject();
+                    if (a.value("self").toBool(false)) {
+                        selfResponseStatus = a.value("responseStatus").toString();
+                        break;
+                    }
+                }
+
+                // ISO start time for QML sorting/formatting.
+                const QString startIso = startDt.toString(Qt::ISODate);
+
                 if (isAllDay) {
                     const qint64 rawStart = weekStart.date().daysTo(startDt.date());
                     const qint64 rawEnd   = weekStart.date().daysTo(endDt.date().addDays(-1));
                     const qint32 visStart = qMax(0, static_cast<qint32>(rawStart));
-                    const qint32 visEnd   = qMin(6, static_cast<qint32>(rawEnd));
-                    if (visStart > 6 || visEnd < 0)
+                    const qint32 visEnd   = qMin(totalDays, static_cast<qint32>(rawEnd));
+                    if (visStart > totalDays || visEnd < 0)
                         continue;
 
                     QVariantMap row;
+                    row.insert("eventId"_L1, eventId);
                     row.insert("calendarId"_L1, calendarId);
                     row.insert("dayIndex"_L1, visStart);
                     row.insert("spanDays"_L1, visEnd - visStart + 1);
@@ -1943,16 +1968,21 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                     row.insert("location"_L1, o.value("location"_L1).toString());
                     row.insert("visibility"_L1, o.value("visibility"_L1).toString());
                     row.insert("recurrence"_L1, recurrence);
+                    row.insert("organizer"_L1, organizer);
+                    row.insert("organizerIsSelf"_L1, organizerIsSelf);
+                    row.insert("selfResponseStatus"_L1, selfResponseStatus);
+                    row.insert("startIso"_L1, startIso);
                     out.push_back(row);
                 } else {
                     const qint64 dayIndex = weekStart.date().daysTo(startDt.date());
-                    if (dayIndex < 0 || dayIndex > 6)
+                    if (dayIndex < 0 || dayIndex > totalDays)
                         continue;
 
                     const qint32 minutes = startDt.time().hour() * 60 + startDt.time().minute();
                     const qint32 durMinutes = qMax(15, static_cast<qint32>(startDt.secsTo(endDt) / 60));
 
                     QVariantMap row;
+                    row.insert("eventId"_L1, eventId);
                     row.insert("calendarId"_L1, calendarId);
                     row.insert("dayIndex"_L1, static_cast<qint32>(dayIndex));
                     row.insert("spanDays"_L1, 1);
@@ -1967,6 +1997,10 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                     row.insert("location"_L1, o.value("location"_L1).toString());
                     row.insert("visibility"_L1, o.value("visibility"_L1).toString());
                     row.insert("recurrence"_L1, recurrence);
+                    row.insert("organizer"_L1, organizer);
+                    row.insert("organizerIsSelf"_L1, organizerIsSelf);
+                    row.insert("selfResponseStatus"_L1, selfResponseStatus);
+                    row.insert("startIso"_L1, startIso);
                     out.push_back(row);
                 }
             }
@@ -1979,6 +2013,98 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
     });
 }
 
+
+void
+ImapService::respondToCalendarInvite(const QString &calendarId,
+                                      const QString &eventId,
+                                      const QString &response) {
+    if (calendarId.isEmpty() || eventId.isEmpty() || response.isEmpty())
+        return;
+
+    const auto accounts = m_accounts ? m_accounts->accounts() : QVariantList{};
+    runBackgroundTask([this, calendarId, eventId, response, accounts]() {
+        const auto resolved = resolveAccounts(accounts);
+        auto it = std::ranges::find_if(resolved, [](const AccountInfo &info) {
+            return info.host.contains("gmail", Qt::CaseInsensitive);
+        });
+        if (it == resolved.end()) { return; }
+        const QString accessToken = it->accessToken;
+        if (accessToken.isEmpty()) { return; }
+
+        const QString encodedCalId = QString::fromUtf8(QUrl::toPercentEncoding(calendarId));
+        const QString encodedEvtId = QString::fromUtf8(QUrl::toPercentEncoding(eventId));
+
+        // GET the event to retrieve current attendees.
+        QUrl getUrl("https://www.googleapis.com/calendar/v3/calendars/%1/events/%2"_L1
+                    .arg(encodedCalId, encodedEvtId));
+
+        QNetworkAccessManager nam;
+        QNetworkRequest getReq{getUrl};
+        getReq.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
+
+        QEventLoop loop;
+        QNetworkReply *getReply = nam.get(getReq);
+        QObject::connect(getReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        loop.exec();
+
+        const QByteArray getPayload = getReply->readAll();
+        const bool getOk = getReply->error() == QNetworkReply::NoError;
+        getReply->deleteLater();
+        if (!getOk) {
+            qWarning() << "[calendar] GET event failed for RSVP:" << eventId;
+            return;
+        }
+
+        auto eventObj = QJsonDocument::fromJson(getPayload).object();
+        auto attendees = eventObj.value("attendees").toArray();
+
+        // Update self's responseStatus.
+        bool found = false;
+        for (qsizetype i = 0; i < attendees.size(); ++i) {
+            auto a = attendees[i].toObject();
+            if (a.value("self").toBool(false)) {
+                a["responseStatus"] = response;
+                attendees[i] = a;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            qWarning() << "[calendar] Self not found in attendees for" << eventId;
+            return;
+        }
+
+        // PATCH the event with updated attendees.
+        QJsonObject patchBody;
+        patchBody["attendees"] = attendees;
+
+        QUrl patchUrl(getUrl);
+        QUrlQuery pq;
+        pq.addQueryItem("sendUpdates"_L1, "all"_L1);
+        patchUrl.setQuery(pq);
+
+        QNetworkRequest patchReq{patchUrl};
+        patchReq.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
+        patchReq.setHeader(QNetworkRequest::ContentTypeHeader, "application/json"_L1);
+
+        QNetworkReply *patchReply = nam.sendCustomRequest(
+            patchReq, "PATCH", QJsonDocument(patchBody).toJson(QJsonDocument::Compact));
+        QObject::connect(patchReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        loop.exec();
+
+        const bool patchOk = patchReply->error() == QNetworkReply::NoError;
+        patchReply->deleteLater();
+
+        if (patchOk) {
+            qInfo() << "[calendar] RSVP sent:" << response << "for" << eventId;
+            QMetaObject::invokeMethod(this, [this]() {
+                emit calendarInviteResponded();
+            }, Qt::QueuedConnection);
+        } else {
+            qWarning() << "[calendar] PATCH event failed for RSVP:" << eventId;
+        }
+    });
+}
 
 bool
 bodyAlreadyFetched(const DataStore *store, const QString& accountEmail, const QString &folderName, const QString &uid) {
@@ -2448,6 +2574,110 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
             if (!m_destroying.load())
                 syncFolder(resolvedTarget, false);
         }, Qt::QueuedConnection);
+    });
+}
+
+void
+ImapService::copyToLocalFolder(const QString &accountEmail, const QString &folder,
+                                const QString &uid, const QString &localFolderKey) {
+    if (m_destroying || accountEmail.isEmpty() || folder.isEmpty() || uid.isEmpty() || localFolderKey.isEmpty())
+        return;
+
+    qint64 messageId = -1;
+    qint32 unreadVal = 0;
+    if (m_store) {
+        const QVariantMap edge = m_store->folderMapRowForEdge(accountEmail, folder, uid);
+        messageId = edge.value("messageId"_L1, -1LL).toLongLong();
+        unreadVal = edge.value("unread"_L1, 0).toInt();
+
+        if (messageId <= 0) {
+            qWarning() << "[copy-to-local] No message_id for" << accountEmail << folder << uid;
+            return;
+        }
+
+        // Optimistic: insert local folder edge so the message appears immediately.
+        m_store->insertFolderEdge(accountEmail, messageId, localFolderKey, uid, unreadVal, "local-copy"_L1);
+        m_store->notifyDataChanged();
+    }
+
+    // Background: ensure body is hydrated and download attachments to persistent storage.
+    const auto msgId = messageId;
+    runBackgroundTask([this, accountEmail, folder, uid, localFolderKey, msgId]() {
+        if (m_destroying.load()) { return; }
+
+        // 1. Hydrate body if missing.
+        if (m_store && !m_store->hasUsableBodyForEdge(accountEmail, folder, uid)) {
+            auto cxn = getPooledConnection(accountEmail, "local-copy-hydrate");
+            if (cxn) {
+                Imap::MessageHydrator::Request req;
+                req.cxn        = cxn;
+                req.folderName = folder;
+                req.uid        = uid;
+                const QString html = Imap::MessageHydrator::execute(req);
+                if (!html.isEmpty()) {
+                    QMetaObject::invokeMethod(this, [this, accountEmail, folder, uid, html]() {
+                        if (!m_destroying.load() && m_store)
+                            m_store->updateBodyForKey(accountEmail, folder, uid, html);
+                    }, Qt::QueuedConnection);
+                }
+            }
+        }
+
+        // 2. Download attachments to persistent local storage.
+        if (!m_store) { return; }
+        const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folder, uid);
+        if (attachments.isEmpty()) { return; }
+
+        auto cxn = getPooledConnection(accountEmail, "local-copy-attachments");
+        if (!cxn) { return; }
+
+        const auto sourceFolder = resolveSourceFolder(folder);
+        if (cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
+            if (!cxn->examine(sourceFolder)) { return; }
+        }
+
+        const auto storageBase = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                               + "/local-attachments/"_L1 + accountEmail
+                               + "/"_L1 + QString::number(msgId);
+
+        for (const auto &a : attachments) {
+            if (m_destroying.load()) { break; }
+
+            const auto am       = a.toMap();
+            const QString partId   = am.value("partId"_L1).toString();
+            const QString encoding = am.value("encoding"_L1).toString();
+            const QString name     = am.value("name"_L1).toString();
+
+            const auto data = fetchAttachmentPartById(*cxn, uid, partId, encoding, [](int, qint64) {});
+            if (data.isEmpty()) { continue; }
+
+            const auto safePartId = QString(partId).replace('/', '_').replace('.', '_');
+            const auto partDir    = storageBase + "/"_L1 + safePartId;
+            QDir().mkpath(partDir);
+
+            const auto safeName  = QString(name).replace(QRegularExpression("[^A-Za-z0-9._-]"_L1), "_"_L1);
+            const auto localPath = partDir + "/"_L1 + (safeName.isEmpty() ? "attachment"_L1 : safeName);
+
+            QSaveFile f(localPath);
+            if (!f.open(QIODevice::WriteOnly)) { continue; }
+            f.write(data);
+            if (!f.commit()) { continue; }
+
+            // Persist the local path in the DB so it survives cache expiry.
+            QMetaObject::invokeMethod(this, [this, accountEmail, msgId, partId, localPath]() {
+                if (!m_destroying.load() && m_store)
+                    m_store->setAttachmentLocalPath(accountEmail, msgId, partId, localPath);
+            }, Qt::QueuedConnection);
+
+            // Also add to the in-memory cache for immediate access.
+            const auto cacheKey = accountEmail + "|"_L1 + uid + "|"_L1 + partId;
+            attachmentCacheInsert(cacheKey, localPath);
+        }
+
+        qInfo().noquote() << "[copy-to-local] Done:"
+                          << "account=" << accountEmail << "uid=" << uid
+                          << "localFolder=" << localFolderKey
+                          << "attachments=" << attachments.size();
     });
 }
 

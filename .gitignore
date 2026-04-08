@@ -4,5 +4,6 @@
 /tmp/
 /tools/__pycache__/
 .idea/
+.claude/
 *.user
 *.swp

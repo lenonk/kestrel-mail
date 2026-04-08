@@ -19,6 +19,7 @@
 #include <QDir>
 #include <QFontDatabase>
 #include <QFontInfo>
+#include <QPainter>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
 #include "ui/splashscreen.h"
@@ -192,9 +193,17 @@ int main(int argc, char *argv[])
                 QString path = avatarUrl;
                 if (path.startsWith("file://"_L1))
                     path = path.mid(7);
-                avatar = QPixmap(path);
-                if (!avatar.isNull())
-                    avatar = avatar.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                QPixmap raw(path);
+                if (!raw.isNull()) {
+                    raw = raw.scaled(64, 64, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+                    avatar = QPixmap(64, 64);
+                    avatar.fill(Qt::transparent);
+                    QPainter p(&avatar);
+                    p.setRenderHint(QPainter::Antialiasing);
+                    p.setBrush(QBrush(raw.copy((raw.width() - 64) / 2, (raw.height() - 64) / 2, 64, 64)));
+                    p.setPen(Qt::NoPen);
+                    p.drawEllipse(0, 0, 64, 64);
+                }
             }
             if (avatar.isNull())
                 avatar = DataStore::avatarPixmap(sender, senderRaw);
