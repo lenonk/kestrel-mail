@@ -94,6 +94,8 @@ Requires Qt 6, KDE Frameworks 6 (Kirigami, KI18n, KCoreAddons, KWallet), and QtW
 
 ![Demo screencast](Screenshots/Screencast_20260319_025819.gif)
 
-## License
+## Legal
 
-GPL-3.0-or-later
+- [Privacy Policy](docs/PRIVACY_POLICY.md)
+- [Terms of Service](docs/TERMS_OF_SERVICE.md)
+- License: GPL-3.0-or-later
