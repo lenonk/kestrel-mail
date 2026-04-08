@@ -1,6 +1,6 @@
 # Kestrel Mail Privacy Policy
 
-**Last updated:** March 27, 2026
+**Last updated:** April 8, 2026
 
 ## Overview
 
@@ -12,22 +12,25 @@ Kestrel Mail does **not** collect, transmit, or store any user data on external 
 
 ## Data Stored Locally
 
-The following data is stored locally on your computer to provide email functionality:
+The following data is stored locally on your computer to provide email, calendar, and contact functionality:
 
 - **Email messages**: Headers, bodies, and attachments synced from your IMAP server are cached in a local SQLite database.
-- **Account credentials**: OAuth2 refresh tokens are stored in a local file (`~/.local/share/kestrel-mail/tokens.json`). Access tokens are obtained on-demand and held only in memory.
+- **Local folder messages**: Messages copied to local folders are stored permanently with their full body and attachments in a local directory.
+- **Calendar events**: Events fetched from Google Calendar are held in memory for display and are not persisted to disk.
+- **Contact information**: Sender names, email addresses, avatar URLs, and contacts synced from Google are cached locally for display purposes.
+- **Account credentials**: OAuth2 refresh tokens are stored securely using KWallet (KDE), libsecret (GNOME), or a local file as a last resort. Access tokens are obtained on-demand and held only in memory.
 - **Account configuration**: Email account settings (server addresses, display names) are stored locally.
-- **Contact information**: Sender names, email addresses, and avatar URLs are cached locally for display purposes.
 - **Search history**: Recent search queries are stored locally for convenience.
 - **User preferences**: Application settings, trusted sender domains, and folder configurations are stored locally.
 
 ## Third-Party Services
 
-Kestrel Mail communicates with the following external services as part of normal email client operation:
+Kestrel Mail communicates with the following external services as part of normal operation:
 
 - **Your email provider's IMAP and SMTP servers** (e.g., Gmail, Outlook) to sync and send email.
 - **Your email provider's OAuth2 endpoints** (e.g., Google's token endpoint) to authenticate your account.
-- **Google People API** (for Gmail accounts only) to retrieve contact photos.
+- **Google Calendar API** (for Gmail accounts) to fetch calendar events and respond to invitations.
+- **Google People API** (for Gmail accounts) to retrieve and sync contacts and contact photos.
 
 No data is sent to the Kestrel Mail developers, or any other third party.
 
@@ -35,24 +38,31 @@ No data is sent to the Kestrel Mail developers, or any other third party.
 
 Kestrel Mail's use of Google API services adheres to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements:
 
-- Kestrel Mail only requests the minimum scopes necessary to provide email functionality (`https://mail.google.com/` for IMAP/SMTP access).
-- Data obtained from Google APIs is used solely to provide email functionality to you.
-- Data is not transferred to third parties except as necessary to provide the email service.
-- Data is not used for advertising or any purpose unrelated to email functionality.
+- Kestrel Mail requests the following scopes:
+  - `https://mail.google.com/` — IMAP and SMTP access for reading and sending email.
+  - `https://www.googleapis.com/auth/calendar` — Reading calendar events and responding to invitations.
+  - `https://www.googleapis.com/auth/contacts` — Reading and syncing contacts.
+- Data obtained from Google APIs is used solely to provide email, calendar, and contact functionality to you.
+- Data is not transferred to third parties except as necessary to provide the service.
+- Data is not used for advertising or any purpose unrelated to email, calendar, or contact functionality.
 - Human access to your data is limited to debugging at your explicit request.
 
 ## Data Security
 
-- OAuth2 refresh tokens are stored in a plain-text JSON file with standard filesystem permissions. Future versions may integrate with platform-specific keychains (e.g., KWallet).
+- OAuth2 refresh tokens are stored using KWallet (KDE), libsecret (GNOME Keyring), or a plain-text JSON file with standard filesystem permissions as a last resort.
 - All IMAP and SMTP connections use TLS encryption.
-- No data leaves your computer except to communicate with your configured email provider.
+- All Google API requests use HTTPS.
+- No data leaves your computer except to communicate with your configured email provider and the Google APIs listed above.
 
 ## Data Deletion
 
 Uninstalling Kestrel Mail and removing the following directories will delete all locally stored data:
 
-- `~/.local/share/kestrel-mail/` (database, tokens, account config)
+- `~/.local/share/kestrel-mail/` (database, local folder messages, attachments, account config)
 - `~/.config/kestrel-mail/` (application settings, if present)
+- `~/.cache/kestrel-mail/` (cached attachments)
+
+To remove stored tokens, use your platform's keychain manager (KWallet, Seahorse, etc.) or delete `~/.local/share/kestrel-mail/tokens.json` if using the file fallback.
 
 ## Children's Privacy
 
