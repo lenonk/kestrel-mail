@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creating a PGP Keypair - Kestrel Mail</title>
+    <style>
+        :root { --bg: #0e1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --text-muted: #8b949e; --accent: #498cfd; --accent-hover: #6aa3ff; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+        .container { max-width: 760px; margin: 0 auto; padding: 60px 24px 80px; }
+        .back-link { display: inline-block; color: var(--accent); text-decoration: none; margin-bottom: 32px; font-size: 0.95rem; }
+        .back-link:hover { color: var(--accent-hover); }
+        h1 { font-size: 2rem; font-weight: 700; margin-bottom: 12px; }
+        .subtitle { color: var(--text-muted); font-size: 1.1rem; margin-bottom: 40px; }
+        h2 { font-size: 1.35rem; font-weight: 600; margin-top: 40px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        p { margin-bottom: 16px; }
+        .highlight-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin: 20px 0; }
+        .highlight-box h3 { font-size: 1.05rem; margin-bottom: 8px; }
+        .highlight-box p { margin-bottom: 0; color: var(--text-muted); }
+        .warning { background: #2a1f0e; border: 1px solid #5c4413; border-radius: 8px; padding: 16px 20px; margin: 20px 0; color: #e8c567; font-size: 0.95rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/encryption" class="back-link">&larr; Back to Encryption Guide</a>
+
+        <h1>Creating a PGP Keypair</h1>
+        <p class="subtitle">What happens when you create a new keypair in Kestrel Mail.</p>
+
+        <h2>Choosing a password</h2>
+        <p>
+            When you create a keypair, you'll be asked to set a password (sometimes called a
+            passphrase). This password protects your private key &mdash; without it, nobody
+            can use your key to decrypt messages or sign emails on your behalf.
+        </p>
+        <p>
+            Choose something strong and memorable. You'll need this password whenever
+            Kestrel Mail needs to decrypt an incoming message or sign an outgoing one.
+        </p>
+        <div class="warning">
+            Use a different password than your email account password. If your email password
+            is ever compromised, your encryption keys will still be safe.
+        </div>
+
+        <h2>Picking a key size</h2>
+        <p>
+            You'll also choose a key size, measured in bits. A larger key is harder to crack
+            but takes slightly longer to generate and use:
+        </p>
+        <div class="highlight-box">
+            <h3>1024 bit</h3>
+            <p>Fastest, but considered weak by modern standards. Not recommended for sensitive communication.</p>
+        </div>
+        <div class="highlight-box">
+            <h3>2048 bit</h3>
+            <p>A good balance of security and speed. Suitable for most people.</p>
+        </div>
+        <div class="highlight-box">
+            <h3>4096 bit</h3>
+            <p>Maximum security. Slightly slower to encrypt and decrypt, but practically unbreakable with current technology.</p>
+        </div>
+        <p>
+            If you're unsure, 2048 bit is a solid default. You can always generate a new,
+            stronger keypair later if your needs change.
+        </p>
+
+        <h2>What happens next</h2>
+        <p>
+            After you click Next, Kestrel Mail generates your keypair. You'll then be prompted
+            to save a backup of your private key &mdash; this is an important step, because
+            losing your private key means losing access to all messages encrypted with it.
+            There is no recovery option.
+        </p>
+    </div>
+</body>
+</html>

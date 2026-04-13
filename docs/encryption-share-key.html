@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sharing Your Public Key - Kestrel Mail</title>
+    <style>
+        :root { --bg: #0e1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --text-muted: #8b949e; --accent: #498cfd; --accent-hover: #6aa3ff; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+        .container { max-width: 760px; margin: 0 auto; padding: 60px 24px 80px; }
+        .back-link { display: inline-block; color: var(--accent); text-decoration: none; margin-bottom: 32px; font-size: 0.95rem; }
+        .back-link:hover { color: var(--accent-hover); }
+        h1 { font-size: 2rem; font-weight: 700; margin-bottom: 12px; }
+        .subtitle { color: var(--text-muted); font-size: 1.1rem; margin-bottom: 40px; }
+        h2 { font-size: 1.35rem; font-weight: 600; margin-top: 40px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        p { margin-bottom: 16px; }
+        ul { margin: 12px 0 16px 24px; }
+        li { margin-bottom: 8px; }
+        .highlight-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin: 20px 0; }
+        .highlight-box h3 { font-size: 1.05rem; margin-bottom: 8px; }
+        .highlight-box p { margin-bottom: 0; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/encryption" class="back-link">&larr; Back to Encryption Guide</a>
+
+        <h1>Sharing Your Public Key</h1>
+        <p class="subtitle">How to let others send you encrypted messages.</p>
+
+        <h2>Why share your public key?</h2>
+        <p>
+            For someone to send you an encrypted email, they need your public key. Think of
+            it like giving someone your mailing address &mdash; without it, they can't send
+            you anything. Your public key is safe to share openly; it can only be used to
+            <em>encrypt</em> messages to you, not to read them.
+        </p>
+
+        <h2>Ways to share</h2>
+
+        <div class="highlight-box">
+            <h3>Upload to a public key server</h3>
+            <p>
+                Key servers are online directories where anyone can look up your public key
+                by your email address. This is the most convenient option &mdash; people can
+                find your key automatically without you having to send it to each person individually.
+            </p>
+        </div>
+
+        <div class="highlight-box">
+            <h3>Send it directly</h3>
+            <p>
+                You can email your public key as an attachment, or share the key file through
+                any channel you like &mdash; messaging apps, cloud storage links, USB drives,
+                etc. The recipient imports it into their email client.
+            </p>
+        </div>
+
+        <h2>Verifying keys</h2>
+        <p>
+            Every PGP key has a unique fingerprint &mdash; a short string of letters and numbers
+            that identifies it. When someone sends you their public key (or you download one
+            from a key server), it's good practice to verify the fingerprint through a separate
+            channel &mdash; a phone call, a text message, or in person.
+        </p>
+        <p>
+            This confirms you have the real key and not one that was tampered with. It takes
+            30 seconds and prevents a whole class of attacks.
+        </p>
+
+        <h2>What if I skip sharing?</h2>
+        <p>
+            You can still use your keypair to decrypt messages and sign outgoing emails.
+            But nobody will be able to send you encrypted messages until they have your
+            public key. You can always share it later from Kestrel Mail's account settings.
+        </p>
+    </div>
+</body>
+</html>

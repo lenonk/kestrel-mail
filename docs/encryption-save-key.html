@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saving Your Private Key - Kestrel Mail</title>
+    <style>
+        :root { --bg: #0e1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --text-muted: #8b949e; --accent: #498cfd; --accent-hover: #6aa3ff; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+        .container { max-width: 760px; margin: 0 auto; padding: 60px 24px 80px; }
+        .back-link { display: inline-block; color: var(--accent); text-decoration: none; margin-bottom: 32px; font-size: 0.95rem; }
+        .back-link:hover { color: var(--accent-hover); }
+        h1 { font-size: 2rem; font-weight: 700; margin-bottom: 12px; }
+        .subtitle { color: var(--text-muted); font-size: 1.1rem; margin-bottom: 40px; }
+        h2 { font-size: 1.35rem; font-weight: 600; margin-top: 40px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        p { margin-bottom: 16px; }
+        ul { margin: 12px 0 16px 24px; }
+        li { margin-bottom: 8px; }
+        .warning { background: #2a1f0e; border: 1px solid #5c4413; border-radius: 8px; padding: 16px 20px; margin: 20px 0; color: #e8c567; font-size: 0.95rem; }
+        .highlight-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin: 20px 0; }
+        .highlight-box h3 { font-size: 1.05rem; margin-bottom: 8px; }
+        .highlight-box p { margin-bottom: 0; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/encryption" class="back-link">&larr; Back to Encryption Guide</a>
+
+        <h1>Saving Your Private Key</h1>
+        <p class="subtitle">Why backing up your private key matters and how to do it safely.</p>
+
+        <div class="warning">
+            If you lose your private key, every message encrypted with it becomes permanently
+            unreadable. This includes messages you've received <em>and</em> copies of encrypted
+            messages you've sent. There is no recovery option &mdash; not even Kestrel Mail
+            can help you get them back.
+        </div>
+
+        <h2>How it works</h2>
+        <p>
+            When you choose to save your private key, Kestrel Mail exports your keypair
+            as a standard file that you can store wherever you like. This file contains
+            both your public and private keys, protected by the password you set during
+            keypair creation.
+        </p>
+
+        <h2>Where to store your backup</h2>
+        <p>
+            Don't rely on a single copy. If the device it's stored on is lost, stolen,
+            or damaged, your key goes with it. Keep multiple backups in different locations:
+        </p>
+        <ul>
+            <li><strong>An encrypted USB drive</strong> stored somewhere safe</li>
+            <li><strong>A secure cloud folder</strong> (encrypted or password-protected)</li>
+            <li><strong>A second device</strong> you control, like a laptop or external hard drive</li>
+        </ul>
+
+        <h2>Can I save it later?</h2>
+        <p>
+            Yes. If you skip the backup during setup, you can always export your keys
+            later from Kestrel Mail's account settings. But we strongly recommend saving
+            a backup right away &mdash; it only takes a moment, and it protects you from
+            a worst-case scenario that can't be undone.
+        </p>
+    </div>
+</body>
+</html>
