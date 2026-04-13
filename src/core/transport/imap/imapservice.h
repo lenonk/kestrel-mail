@@ -34,7 +34,7 @@ public:
     Q_INVOKABLE void syncAll(bool announce = true);
     static std::shared_ptr<Imap::Connection> getPooledConnection(const QString &email = {}, const QString &owner = {});
     static std::shared_ptr<Imap::Connection> getDedicatedHydrateConnection(const QString &email);
-    Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true);
+    Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true, const QString &accountEmail = {});
     Q_INVOKABLE void refreshFolderList(bool announce = true);
     Q_INVOKABLE void hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid);
     Q_INVOKABLE void moveMessage(const QString &accountEmail, const QString &folder,

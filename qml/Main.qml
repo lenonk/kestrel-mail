@@ -114,6 +114,7 @@ Kirigami.ApplicationWindow {
     property bool favoritesExpanded: true
     property bool tagsExpanded: true
     property bool accountExpanded: true
+    property var accountExpandedState: ({})
     property bool moreExpanded: false
     property var moreFolderExpandedState: ({})
     property bool localFoldersExpanded: false
@@ -360,15 +361,40 @@ Kirigami.ApplicationWindow {
         return ColorUtils.tagColorForName(name, usedColors, Common.KestrelColors.importantYellow)
     }
 
-    function accountFolderItems() {
+    readonly property var accountEmails: {
+        var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
+        return FolderUtils.distinctAccountEmails(folders)
+    }
+
+    function accountFolderItemsForEmail(email) {
         var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
         var tabs = root.dataStoreObj ? root.dataStoreObj.inboxCategoryTabs : ["Primary"]
-        return FolderUtils.accountFolderItems(folders, tabs, i18n)
+        return FolderUtils.accountFolderItems(folders, tabs, i18n, email)
+    }
+
+    function moreAccountFolderItemsForEmail(email) {
+        var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
+        return FolderUtils.moreAccountFolderItems(folders, root.accountFolderItemsForEmail(email), root.isMoreFolderExpanded, i18n, email)
+    }
+
+    // Legacy wrappers for code that doesn't pass an email yet.
+    function accountFolderItems() {
+        var emails = root.accountEmails
+        if (emails.length === 1) return root.accountFolderItemsForEmail(emails[0])
+        // Aggregate across all accounts.
+        var all = []
+        for (var i = 0; i < emails.length; ++i)
+            all = all.concat(root.accountFolderItemsForEmail(emails[i]))
+        return all
     }
 
     function moreAccountFolderItems() {
-        var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
-        return FolderUtils.moreAccountFolderItems(folders, root.accountFolderItems(), root.isMoreFolderExpanded, i18n)
+        var emails = root.accountEmails
+        if (emails.length === 1) return root.moreAccountFolderItemsForEmail(emails[0])
+        var all = []
+        for (var i = 0; i < emails.length; ++i)
+            all = all.concat(root.moreAccountFolderItemsForEmail(emails[i]))
+        return all
     }
 
     function tagFolderItems() {
@@ -852,8 +878,9 @@ Kirigami.ApplicationWindow {
 
         var folder = root.selectedImapFolderName()
         if (!folder.length) return
+        var email = FolderUtils.accountEmailFromKey(root.selectedFolderKey)
         root.accountRefreshing = true
-        root.imapServiceObj.syncFolder(folder, !silent)
+        root.imapServiceObj.syncFolder(folder, !silent, email)
     }
 
     function syncMessageListModelSelection() {

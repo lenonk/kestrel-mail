@@ -60,15 +60,24 @@ function isPrimaryAccountFolderNorm(norm) {
 // Build the main account folder list from the dataStore folders array.
 // i18nFn: function(key) for translations — pass Qt i18n or a stub.
 // inboxCategoryTabs: array from dataStore.inboxCategoryTabs
-function accountFolderItems(folders, inboxCategoryTabs, i18nFn) {
+function accountFolderItems(folders, inboxCategoryTabs, i18nFn, accountEmail) {
     if (!folders || folders.length === 0)
         return []
+
+    var filterEmail = (accountEmail || "").toLowerCase()
 
     var bySpecialUse = {}
     var byNorm = {}
 
     for (var i = 0; i < folders.length; ++i) {
         var f = folders[i]
+
+        // Filter by account email if provided.
+        if (filterEmail.length) {
+            var fEmail = (f.accountEmail || "").toString().toLowerCase()
+            if (fEmail !== filterEmail) continue
+        }
+
         var rawName = normalizedRemoteFolderName((f.name || "").toString())
 
         if (!rawName.length) continue
@@ -88,13 +97,15 @@ function accountFolderItems(folders, inboxCategoryTabs, i18nFn) {
         var dn = displayFolderName(rawName)
         if (specialUse === "junk") dn = i18nFn("Junk Email")
 
+        var keyEmail = filterEmail || (f.accountEmail || "").toString().toLowerCase()
         var item = {
-            key: "account:" + norm,
+            key: keyEmail.length ? ("account:" + keyEmail + ":" + norm) : ("account:" + norm),
             name: dn,
             rawName: rawName,
             icon: iconForSpecialUse(specialUse, rawName),
             categories: [],
-            specialUse: specialUse
+            specialUse: specialUse,
+            accountEmail: keyEmail
         }
         byNorm[norm] = item
 
@@ -140,8 +151,10 @@ function accountFolderItems(folders, inboxCategoryTabs, i18nFn) {
 // Build the "More" subfolder items (hierarchical, non-primary, non-tag).
 // primaryItems: result of accountFolderItems()
 // isMoreFolderExpandedFn: function(path) -> bool
-function moreAccountFolderItems(folders, primaryItems, isMoreFolderExpandedFn, i18nFn) {
+function moreAccountFolderItems(folders, primaryItems, isMoreFolderExpandedFn, i18nFn, accountEmail) {
     if (!folders || folders.length === 0) return []
+
+    var filterEmail = (accountEmail || "").toLowerCase()
 
     var primaryKeys = {}
     for (var i = 0; i < primaryItems.length; ++i)
@@ -150,6 +163,12 @@ function moreAccountFolderItems(folders, primaryItems, isMoreFolderExpandedFn, i
     var byNorm = {}
     for (var i2 = 0; i2 < folders.length; ++i2) {
         var f = folders[i2]
+
+        if (filterEmail.length) {
+            var fEmail = (f.accountEmail || "").toString().toLowerCase()
+            if (fEmail !== filterEmail) continue
+        }
+
         var rawName = normalizedRemoteFolderName((f.name || "").toString())
         if (!rawName.length) continue
         if (isCategoryFolder(rawName)) continue
@@ -165,15 +184,17 @@ function moreAccountFolderItems(folders, primaryItems, isMoreFolderExpandedFn, i
             if (head === "[gmail]" || head === "[google mail]") level = Math.max(0, level - 1)
         }
 
+        var keyEmail = filterEmail || (f.accountEmail || "").toString().toLowerCase()
         byNorm[norm] = {
-            key: "account:" + norm,
+            key: keyEmail.length ? ("account:" + keyEmail + ":" + norm) : ("account:" + norm),
             name: displayFolderName(rawName),
             rawName: rawName,
             icon: iconForSpecialUse(f.specialUse, rawName),
             categories: [],
             flags: (f.flags || "").toString(),
             noselect: isNoSelectFolder(f.flags),
-            level: level
+            level: level,
+            accountEmail: keyEmail
         }
     }
 
@@ -362,7 +383,33 @@ function folderEntryByKey(key, favoriteItems, tagItems, accountItems, moreItems,
 
 function normalizedFolderFromKey(key) {
     if (!key || key.indexOf("account:") !== 0) return ""
-    return key.slice("account:".length).toLowerCase()
+    var rest = key.slice("account:".length)
+    var colonIdx = rest.indexOf(":")
+    if (colonIdx >= 0 && rest.substring(0, colonIdx).indexOf("@") >= 0)
+        return rest.slice(colonIdx + 1).toLowerCase()
+    return rest.toLowerCase()
+}
+
+function accountEmailFromKey(key) {
+    if (!key || key.indexOf("account:") !== 0) return ""
+    var rest = key.slice("account:".length)
+    var colonIdx = rest.indexOf(":")
+    if (colonIdx >= 0 && rest.substring(0, colonIdx).indexOf("@") >= 0)
+        return rest.substring(0, colonIdx).toLowerCase()
+    return ""
+}
+
+function distinctAccountEmails(folders) {
+    var seen = {}
+    var result = []
+    for (var i = 0; i < folders.length; ++i) {
+        var e = (folders[i].accountEmail || "").toString().toLowerCase()
+        if (e.length && !seen[e]) {
+            seen[e] = true
+            result.push(e)
+        }
+    }
+    return result
 }
 
 function selectedImapFolderName(selectedFolderKey, folders) {

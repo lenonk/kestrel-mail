@@ -1,4 +1,5 @@
 #include "folderstatsstore.h"
+#include "folderkey.h"
 
 #include <QColor>
 #include <QSqlQuery>
@@ -206,7 +207,8 @@ FolderStatsStore::statsKeysFromFolders() const {
             norm = "[gmail]/"_L1 + norm.mid(14);
         }
 
-        keys << ("account:"_L1 + norm);
+        const auto email = f.value("accountEmail"_L1).toString().trimmed().toLower();
+        keys << (email.isEmpty() ? ("account:"_L1 + norm) : ("account:"_L1 + email + ":"_L1 + norm));
         if (f.value("specialUse"_L1).toString().trimmed().isEmpty()
                 && !norm.contains(QLatin1Char('/'))) {
             keys << ("tag:"_L1 + norm);
@@ -278,16 +280,26 @@ FolderStatsStore::statsForFolder(const QString &folderKey, const QString &rawFol
 
     } else {
         auto folder = rawFolderName.trimmed().toLower();
-        if (folder.isEmpty() && key.startsWith("account:"_L1)) {
-            folder = key.mid("account:"_L1.size());
+        QString accountEmail;
+        if (key.startsWith("account:"_L1)) {
+            const auto parsed = FolderKey::parseAccountKey(key);
+            accountEmail = parsed.accountEmail;
+            if (folder.isEmpty()) folder = parsed.folder;
         }
+
+        const auto kAccountWhere = accountEmail.isEmpty()
+            ? QString()
+            : " AND lower(mfm.account_email)=:account_email"_L1;
+        QList<QPair<QString, QVariant>> binds;
+        if (!accountEmail.isEmpty())
+            binds << QPair(":account_email"_L1, accountEmail);
 
         if (!folder.isEmpty()) {
             if (folder == "inbox"_L1) {
-                counts = queryThreadStats(database, QString(kWhereInboxWithCategories));
+                counts = queryThreadStats(database, QString(kWhereInboxWithCategories) + kAccountWhere, binds);
             } else {
-                counts = queryThreadStats(database, "lower(mfm.folder)=:folder"_L1,
-                                          {{":folder"_L1, folder}});
+                binds << QPair(":folder"_L1, folder);
+                counts = queryThreadStats(database, "lower(mfm.folder)=:folder"_L1 + kAccountWhere, binds);
             }
         }
     }

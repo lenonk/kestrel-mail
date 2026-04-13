@@ -2997,7 +2997,7 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
 }
 
 void
-ImapService::syncFolder(const QString &folderName, bool announce) {
+ImapService::syncFolder(const QString &folderName, bool announce, const QString &accountEmail) {
     if (m_destroying)
         return;
 
@@ -3056,7 +3056,7 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
     }
 
     runAsync(
-        [this, accounts, target, announce]() -> SyncResult {
+        [this, accounts, target, announce, accountEmail]() -> SyncResult {
             // Cap concurrent background syncs to keep pool connections available.
             const bool isBgSync = !announce;
             if (isBgSync && !g_bgFolderSyncSem.tryAcquire(1, 30'000))
@@ -3075,6 +3075,8 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             auto flush = makeSyncFlushLambda(pendingHeaders, flushTimer);
 
             for (const auto &[email, host, accessToken, port, acctAuthType] : resolveAccounts(accounts)) {
+                if (!accountEmail.isEmpty() && email.compare(accountEmail, Qt::CaseInsensitive) != 0)
+                    continue;
                 if (m_cancelRequested.load()) {
                     SyncResult r;
                     r.message = "Aborted fetch for %1."_L1.arg(target);

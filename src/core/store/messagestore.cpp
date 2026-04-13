@@ -1,5 +1,6 @@
 #include "messagestore.h"
 #include "contactstore.h"
+#include "folderkey.h"
 #include "folderstatsstore.h"
 
 #include "../utils.h"
@@ -585,12 +586,17 @@ messagesForInboxesView(const QSqlDatabase &database, const bool unreadOnly,
 }
 
 QVariantList
-messagesForFolderView(const QSqlDatabase &database, const QString &selectedFolder,
+messagesForFolderView(const QSqlDatabase &database, const QString &accountEmail,
+                      const QString &selectedFolder,
                       const qint32 limit, const qint32 offset, bool *hasMore) {
     if (!database.isValid() || !database.isOpen()) { return {}; }
 
     const bool selectedIsTrash = isTrashFolderName(selectedFolder);
     const bool selectedIsImportantPseudo = (selectedFolder == "important"_L1);
+
+    const QString kAccountFilter = R"(
+        AND (:account_email='' OR lower(mfm.account_email)=lower(:account_email))
+    )"_L1;
 
     const auto safeOffset = qMax(0, offset);
     const auto chunkSize = (limit > 0) ? qMax(200, limit * 4) : 5000;
@@ -607,6 +613,7 @@ messagesForFolderView(const QSqlDatabase &database, const QString &selectedFolde
             q.prepare(kListSelectColumns + R"(
                 WHERE ((:is_important=1 AND lower(mfm.folder) LIKE '%/important')
                        OR (:is_important=0 AND lower(mfm.folder)=:folder))
+            )"_L1 + kAccountFilter + R"(
                 ORDER BY cm.received_at DESC
                 LIMIT :limit OFFSET :offset
             )"_L1);
@@ -614,12 +621,13 @@ messagesForFolderView(const QSqlDatabase &database, const QString &selectedFolde
             q.prepare(kListSelectColumns + R"(
                 WHERE ((:is_important=1 AND lower(mfm.folder) LIKE '%/important')
                        OR (:is_important=0 AND lower(mfm.folder)=:folder))
-                  AND )" + kNotInTrash + R"(
+            )"_L1 + kAccountFilter + " AND "_L1 + kNotInTrash + R"(
                 ORDER BY cm.received_at DESC
                 LIMIT :limit OFFSET :offset
             )"_L1);
         }
         q.bindValue(":folder"_L1, selectedFolder);
+        q.bindValue(":account_email"_L1, accountEmail);
         q.bindValue(":is_important"_L1, selectedIsImportantPseudo ? 1 : 0);
         q.bindValue(":limit"_L1, chunkSize);
         q.bindValue(":offset"_L1, rawOffset);
@@ -664,7 +672,7 @@ messagesForFolderView(const QSqlDatabase &database, const QString &selectedFolde
 }
 
 QVariantList
-messagesForCategoryView(const QSqlDatabase &database,
+messagesForCategoryView(const QSqlDatabase &database, const QString &accountEmail,
                         const QStringList &selectedCategories,
                         const qint32 selectedCategoryIndex,
                         const qint32 limit, const qint32 offset,
@@ -727,6 +735,7 @@ messagesForCategoryView(const QSqlDatabase &database,
         JOIN messages cm ON cm.id = m.message_id AND cm.account_email = m.account_email
         WHERE NOT %1
           AND %2
+          AND (:account_email='' OR lower(m.account_email)=lower(:account_email))
         GROUP BY m.account_email, m.message_id
         ORDER BY cm.received_at DESC
         LIMIT :limit OFFSET :offset
@@ -734,6 +743,7 @@ messagesForCategoryView(const QSqlDatabase &database,
 
     QSqlQuery qIds(database);
     qIds.prepare(idsSql);
+    qIds.bindValue(":account_email"_L1, accountEmail);
     qIds.bindValue(":limit"_L1, (limit > 0 ? (limit + 1) : 5001));
     qIds.bindValue(":offset"_L1, qMax(0, offset));
 
@@ -2562,7 +2572,7 @@ MessageStore::messagesForSelection(const QString &folderKey,
     if (hasMore) { *hasMore = false; }
 
     if (key.startsWith("local:"_L1, Qt::CaseInsensitive)) {
-        return messagesForFolderView(database, key, limit, offset, hasMore);
+        return messagesForFolderView(database, {}, key, limit, offset, hasMore);
     }
 
     if (key.compare("favorites:flagged"_L1, Qt::CaseInsensitive) == 0) {
@@ -2575,9 +2585,12 @@ MessageStore::messagesForSelection(const QString &folderKey,
         return messagesForInboxesView(database, unreadOnly, limit, offset, hasMore);
     }
 
+    QString selectedAccountEmail;
     QString selectedFolder;
     if (key.startsWith("account:"_L1, Qt::CaseInsensitive)) {
-        selectedFolder = key.mid("account:"_L1.size()).toLower();
+        const auto parsed = FolderKey::parseAccountKey(key);
+        selectedAccountEmail = parsed.accountEmail;
+        selectedFolder = parsed.folder.toLower();
     } else if (key.startsWith("tag:"_L1, Qt::CaseInsensitive)) {
         selectedFolder = key.mid("tag:"_L1.size()).toLower();
     }
@@ -2588,11 +2601,11 @@ MessageStore::messagesForSelection(const QString &folderKey,
                                && selectedCategoryIndex < selectedCategories.size());
 
     if (!selectedFolder.isEmpty() && !categoryView) {
-        return messagesForFolderView(database, selectedFolder, limit, offset, hasMore);
+        return messagesForFolderView(database, selectedAccountEmail, selectedFolder, limit, offset, hasMore);
     }
 
     if (categoryView) {
-        return messagesForCategoryView(database, selectedCategories,
+        return messagesForCategoryView(database, selectedAccountEmail, selectedCategories,
                                        selectedCategoryIndex, limit, offset, hasMore);
     }
 
