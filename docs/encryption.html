@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Encryption - Kestrel Mail</title>
+    <style>
+        :root {
+            --bg: #0e1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #498cfd;
+            --accent-hover: #6aa3ff;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+        }
+
+        .container {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 60px 24px 80px;
+        }
+
+        .back-link {
+            display: inline-block;
+            color: var(--accent);
+            text-decoration: none;
+            margin-bottom: 32px;
+            font-size: 0.95rem;
+        }
+        .back-link:hover { color: var(--accent-hover); }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            margin-bottom: 40px;
+        }
+
+        h2 {
+            font-size: 1.35rem;
+            font-weight: 600;
+            margin-top: 40px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        p {
+            margin-bottom: 16px;
+            color: var(--text);
+        }
+
+        .highlight-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px 24px;
+            margin: 20px 0;
+        }
+
+        .highlight-box h3 {
+            font-size: 1.05rem;
+            margin-bottom: 8px;
+        }
+
+        .highlight-box p {
+            margin-bottom: 0;
+            color: var(--text-muted);
+        }
+
+        .key-pair {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .key-card {
+            flex: 1;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .key-card h3 {
+            font-size: 1rem;
+            margin-bottom: 6px;
+        }
+
+        .key-card p {
+            color: var(--text-muted);
+            font-size: 0.92rem;
+            margin-bottom: 0;
+        }
+
+        ul {
+            margin: 12px 0 16px 24px;
+            color: var(--text);
+        }
+
+        li { margin-bottom: 6px; }
+
+        .warning {
+            background: #2a1f0e;
+            border: 1px solid #5c4413;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin: 20px 0;
+            color: #e8c567;
+            font-size: 0.95rem;
+        }
+
+        @media (max-width: 600px) {
+            .key-pair { flex-direction: column; }
+            h1 { font-size: 1.6rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">&larr; Back to Kestrel Mail</a>
+
+        <h1>Email Encryption in Kestrel Mail</h1>
+        <p class="subtitle">A plain-language guide to keeping your emails private with PGP encryption.</p>
+
+        <h2>Why encrypt your email?</h2>
+        <p>
+            Regular email is a lot like a postcard &mdash; anyone handling it along the way could
+            read what's inside. Even on secure networks, messages can be intercepted or accessed
+            by third parties. Encryption turns your email into a sealed letter that only the
+            intended recipient can open.
+        </p>
+        <p>
+            Kestrel Mail supports <strong>PGP</strong> (Pretty Good Privacy), a widely trusted
+            encryption standard that has been protecting communications since 1991.
+        </p>
+
+        <h2>How does it work?</h2>
+        <p>
+            PGP uses a pair of mathematically linked keys &mdash; one public, one private.
+            Think of it like a mailbox: anyone can drop a letter in (using your public key),
+            but only you have the key to open it (your private key).
+        </p>
+
+        <div class="key-pair">
+            <div class="key-card">
+                <h3>Public key</h3>
+                <p>
+                    You share this freely. Others use it to encrypt messages they send to you,
+                    and to verify that messages you signed really came from you.
+                </p>
+            </div>
+            <div class="key-card">
+                <h3>Private key</h3>
+                <p>
+                    You keep this secret. It decrypts messages sent to you and signs outgoing
+                    messages to prove they're authentically from you.
+                </p>
+            </div>
+        </div>
+
+        <h2>Digital signatures</h2>
+        <p>
+            Beyond encryption, PGP can also <em>sign</em> your messages. A digital signature
+            proves two things: that the message genuinely came from you, and that nobody
+            tampered with it in transit. Signing doesn't hide the content &mdash; it just
+            guarantees authenticity.
+        </p>
+
+        <h2>Setting up encryption in Kestrel Mail</h2>
+        <p>
+            When you add an account in Kestrel Mail, the setup wizard gives you three options:
+        </p>
+
+        <div class="highlight-box">
+            <h3>Create a new keypair</h3>
+            <p>
+                Kestrel Mail generates a fresh public/private key pair for you. You'll choose a
+                passphrase to protect your private key. This is the easiest way to get started
+                if you've never used PGP before.
+            </p>
+        </div>
+
+        <div class="highlight-box">
+            <h3>Import an existing keypair</h3>
+            <p>
+                If you already use PGP (from another email client or GPG on the command line),
+                you can import your existing keys so you can continue reading previously
+                encrypted messages without interruption.
+            </p>
+        </div>
+
+        <div class="highlight-box">
+            <h3>Continue without encryption</h3>
+            <p>
+                You can skip encryption entirely and set it up later from account settings.
+                Your email will work normally &mdash; you just won't be able to send or
+                receive encrypted messages until you configure a keypair.
+            </p>
+        </div>
+
+        <h2>Exchanging keys with others</h2>
+        <p>
+            For someone to send you an encrypted message, they need your public key. You can
+            share it by:
+        </p>
+        <ul>
+            <li>Attaching it to an email</li>
+            <li>Uploading it to a public key server</li>
+            <li>Sharing the key file directly (USB drive, cloud storage, etc.)</li>
+        </ul>
+        <p>
+            Likewise, to send someone an encrypted message, you'll need their public key.
+            Each PGP key has a unique fingerprint &mdash; a short string of letters and numbers
+            &mdash; that you can verify over the phone or in person to make sure you have the
+            right key.
+        </p>
+
+        <h2>Keeping your keys safe</h2>
+        <div class="warning">
+            If you lose your private key, any messages encrypted with it become permanently
+            unreadable. There is no recovery option. Always back up your private key to a
+            safe location &mdash; an encrypted USB drive, a secure cloud folder, or another
+            device you control.
+        </div>
+        <p>
+            Your private key is protected by the passphrase you choose during setup. Pick
+            something strong and memorable &mdash; you'll need it each time Kestrel Mail
+            decrypts a message or signs an outgoing email.
+        </p>
+
+        <h2>Reading encrypted messages</h2>
+        <p>
+            When you receive an encrypted email, Kestrel Mail will prompt you for your
+            private key passphrase (if it isn't already unlocked for the session).
+            Once entered, the message is decrypted and displayed normally. Signed
+            messages are verified automatically &mdash; you'll see an indicator showing
+            whether the signature is valid.
+        </p>
+    </div>
+</body>
+</html>
