@@ -352,6 +352,56 @@ ImapService::initializeConnectionPool() {
                 });
             }
         }
+    } else {
+        // Pool already initialized — add connections for any newly-added accounts.
+        if (!m_accounts) return;
+        const auto accounts = resolveAccounts(m_accounts->accounts());
+
+        QSet<QString> pooledEmails;
+        {
+            QMutexLocker lock(&g_poolMutex);
+            for (const auto &s : g_poolSlots)
+                pooledEmails.insert(s.email.toLower());
+        }
+        {
+            QMutexLocker lock(&g_hydrateMutex);
+            for (const auto &s : g_hydrateSlots)
+                pooledEmails.insert(s.email.toLower());
+        }
+
+        for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
+            if (pooledEmails.contains(email.toLower())) continue;
+
+            const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
+
+            // Hydration connection.
+            runBackgroundTask([this, host, email, port, accessToken, method]() {
+                if (m_destroying.load()) return;
+                auto conn = std::make_unique<Imap::Connection>();
+                conn->connectAndAuth(host, port, email, accessToken, method);
+                PooledConnSlot s;
+                s.email = email; s.host = host; s.port = port;
+                s.conn = std::move(conn); s.busy = false;
+                QMutexLocker lock(&g_hydrateMutex);
+                g_hydrateSlots.push_back(std::move(s));
+                g_hydrateWait.wakeOne();
+            });
+
+            // Operational pool connections.
+            for (qint32 i = 0; i < kOperationalPoolMax; ++i) {
+                runBackgroundTask([this, host, email, port, accessToken, method]() {
+                    if (m_destroying.load()) return;
+                    auto conn = std::make_unique<Imap::Connection>();
+                    conn->connectAndAuth(host, port, email, accessToken, method);
+                    PooledConnSlot s;
+                    s.email = email; s.host = host; s.port = port;
+                    s.conn = std::move(conn); s.busy = false;
+                    QMutexLocker lock(&g_poolMutex);
+                    g_poolSlots.push_back(std::move(s));
+                    g_poolWait.wakeOne();
+                });
+            }
+        }
     }
 }
 

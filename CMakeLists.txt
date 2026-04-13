@@ -128,6 +128,10 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/AccountWizard/AccountWizardStep3.qml
         qml/components/AccountWizard/OAuthBrowserWindow.qml
         qml/components/AccountWizard/AvatarChooserDialog.qml
+        qml/components/AccountWizard/ManualIdentityStep.qml
+        qml/components/AccountWizard/ManualIncomingStep.qml
+        qml/components/AccountWizard/ManualOutgoingStep.qml
+        qml/components/AccountWizard/ManualTestStep.qml
         qml/components/Attachments/AttachmentCard.qml
         qml/components/Attachments/AttachmentHoverPopup.qml
         qml/components/Calendar/CalendarPane.qml

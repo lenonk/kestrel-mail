@@ -3,6 +3,7 @@
     "id": "gmail",
     "displayName": "Gmail",
     "domains": ["gmail.com", "googlemail.com"],
+    "mxPatterns": ["*.google.com", "*.googlemail.com"],
     "imapHost": "imap.gmail.com",
     "imapPort": 993,
     "smtpHost": "smtp.gmail.com",
@@ -13,5 +14,54 @@
     "oauthScopes": "openid profile email https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts",
     "oauthClientId": "838689413408-g7bpqtpc4hb3bihelaa41a7lbdo2e40r.apps.googleusercontent.com",
     "oauthClientSecret": "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"
+  },
+  {
+    "id": "microsoft",
+    "displayName": "Microsoft / Outlook",
+    "domains": ["outlook.com", "hotmail.com", "live.com", "msn.com", "outlook.de", "outlook.jp"],
+    "mxPatterns": ["*.outlook.com", "*.protection.outlook.com", "*.mail.protection.outlook.com", "*.olc.protection.outlook.com"],
+    "imapHost": "outlook.office365.com",
+    "imapPort": 993,
+    "smtpHost": "smtp.office365.com",
+    "smtpPort": 587,
+    "supportsOAuth2": true,
+    "oauthAuthUrl": "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
+    "oauthTokenUrl": "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+    "oauthScopes": "openid profile email offline_access https://outlook.office365.com/IMAP.AccessAsUser.All https://outlook.office365.com/SMTP.Send",
+    "oauthClientId": "",
+    "oauthClientSecret": ""
+  },
+  {
+    "id": "yahoo",
+    "displayName": "Yahoo! Mail",
+    "domains": ["yahoo.com", "yahoo.co.uk", "yahoo.co.jp", "yahoo.fr", "yahoo.de", "ymail.com", "rocketmail.com"],
+    "mxPatterns": ["*.yahoodns.net", "*.yahoo.com"],
+    "imapHost": "imap.mail.yahoo.com",
+    "imapPort": 993,
+    "smtpHost": "smtp.mail.yahoo.com",
+    "smtpPort": 465,
+    "supportsOAuth2": false
+  },
+  {
+    "id": "aol",
+    "displayName": "AOL Mail",
+    "domains": ["aol.com", "aim.com"],
+    "mxPatterns": ["*.yahoodns.net"],
+    "imapHost": "imap.aol.com",
+    "imapPort": 993,
+    "smtpHost": "smtp.aol.com",
+    "smtpPort": 465,
+    "supportsOAuth2": false
+  },
+  {
+    "id": "icloud",
+    "displayName": "iCloud Mail",
+    "domains": ["icloud.com", "me.com", "mac.com"],
+    "mxPatterns": ["*.icloud.com", "*.apple.com"],
+    "imapHost": "imap.mail.me.com",
+    "imapPort": 993,
+    "smtpHost": "smtp.mail.me.com",
+    "smtpPort": 587,
+    "supportsOAuth2": false
   }
 ]

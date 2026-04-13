@@ -12,12 +12,14 @@ Item {
     required property string openSection
     required property string selectedProviderId
     required property string accountNameDraft
+    property string displayName: ""
     required property bool hasStatus
     required property bool statusIsError
     required property int wizardStep
 
     signal beginAutoSetupRequested()
     signal advanceWizardRequested()
+    signal beginManualSetupRequested()
     signal openSectionChangeRequested(string section)
     signal selectedProviderIdChangeRequested(string providerId)
     signal accountNameDraftChangeRequested(string text)
@@ -190,7 +192,11 @@ Item {
                                 Layout.preferredWidth: 86
                                 Layout.preferredHeight: 96
                                 flat: true
-                                onClicked: step1Root.selectedProviderIdChangeRequested(modelData)
+                                onClicked: {
+                                    step1Root.selectedProviderIdChangeRequested(modelData)
+                                    if (modelData === "other")
+                                        step1Root.beginManualSetupRequested()
+                                }
                                 background: Rectangle { radius: 4; color: step1Root.providerButtonColor(modelData); border.width: 1; border.color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.2) }
                                 contentItem: Column {
                                     spacing: 8
@@ -339,18 +345,40 @@ Item {
         spacing: 10
 
         onVisibleChanged: {
-            if (visible) Qt.callLater(function() { accountNameField.forceActiveFocus(); accountNameField.selectAll() })
+            if (visible) Qt.callLater(function() { displayNameField.forceActiveFocus(); displayNameField.selectAll() })
         }
 
         QQC2.Label { text: i18n("Account details"); font.pixelSize: 18; font.bold: true }
-        QQC2.Label { text: i18n("Enter additional information about your new account."); opacity: 0.7 }
+        QQC2.Label {
+            text: i18n("Enter additional information about your new account.")
+            wrapMode: Text.Wrap; Layout.fillWidth: true; opacity: 0.7
+        }
 
         Item { Layout.preferredHeight: 4 }
 
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
-            QQC2.Label { text: i18n("Account name:"); Layout.alignment: Qt.AlignVCenter }
+            QQC2.Label { text: i18n("Your name:") }
+            QQC2.TextField {
+                id: displayNameField
+                Layout.fillWidth: true
+                placeholderText: i18n("Your Name")
+                text: step1Root.displayName
+                onTextEdited: step1Root.displayName = text
+            }
+        }
+        QQC2.Label {
+            text: i18n("This is the name your recipients will see when you send out an email.")
+            opacity: 0.45; font.pixelSize: 12
+        }
+
+        Item { Layout.preferredHeight: 4 }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+            QQC2.Label { text: i18n("Account name:") }
             QQC2.TextField {
                 id: accountNameField
                 Layout.fillWidth: true
@@ -362,9 +390,7 @@ Item {
         }
         QQC2.Label {
             text: i18n("This is the name for this account that you will see in the account list.")
-            opacity: 0.45
-            font.pixelSize: 12
-            Layout.leftMargin: 100
+            opacity: 0.45; font.pixelSize: 12
         }
 
         Item { Layout.fillHeight: true }

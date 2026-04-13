@@ -28,12 +28,43 @@ Window {
     property bool oauthFlowStarted: false
     property double lastWizardAdvanceAt: 0
 
+    // Flow type: "oauth" (3 steps) or "manual" (7 steps).
+    property string flowType: "oauth"
+    readonly property int maxStep: flowType === "manual" ? 7 : 3
+
+    readonly property var oauthSteps: [
+        { n: 1, text: i18n("Account details") },
+        { n: 2, text: i18n("Encryption") },
+        { n: 3, text: i18n("Finish") }
+    ]
+    readonly property var manualSteps: [
+        { n: 1, text: i18n("Identity") },
+        { n: 2, text: i18n("Incoming server") },
+        { n: 3, text: i18n("Outgoing server") },
+        { n: 4, text: i18n("Test configuration") },
+        { n: 5, text: i18n("Account details") },
+        { n: 6, text: i18n("Encryption") },
+        { n: 7, text: i18n("Finish") }
+    ]
+    readonly property var wizardSteps: flowType === "manual" ? manualSteps : oauthSteps
+
     signal toastRequested(string message, bool isError)
 
     readonly property bool hasStatus: accountSetupObj && accountSetupObj.statusMessage.length > 0
     readonly property bool statusIsError: hasStatus && (accountSetupObj.statusMessage.toLowerCase().indexOf("failed") >= 0
                                                   || accountSetupObj.statusMessage.toLowerCase().indexOf("cannot") >= 0
                                                   || accountSetupObj.statusMessage.toLowerCase().indexOf("missing") >= 0)
+
+    // Map (flowType, wizardStep) → StackLayout index.
+    // Manual: 0=Identity 1=Incoming 2=Outgoing 3=Test 4=AccountDetails 5=Encryption 6=Finish
+    // OAuth:  7=AccountDetails 8=Encryption 9=Finish
+    function pageIndex() {
+        if (flowType === "manual") return wizardStep - 1
+        return 6 + wizardStep  // 7,8,9
+    }
+
+    // Encryption step number depends on flow.
+    readonly property int encryptionStep: flowType === "manual" ? 6 : 2
 
     function open() {
         visible = true
@@ -46,7 +77,29 @@ Window {
         setupStarted = true
         oauthFlowStarted = false
         openSection = "automatic"
-        accountSetupObj.discoverProvider()
+
+        // Start async discovery.
+        if (typeof providerProfiles !== "undefined" && providerProfiles.discoverForEmailAsync)
+            providerProfiles.discoverForEmailAsync(accountSetupObj.email)
+        else
+            accountSetupObj.discoverProvider()
+
+        var em = (accountSetupObj.email || "").trim()
+        accountNameDraft = em.length > 0 ? em : i18n("My Account")
+        wizardStep = 1
+    }
+
+    function beginManualSetup() {
+        if (!accountSetupObj) return
+        setupStarted = true
+        oauthFlowStarted = false
+        flowType = "manual"
+        accountSetupObj.applyDiscoveryResult({
+            "id": "generic", "displayName": "Generic IMAP/SMTP",
+            "imapHost": "", "imapPort": 993,
+            "smtpHost": "", "smtpPort": 587,
+            "supportsOAuth2": false, "flowType": "manual"
+        })
         var em = (accountSetupObj.email || "").trim()
         accountNameDraft = em.length > 0 ? em : i18n("My Account")
         wizardStep = 1
@@ -64,70 +117,84 @@ Window {
             return
         }
 
-        // Step 2 has encryption sub-pages (create → save → share)
-        if (wizardStep === 2 && step2.hasSubPages && !step2.atLastSubPage) {
-            step2.advanceSubPage()
-            return
+        // Encryption sub-pages.
+        if (wizardStep === root.encryptionStep) {
+            const encStep = flowType === "manual" ? manualStep2Enc : oauthStep2Enc
+            if (encStep.hasSubPages && !encStep.atLastSubPage) {
+                encStep.advanceSubPage()
+                return
+            }
         }
 
-        if (wizardStep < 3) {
-            if (wizardStep === 2) step2.reset()
+        if (wizardStep < root.maxStep) {
+            if (wizardStep === root.encryptionStep) {
+                const encStep = flowType === "manual" ? manualStep2Enc : oauthStep2Enc
+                encStep.reset()
+            }
             wizardStep += 1
             return
         }
 
+        // Finish step.
         if (!accountSetupObj) return
 
-        // Always (re)start OAuth on Finish for OAuth providers.
-        const supportsOAuth = !!(accountSetupObj.selectedProvider && accountSetupObj.selectedProvider.supportsOAuth2)
-        if (supportsOAuth) {
-            // Be defensive: provider discovery can be stale/empty after UI navigation.
-            if (!accountSetupObj.selectedProvider || !accountSetupObj.selectedProvider.id) {
-                accountSetupObj.discoverProvider()
-            }
+        if (flowType === "oauth") {
+            const supportsOAuth = !!(accountSetupObj.selectedProvider && accountSetupObj.selectedProvider.supportsOAuth2)
+            if (supportsOAuth) {
+                if (!accountSetupObj.selectedProvider || !accountSetupObj.selectedProvider.id)
+                    accountSetupObj.discoverProvider()
 
-            root.oauthFlowStarted = true
-            accountSetupObj.beginOAuth()
-            toastRequested(i18n("Finish pressed. Starting OAuth..."), false)
-            var launchUrl = accountSetupObj.oauthUrl ? accountSetupObj.oauthUrl.toString() : ""
-
-            // Retry once after rediscovery if OAuth URL did not populate.
-            if (launchUrl.length === 0) {
-                toastRequested(i18n("OAuth URL missing. Retrying provider discovery..."), true)
-                accountSetupObj.discoverProvider()
+                root.oauthFlowStarted = true
                 accountSetupObj.beginOAuth()
-                launchUrl = accountSetupObj.oauthUrl ? accountSetupObj.oauthUrl.toString() : ""
-            }
+                toastRequested(i18n("Starting OAuth..."), false)
+                var launchUrl = accountSetupObj.oauthUrl ? accountSetupObj.oauthUrl.toString() : ""
 
-            if (launchUrl.length > 0) {
-                root.oauthBrowserUrl = launchUrl
-                const providerId = (accountSetupObj.selectedProvider && accountSetupObj.selectedProvider.id)
-                                   ? accountSetupObj.selectedProvider.id.toString().toLowerCase()
-                                   : ""
-                if (providerId === "gmail") {
-                    toastRequested(i18n("Opening OAuth in browser..."), false)
-                    Qt.openUrlExternally(root.oauthBrowserUrl)
-                } else {
-                    toastRequested(i18n("Opening OAuth window..."), false)
-                    oauthBrowserWindow.show()
-                    oauthBrowserWindow.raise()
-                    oauthBrowserWindow.requestActivate()
+                if (launchUrl.length === 0) {
+                    accountSetupObj.discoverProvider()
+                    accountSetupObj.beginOAuth()
+                    launchUrl = accountSetupObj.oauthUrl ? accountSetupObj.oauthUrl.toString() : ""
                 }
-            } else {
-                toastRequested(i18n("OAuth did not start. %1", accountSetupObj ? accountSetupObj.statusMessage : i18n("No status available.")), true)
+
+                if (launchUrl.length > 0) {
+                    root.oauthBrowserUrl = launchUrl
+                    const providerId = (accountSetupObj.selectedProvider && accountSetupObj.selectedProvider.id)
+                                       ? accountSetupObj.selectedProvider.id.toString().toLowerCase() : ""
+                    if (providerId === "gmail") {
+                        toastRequested(i18n("Opening OAuth in browser..."), false)
+                        Qt.openUrlExternally(root.oauthBrowserUrl)
+                    } else {
+                        oauthBrowserWindow.show()
+                        oauthBrowserWindow.raise()
+                        oauthBrowserWindow.requestActivate()
+                    }
+                } else {
+                    toastRequested(i18n("OAuth did not start. %1", accountSetupObj.statusMessage || ""), true)
+                }
+                return
             }
-            return
         }
 
+        // Manual or non-OAuth finish: save directly.
         if (accountSetupObj.saveCurrentAccount(root.accountNameDraft, "Auto")) {
+            toastRequested(i18n("Account saved successfully."), false)
             root.close()
         } else {
-            root.wizardStep = 1
-            root.openSection = "automatic"
+            toastRequested(i18n("Save failed: %1", accountSetupObj.statusMessage || ""), true)
         }
     }
 
     SystemPalette { id: systemPalette }
+
+    // ── Discovery result handler ──────────────────────────────────────────
+    Connections {
+        target: typeof providerProfiles !== "undefined" ? providerProfiles : null
+        ignoreUnknownSignals: true
+        function onDiscoveryFinished(result) {
+            if (!accountSetupObj) return
+            accountSetupObj.applyDiscoveryResult(result)
+            root.flowType = (result.flowType || "oauth").toString()
+        }
+    }
 
     Connections {
         target: accountSetupObj
@@ -138,11 +205,9 @@ Window {
 
             toastRequested(i18n("OAuth complete. Saving account..."), false)
 
-            if (oauthBrowserWindow.visible) {
+            if (oauthBrowserWindow.visible)
                 oauthBrowserWindow.close()
-            }
 
-            // Auto-finish flow after successful OAuth.
             if (accountSetupObj.saveCurrentAccount(root.accountNameDraft, "Auto")) {
                 toastRequested(i18n("Account connected successfully."), false)
                 root.close()
@@ -160,23 +225,18 @@ Window {
 
     Kirigami.Page {
         anchors.fill: parent
-        leftPadding: 0
-        rightPadding: 0
-        topPadding: 0
-        bottomPadding: 0
+        leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
         background: Item {}
 
         Rectangle {
             anchors.fill: parent
             color: Qt.darker(Kirigami.Theme.backgroundColor, 1.08)
-            border.width: 0
-            border.color: "transparent"
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 0
                 spacing: 10
 
+                // ── Title bar ─────────────────────────────────────────
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 36
@@ -208,6 +268,7 @@ Window {
                     }
                 }
 
+                // ── Body ──────────────────────────────────────────────
                 Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -216,6 +277,7 @@ Window {
                         anchors.fill: parent
                         spacing: 0
 
+                        // ── Sidebar ───────────────────────────────────
                         Rectangle {
                             Layout.preferredWidth: root.setupStarted ? 160 : 0
                             Layout.fillHeight: true
@@ -230,17 +292,11 @@ Window {
                                 spacing: 8
 
                                 Repeater {
-                                    model: [
-                                        { n: 1, text: i18n("Account details") },
-                                        { n: 2, text: i18n("Encryption") },
-                                        { n: 3, text: i18n("Finish") }
-                                    ]
+                                    model: root.wizardSteps
                                     delegate: Row {
                                         spacing: 8
                                         Rectangle {
-                                            width: 24
-                                            height: 24
-                                            radius: 12
+                                            width: 24; height: 24; radius: 12
                                             color: "transparent"
                                             border.width: 1.5
                                             border.color: modelData.n <= root.wizardStep ? Qt.lighter(Kirigami.Theme.textColor, 1.0) : Qt.lighter(Kirigami.Theme.textColor, 0.5)
@@ -260,12 +316,18 @@ Window {
                             opacity: 0.7
                         }
 
+                        // ── Pages ─────────────────────────────────────
                         StackLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            currentIndex: root.wizardStep - 1
+                            currentIndex: root.pageIndex()
 
-                            AccountWizardStep1 {
+                            // Manual flow pages (indices 0-6)
+                            ManualIdentityStep   { accountSetupObj: root.accountSetupObj }
+                            ManualIncomingStep   { accountSetupObj: root.accountSetupObj }
+                            ManualOutgoingStep   { accountSetupObj: root.accountSetupObj }
+                            ManualTestStep       { accountSetupObj: root.accountSetupObj }
+                            AccountWizardStep1   {
                                 accountSetupObj: root.accountSetupObj
                                 setupStarted: root.setupStarted
                                 openSection: root.openSection
@@ -276,18 +338,38 @@ Window {
                                 wizardStep: root.wizardStep
                                 onBeginAutoSetupRequested: root.beginAutoSetup()
                                 onAdvanceWizardRequested: root.advanceWizard()
+                                onBeginManualSetupRequested: root.beginManualSetup()
                                 onOpenSectionChangeRequested: function(section) { root.openSection = section }
                                 onSelectedProviderIdChangeRequested: function(providerId) { root.selectedProviderId = providerId }
                                 onAccountNameDraftChangeRequested: function(text) { root.accountNameDraft = text }
                             }
+                            AccountWizardStep2   { id: manualStep2Enc; accountSetupObj: root.accountSetupObj }
+                            AccountWizardStep3   {}
 
-                            AccountWizardStep2 { id: step2; accountSetupObj: root.accountSetupObj }
-
-                            AccountWizardStep3 {}
+                            // OAuth flow pages (indices 7-9)
+                            AccountWizardStep1   {
+                                accountSetupObj: root.accountSetupObj
+                                setupStarted: root.setupStarted
+                                openSection: root.openSection
+                                selectedProviderId: root.selectedProviderId
+                                accountNameDraft: root.accountNameDraft
+                                hasStatus: root.hasStatus
+                                statusIsError: root.statusIsError
+                                wizardStep: root.wizardStep
+                                onBeginAutoSetupRequested: root.beginAutoSetup()
+                                onAdvanceWizardRequested: root.advanceWizard()
+                                onBeginManualSetupRequested: root.beginManualSetup()
+                                onOpenSectionChangeRequested: function(section) { root.openSection = section }
+                                onSelectedProviderIdChangeRequested: function(providerId) { root.selectedProviderId = providerId }
+                                onAccountNameDraftChangeRequested: function(text) { root.accountNameDraft = text }
+                            }
+                            AccountWizardStep2   { id: oauthStep2Enc; accountSetupObj: root.accountSetupObj }
+                            AccountWizardStep3   {}
                         }
                     }
                 }
 
+                // ── Footer ────────────────────────────────────────────
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.leftMargin: 20
@@ -307,17 +389,22 @@ Window {
                     QQC2.Button {
                         id: backButton
                         text: i18n("Back")
-                        enabled: root.wizardStep > 1 || root.setupStarted || (root.wizardStep === 2 && step2.subPage > 0)
+                        enabled: root.wizardStep > 1 || root.setupStarted
                         onClicked: {
-                            // Try retreating within step 2 sub-pages first
-                            if (root.wizardStep === 2 && step2.retreatSubPage()) {
-                                return
+                            // Try retreating within encryption sub-pages first.
+                            if (root.wizardStep === root.encryptionStep) {
+                                const encStep = root.flowType === "manual" ? manualStep2Enc : oauthStep2Enc
+                                if (encStep.retreatSubPage()) return
                             }
                             if (root.wizardStep > 1) {
-                                if (root.wizardStep === 2) step2.reset()
+                                if (root.wizardStep === root.encryptionStep) {
+                                    const encStep = root.flowType === "manual" ? manualStep2Enc : oauthStep2Enc
+                                    encStep.reset()
+                                }
                                 root.wizardStep = Math.max(1, root.wizardStep - 1)
                             } else {
                                 root.setupStarted = false
+                                root.flowType = "oauth"
                                 root.openSection = "automatic"
                             }
                         }
@@ -326,7 +413,7 @@ Window {
                         id: nextBtn
                         Layout.preferredWidth: backButton.width - 4
                         Layout.preferredHeight: backButton.height - 4
-                        text: root.wizardStep >= 3 ? i18n("Finish") : i18n("Next")
+                        text: root.wizardStep >= root.maxStep ? i18n("Finish") : i18n("Next")
                         enabled: true
                         onClicked: root.advanceWizard()
 
@@ -347,7 +434,7 @@ Window {
                     }
                     QQC2.Button {
                         id: cancelButton
-                        text: i18n("Cancel");
+                        text: i18n("Cancel")
                         onClicked: root.close()
                     }
                 }

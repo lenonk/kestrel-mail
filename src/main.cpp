@@ -146,7 +146,7 @@ int main(int argc, char *argv[])
     }
 #endif
     OAuthService oauthService(tokenVault.get(), &engine);
-    AccountSetupController accountSetup(&providerProfiles, &oauthService, &accountRepository, &engine);
+    AccountSetupController accountSetup(&providerProfiles, &oauthService, &accountRepository, tokenVault.get(), &engine);
     DataStore dataStore(&engine);
     dataStore.init();
     dataStore.quickCheck();
