@@ -171,7 +171,8 @@ IdleWatcher::start() {
             }
 
             auto newCxn = std::make_shared<Connection>();
-            const auto connectResult = newCxn->connectAndAuth(target.host, target.port, target.email, accessToken);
+            const auto authMethod = target.authType == "password"_L1 ? AuthMethod::Login : AuthMethod::XOAuth2;
+            const auto connectResult = newCxn->connectAndAuth(target.host, target.port, target.email, accessToken, authMethod);
             if (!connectResult.success) {
                 if (!accountChanged && accessToken == lastAccessToken)
                     lastAccessToken.clear();

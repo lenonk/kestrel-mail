@@ -73,3 +73,46 @@ LibSecretTokenVault::removeRefreshToken(const QString &accountEmail) {
 
     return ok == TRUE;
 }
+
+static constexpr SecretSchema kPasswordSchema = {
+    "com.kestrelmail.Password",
+    SECRET_SCHEMA_NONE,
+    {
+        { "account", SECRET_SCHEMA_ATTRIBUTE_STRING },
+        { nullptr, SECRET_SCHEMA_ATTRIBUTE_STRING }
+    },
+    0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr
+};
+
+bool
+LibSecretTokenVault::storePassword(const QString &accountEmail, const QString &password) {
+    const auto account = Kestrel::normalizeEmail(accountEmail).toUtf8();
+    const auto pw = password.toUtf8();
+    GError *error = nullptr;
+    const auto ok = secret_password_store_sync(&kPasswordSchema, SECRET_COLLECTION_DEFAULT,
+        "Kestrel Mail account password", pw.constData(), nullptr, &error,
+        "account", account.constData(), nullptr);
+    if (error) { qWarning("LibSecretTokenVault::storePassword failed: %s", error->message); g_error_free(error); }
+    return ok == TRUE;
+}
+
+QString
+LibSecretTokenVault::loadPassword(const QString &accountEmail) {
+    const auto account = Kestrel::normalizeEmail(accountEmail).toUtf8();
+    GError *error = nullptr;
+    auto *pw = secret_password_lookup_sync(&kPasswordSchema, nullptr, &error, "account", account.constData(), nullptr);
+    if (error) { qWarning("LibSecretTokenVault::loadPassword failed: %s", error->message); g_error_free(error); return {}; }
+    if (!pw) return {};
+    const auto result = QString::fromUtf8(pw);
+    secret_password_free(pw);
+    return result;
+}
+
+bool
+LibSecretTokenVault::removePassword(const QString &accountEmail) {
+    const auto account = Kestrel::normalizeEmail(accountEmail).toUtf8();
+    GError *error = nullptr;
+    const auto ok = secret_password_clear_sync(&kPasswordSchema, nullptr, &error, "account", account.constData(), nullptr);
+    if (error) { qWarning("LibSecretTokenVault::removePassword failed: %s", error->message); g_error_free(error); }
+    return ok == TRUE;
+}

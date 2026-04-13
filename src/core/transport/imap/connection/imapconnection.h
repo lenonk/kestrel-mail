@@ -12,6 +12,11 @@ namespace Imap {
 using namespace Qt::Literals::StringLiterals;
 
 /**
+ * IMAP authentication method.
+ */
+enum class AuthMethod { XOAuth2, Login };
+
+/**
  * Result of a connection attempt.
  */
 struct ConnectResult {
@@ -48,7 +53,8 @@ public:
      * @return ConnectResult with success status and details
      */
     ConnectResult connectAndAuth(const QString &host, int port,
-                                  const QString &email, const QString &accessToken);
+                                  const QString &email, const QString &credential,
+                                  AuthMethod method = AuthMethod::XOAuth2);
 
     // Gracefully disconnect from server (sends LOGOUT).
     void disconnect();
@@ -135,6 +141,7 @@ private:
     int     m_port         = 993;
     QString m_email;
     QString m_accessToken;
+    AuthMethod m_authMethod = AuthMethod::XOAuth2;
     QString m_selectedFolder;
     QString m_idleTag;
     bool    m_selectedReadOnly = false;

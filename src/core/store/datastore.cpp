@@ -497,6 +497,19 @@ bool DataStore::init()
         return false;
     }
 
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS account_pgp_keys (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_email TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          key_size INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(account_email, fingerprint)
+        )
+    )"_L1)) {
+        return false;
+    }
+
     // Idempotent migrations for message_attachments.
     q.exec("ALTER TABLE message_attachments ADD COLUMN local_path TEXT DEFAULT ''"_L1);
 
@@ -785,6 +798,36 @@ QVariantList DataStore::favoritesConfig() const { return m_prefs->favoritesConfi
 QVariantList DataStore::recentSearches(int limit) const { return m_prefs->recentSearches(limit); }
 void DataStore::addRecentSearch(const QString &query) { m_prefs->addRecentSearch(query); }
 void DataStore::removeRecentSearch(const QString &query) { m_prefs->removeRecentSearch(query); }
+
+bool DataStore::insertPgpKey(const QString &accountEmail, const QString &fingerprint, const int keySize) {
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return false;
+    QSqlQuery q(database);
+    q.prepare(R"(
+        INSERT OR REPLACE INTO account_pgp_keys (account_email, fingerprint, key_size, created_at)
+        VALUES (:email, :fp, :ks, datetime('now'))
+    )"_L1);
+    q.bindValue(":email"_L1, accountEmail.trimmed());
+    q.bindValue(":fp"_L1,    fingerprint);
+    q.bindValue(":ks"_L1,    keySize);
+    return q.exec();
+}
+
+QVariantMap DataStore::pgpKeyForAccount(const QString &accountEmail) const {
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return {};
+    QSqlQuery q(database);
+    q.prepare("SELECT fingerprint, key_size, created_at FROM account_pgp_keys WHERE account_email = :email"_L1);
+    q.bindValue(":email"_L1, accountEmail.trimmed());
+    if (q.exec() && q.next()) {
+        return {
+            {"fingerprint"_L1, q.value(0).toString()},
+            {"keySize"_L1,     q.value(1).toInt()},
+            {"createdAt"_L1,   q.value(2).toString()}
+        };
+    }
+    return {};
+}
 
 bool DataStore::hasCachedHeadersForFolder(const QString &rawFolderName, int minCount) const { return m_folderStats->hasCachedHeadersForFolder(rawFolderName, minCount); }
 QVariantMap DataStore::statsForFolder(const QString &folderKey, const QString &rawFolderName) const { return m_folderStats->statsForFolder(folderKey, rawFolderName); }

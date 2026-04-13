@@ -14,12 +14,16 @@
  */
 namespace Imap::SyncUtils {
 
-struct OAuthAccountTarget {
+struct AccountTarget {
     QString email;
     QString host;
     qint32 port = 0;
     QVariantMap account;
+    QString authType;   // "oauth2" or "password"
 };
+
+// Backward compat alias
+using OAuthAccountTarget = AccountTarget;
 
 /**
  * Default batch size for UID FETCH operations.
@@ -45,8 +49,11 @@ bool chunkIsFuzzyContiguous(std::span<const qint32> sortedUids,
  */
 int recentFetchCount();
 
-// Shared OAuth account selection for sync workers.
-std::tuple<bool, QString, OAuthAccountTarget> selectOAuthAccount(const QVariantList &accounts);
+// Account selection for sync workers — accepts both OAuth and password accounts.
+std::tuple<bool, QString, AccountTarget> selectAccount(const QVariantList &accounts);
+
+// Legacy alias.
+inline auto selectOAuthAccount(const QVariantList &accounts) { return selectAccount(accounts); }
 
 // Sleep in 1s chunks; early-exit if running becomes false.
 void sleepInterruptible(std::atomic_bool &running, int totalSeconds);

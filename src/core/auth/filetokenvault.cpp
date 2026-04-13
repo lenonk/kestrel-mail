@@ -62,3 +62,38 @@ FileTokenVault::removeRefreshToken(const QString &accountEmail) {
 
     return true;
 }
+
+bool
+FileTokenVault::storePassword(const QString &accountEmail, const QString &password) {
+    QJsonObject obj;
+    if (QFile in(m_path); in.open(QIODevice::ReadOnly))
+        obj = QJsonDocument::fromJson(in.readAll()).object();
+
+    obj["pwd:"_L1 + Kestrel::normalizeEmail(accountEmail)] = password;
+
+    QFile out(m_path);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    out.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
+    return true;
+}
+
+QString
+FileTokenVault::loadPassword(const QString &accountEmail) {
+    QFile in(m_path);
+    if (!in.open(QIODevice::ReadOnly)) return {};
+    const auto obj = QJsonDocument::fromJson(in.readAll()).object();
+    return obj.value("pwd:"_L1 + Kestrel::normalizeEmail(accountEmail)).toString();
+}
+
+bool
+FileTokenVault::removePassword(const QString &accountEmail) {
+    QFile in(m_path);
+    if (!in.open(QIODevice::ReadOnly)) return true;
+    auto obj = QJsonDocument::fromJson(in.readAll()).object();
+    in.close();
+    obj.remove("pwd:"_L1 + Kestrel::normalizeEmail(accountEmail));
+    QFile out(m_path);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    out.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
+    return true;
+}

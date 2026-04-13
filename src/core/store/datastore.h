@@ -115,6 +115,10 @@ public:
     Q_INVOKABLE void updateContactAvatar(const QString &email, const QString &avatarUrl, const QString &source);
     Q_INVOKABLE QVariantList searchContacts(const QString &prefix, int limit = 10) const;
 
+    // ── PGP key management ──────────────────────────────────────────
+    Q_INVOKABLE bool insertPgpKey(const QString &accountEmail, const QString &fingerprint, int keySize);
+    Q_INVOKABLE QVariantMap pgpKeyForAccount(const QString &accountEmail) const;
+
     // ── User prefs forwarding — delegates to m_prefs ────────────────
     Q_INVOKABLE QVariantMap migrationStats() const;
     Q_INVOKABLE bool isSenderTrusted(const QString &domain) const;

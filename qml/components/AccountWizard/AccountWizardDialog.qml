@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../Common"
+import "../Layout"
 
 Window {
     id: root
@@ -24,6 +25,7 @@ Window {
     property string accountNameDraft: ""
     property string oauthBrowserUrl: ""
     property bool oauthUseMobileView: true
+    property bool oauthFlowStarted: false
     property double lastWizardAdvanceAt: 0
 
     signal toastRequested(string message, bool isError)
@@ -42,11 +44,11 @@ Window {
     function beginAutoSetup() {
         if (!accountSetupObj) return
         setupStarted = true
+        oauthFlowStarted = false
         openSection = "automatic"
         accountSetupObj.discoverProvider()
         var em = (accountSetupObj.email || "").trim()
-        var local = em.indexOf("@") > 0 ? em.slice(0, em.indexOf("@")) : em
-        accountNameDraft = local.length > 0 ? local : i18n("My Account")
+        accountNameDraft = em.length > 0 ? em : i18n("My Account")
         wizardStep = 1
     }
 
@@ -62,7 +64,14 @@ Window {
             return
         }
 
+        // Step 2 has encryption sub-pages (create → save → share)
+        if (wizardStep === 2 && step2.hasSubPages && !step2.atLastSubPage) {
+            step2.advanceSubPage()
+            return
+        }
+
         if (wizardStep < 3) {
+            if (wizardStep === 2) step2.reset()
             wizardStep += 1
             return
         }
@@ -77,6 +86,7 @@ Window {
                 accountSetupObj.discoverProvider()
             }
 
+            root.oauthFlowStarted = true
             accountSetupObj.beginOAuth()
             toastRequested(i18n("Finish pressed. Starting OAuth..."), false)
             var launchUrl = accountSetupObj.oauthUrl ? accountSetupObj.oauthUrl.toString() : ""
@@ -124,6 +134,7 @@ Window {
         ignoreUnknownSignals: true
         function onOauthReadyChanged() {
             if (!accountSetupObj || !accountSetupObj.oauthReady) return
+            if (!root.oauthFlowStarted) return
 
             toastRequested(i18n("OAuth complete. Saving account..."), false)
 
@@ -185,26 +196,15 @@ Window {
                         font.pixelSize: 14
                     }
 
-                    QQC2.Button {
-                        id: closeBtn
+                    TitleBarIconButton {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        implicitWidth: 32
-                        implicitHeight: 32
-                        leftPadding: 0
-                        rightPadding: 0
-                        background: Rectangle {
-                            radius: 4
-                            color: closeBtn.down ? Qt.darker(systemPalette.highlight, 1.45)
-                                                 : (closeBtn.hovered ? Qt.darker(systemPalette.highlight, 1.7) : "transparent")
-                        }
+                        buttonWidth: Kirigami.Units.gridUnit + 16
+                        buttonHeight: Kirigami.Units.gridUnit + 5
+                        iconSize: Kirigami.Units.gridUnit - 4
+                        highlightColor: systemPalette.highlight
+                        iconName: "window-close-symbolic"
                         onClicked: root.close()
-                        contentItem: Kirigami.Icon {
-                            source: "window-close-symbolic"
-                            width: 16
-                            height: 16
-                            color: Kirigami.Theme.textColor
-                        }
                     }
                 }
 
@@ -217,7 +217,7 @@ Window {
                         spacing: 0
 
                         Rectangle {
-                            Layout.preferredWidth: root.setupStarted ? 210 : 0
+                            Layout.preferredWidth: root.setupStarted ? 160 : 0
                             Layout.fillHeight: true
                             visible: root.setupStarted
                             color: "transparent"
@@ -227,7 +227,7 @@ Window {
                                 anchors.leftMargin: 8
                                 anchors.top: parent.top
                                 anchors.topMargin: 24
-                                spacing: 4
+                                spacing: 8
 
                                 Repeater {
                                     model: [
@@ -236,17 +236,17 @@ Window {
                                         { n: 3, text: i18n("Finish") }
                                     ]
                                     delegate: Row {
-                                        spacing: 10
+                                        spacing: 8
                                         Rectangle {
-                                            width: 42
-                                            height: 42
-                                            radius: 21
+                                            width: 24
+                                            height: 24
+                                            radius: 12
                                             color: "transparent"
-                                            border.width: 2
+                                            border.width: 1.5
                                             border.color: modelData.n <= root.wizardStep ? Qt.lighter(Kirigami.Theme.textColor, 1.0) : Qt.lighter(Kirigami.Theme.textColor, 0.5)
-                                            QQC2.Label { anchors.centerIn: parent; text: modelData.n; font.bold: true; opacity: modelData.n <= root.wizardStep ? 1 : 0.55 }
+                                            QQC2.Label { anchors.centerIn: parent; text: modelData.n; font.pixelSize: 11; opacity: modelData.n <= root.wizardStep ? 1 : 0.55 }
                                         }
-                                        QQC2.Label { anchors.verticalCenter: parent.verticalCenter; text: modelData.text; font.pixelSize: 19; opacity: modelData.n <= root.wizardStep ? 1 : 0.55 }
+                                        QQC2.Label { anchors.verticalCenter: parent.verticalCenter; text: modelData.text; font.pixelSize: 13; opacity: modelData.n <= root.wizardStep ? 1 : 0.55 }
                                     }
                                 }
                             }
@@ -281,7 +281,7 @@ Window {
                                 onAccountNameDraftChangeRequested: function(text) { root.accountNameDraft = text }
                             }
 
-                            AccountWizardStep2 {}
+                            AccountWizardStep2 { id: step2; accountSetupObj: root.accountSetupObj }
 
                             AccountWizardStep3 {}
                         }
@@ -290,6 +290,7 @@ Window {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.leftMargin: 20
                     Layout.rightMargin: 20
                     Layout.bottomMargin: 20
 
@@ -306,9 +307,14 @@ Window {
                     QQC2.Button {
                         id: backButton
                         text: i18n("Back")
-                        enabled: root.wizardStep > 1 || root.setupStarted
+                        enabled: root.wizardStep > 1 || root.setupStarted || (root.wizardStep === 2 && step2.subPage > 0)
                         onClicked: {
+                            // Try retreating within step 2 sub-pages first
+                            if (root.wizardStep === 2 && step2.retreatSubPage()) {
+                                return
+                            }
                             if (root.wizardStep > 1) {
+                                if (root.wizardStep === 2) step2.reset()
                                 root.wizardStep = Math.max(1, root.wizardStep - 1)
                             } else {
                                 root.setupStarted = false

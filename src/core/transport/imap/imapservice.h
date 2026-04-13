@@ -155,7 +155,7 @@ private:
     QSet<QString>                                m_inFlightAttachmentDownloads;
     mutable QMutex                               m_inFlightAttachmentDownloadsMutex;
 
-    struct AccountInfo { QString email, host, accessToken; int port = 0; };
+    struct AccountInfo { QString email, host, accessToken; int port = 0; QString authType; };
     struct SyncFolderOptions {
         bool announce = true;
     };

@@ -282,7 +282,11 @@ ImapService::initializeConnectionPool() {
             auto it = std::ranges::find_if(accounts, [&](const QVariant &a) {
                 return a.toMap().value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0;
             });
-            return (it != accounts.end()) ? refreshAccessToken(it->toMap(), email) : QString{};
+            if (it == accounts.end()) return {};
+            const auto acc = it->toMap();
+            if (acc.value("authType"_L1).toString() == "password"_L1)
+                return m_vault ? m_vault->loadPassword(email) : QString{};
+            return refreshAccessToken(acc, email);
         };
     }
 
@@ -308,13 +312,14 @@ ImapService::initializeConnectionPool() {
 
         // Establish dedicated hydration connections FIRST (one per account).
         // These are reserved for user-click-initiated hydration to guarantee availability.
-        for (const auto &[email, host, accessToken, port] : accounts) {
-            runBackgroundTask([this, host, email, port, accessToken]() {
+        for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
+            const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
+            runBackgroundTask([this, host, email, port, accessToken, method]() {
                 if (m_destroying.load())
                     return;
 
                 auto conn = std::make_unique<Imap::Connection>();
-                conn->connectAndAuth(host, port, email, accessToken);
+                conn->connectAndAuth(host, port, email, accessToken, method);
 
                 PooledConnSlot s;
                 s.email = email; s.host = host; s.port = port;
@@ -327,14 +332,15 @@ ImapService::initializeConnectionPool() {
         }
 
         // Then establish the general-purpose operational pool.
-        for (const auto &[email, host, accessToken, port] : accounts) {
+        for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
+            const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
             for (qint32 i = 0; i < kOperationalPoolMax; ++i) {
-                runBackgroundTask([this, host, email, port, accessToken]() {
+                runBackgroundTask([this, host, email, port, accessToken, method]() {
                     if (m_destroying.load())
                         return;
 
                     auto conn = std::make_unique<Imap::Connection>();
-                    conn->connectAndAuth(host, port, email, accessToken);
+                    conn->connectAndAuth(host, port, email, accessToken, method);
 
                     PooledConnSlot s;
                     s.email = email; s.host = host; s.port = port;
@@ -962,7 +968,11 @@ ImapService::startIdleWatcher() {
 
     connect(m_idleWatcher, &Imap::IdleWatcher::requestRefreshAccessToken,
             this, [this](const QVariantMap &account, const QString &email, QString *out) {
-                if (out) *out = workerRefreshAccessToken(account, email);
+                if (!out) return;
+                if (account.value("authType"_L1).toString() == "password"_L1)
+                    *out = m_vault ? m_vault->loadPassword(email) : QString{};
+                else
+                    *out = workerRefreshAccessToken(account, email);
             }, Qt::BlockingQueuedConnection);
 
     connect(m_idleWatcher, &Imap::IdleWatcher::requestFolderUids,
@@ -1045,7 +1055,11 @@ ImapService::startBackgroundWorker() {
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::requestRefreshAccessToken,
             this, [this](const QVariantMap &account, const QString &email, QString *out) {
-                if (out) *out = workerRefreshAccessToken(account, email);
+                if (!out) return;
+                if (account.value("authType"_L1).toString() == "password"_L1)
+                    *out = m_vault ? m_vault->loadPassword(email) : QString{};
+                else
+                    *out = workerRefreshAccessToken(account, email);
             }, Qt::BlockingQueuedConnection);
 
     connect(m_backgroundWorker, &Imap::BackgroundWorker::requestAccountThrottled,
@@ -1152,7 +1166,23 @@ ImapService::idleOnInboxChanged() {
 
 void
 ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
-    auto fn = [this, ok, message]() { emit realtimeStatus(ok, message); };
+    auto fn = [this, ok, message]() {
+        // Auto-trigger reauth flow when the account is missing or broken,
+        // suppressing the raw error toast in favour of the reauth prompt.
+        if (!ok && (message.contains("no OAuth account"_L1, Qt::CaseInsensitive)
+                 || message.contains("account settings incomplete"_L1, Qt::CaseInsensitive))) {
+            const auto accounts = m_accounts ? m_accounts->accounts() : QVariantList{};
+            const auto email = !accounts.isEmpty()
+                ? accounts.first().toMap().value("email"_L1).toString()
+                : QString{};
+            if (!email.isEmpty()) {
+                emit accountNeedsReauth(email);
+                return;
+            }
+        }
+
+        emit realtimeStatus(ok, message);
+    };
 
     if (QThread::currentThread() == thread())
         fn();
@@ -1398,7 +1428,13 @@ ImapService::resolveAccounts(const QVariantList &accounts) {
     for (const auto &a : accounts) {
         const auto acc = a.toMap();
 
-        if (acc.value("authType"_L1).toString() != "oauth2"_L1)
+        const auto authType = acc.value("authType"_L1).toString();
+        const bool isOAuth = authType == "oauth2"_L1
+                          || (!acc.value("oauthClientId"_L1).toString().isEmpty()
+                           && !acc.value("oauthTokenUrl"_L1).toString().isEmpty());
+        const bool isPassword = authType == "password"_L1;
+
+        if (!isOAuth && !isPassword)
             continue;
 
         const auto email = acc.value("email"_L1).toString();
@@ -1408,12 +1444,17 @@ ImapService::resolveAccounts(const QVariantList &accounts) {
         if (email.isEmpty() || host.isEmpty() || port <= 0)
             continue;
 
-        const auto token = refreshAccessToken(acc, email);
+        QString credential;
+        if (isOAuth) {
+            credential = refreshAccessToken(acc, email);
+        } else if (m_vault) {
+            credential = m_vault->loadPassword(email);
+        }
 
-        if (token.isEmpty())
+        if (credential.isEmpty())
             continue;
 
-        result.push_back({email, host, token, port});
+        result.push_back({email, host, credential, port, isPassword ? "password"_L1 : "oauth2"_L1});
     }
 
     return result;
@@ -2392,7 +2433,10 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         if (m_destroying)
             return {};
 
-        if (account.value("authType"_L1).toString() != "oauth2") {
+        const bool isOAuth = account.value("authType"_L1).toString() == "oauth2"_L1
+                          || (!account.value("oauthClientId"_L1).toString().isEmpty()
+                           && !account.value("oauthTokenUrl"_L1).toString().isEmpty());
+        if (!isOAuth) {
             return {};
         }
 
@@ -2980,14 +3024,14 @@ ImapService::syncFolder(const QString &folderName, bool announce) {
             flushTimer.start();
             auto flush = makeSyncFlushLambda(pendingHeaders, flushTimer);
 
-            for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
+            for (const auto &[email, host, accessToken, port, acctAuthType] : resolveAccounts(accounts)) {
                 if (m_cancelRequested.load()) {
                     SyncResult r;
                     r.message = "Aborted fetch for %1."_L1.arg(target);
                     return r;
                 }
 
-                (void)syncFolderInternal(AccountInfo{email, host, accessToken, port}, target, SyncFolderOptions{announce},
+                (void)syncFolderInternal(AccountInfo{email, host, accessToken, port, acctAuthType}, target, SyncFolderOptions{announce},
                                            seqNum, inboxInserted, pendingHeaders, result.headers,
                                            flushTimer, flush);
             }
@@ -3070,7 +3114,7 @@ ImapService::syncAll(bool announce) {
             auto flush = makeSyncFlushLambda(pendingHeaders, flushTimer);
 
             QString googleAccessToken;
-            for (const auto &[email, host, accessToken, port] : resolveAccounts(accounts)) {
+            for (const auto &[email, host, accessToken, port, acctAuthType] : resolveAccounts(accounts)) {
                 if (googleAccessToken.isEmpty()
                         && (host.contains("gmail.com"_L1) || host.contains("google"_L1)))
                     googleAccessToken = accessToken;
@@ -3145,7 +3189,7 @@ ImapService::syncAll(bool announce) {
 
                     const auto folderLabel = stripGmailPrefix(folderTarget);
 
-                    const auto folderHeaders = syncFolderInternal(AccountInfo{email, host, accessToken, port},
+                    const auto folderHeaders = syncFolderInternal(AccountInfo{email, host, accessToken, port, acctAuthType},
                         folderTarget, SyncFolderOptions{announce}, seqNum, inboxInserted,
                         pendingHeaders, result.headers, flushTimer, flush);
 

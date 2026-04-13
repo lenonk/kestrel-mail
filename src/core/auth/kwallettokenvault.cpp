@@ -52,3 +52,26 @@ KWalletTokenVault::removeRefreshToken(const QString &accountEmail) {
 
     return wallet->removeEntry(Kestrel::normalizeEmail(accountEmail)) == 0;
 }
+
+bool
+KWalletTokenVault::storePassword(const QString &accountEmail, const QString &password) {
+    const std::unique_ptr<KWallet::Wallet> wallet(openWallet());
+    if (!wallet) return false;
+    return wallet->writePassword("pwd:"_L1 + Kestrel::normalizeEmail(accountEmail), password) == 0;
+}
+
+QString
+KWalletTokenVault::loadPassword(const QString &accountEmail) {
+    const std::unique_ptr<KWallet::Wallet> wallet(openWallet());
+    if (!wallet) return {};
+    QString pw;
+    if (wallet->readPassword("pwd:"_L1 + Kestrel::normalizeEmail(accountEmail), pw) != 0) return {};
+    return pw;
+}
+
+bool
+KWalletTokenVault::removePassword(const QString &accountEmail) {
+    const std::unique_ptr<KWallet::Wallet> wallet(openWallet());
+    if (!wallet) return false;
+    return wallet->removeEntry("pwd:"_L1 + Kestrel::normalizeEmail(accountEmail)) == 0;
+}

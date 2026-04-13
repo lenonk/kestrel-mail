@@ -42,6 +42,7 @@ set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
 include(KDEInstallDirs)
 include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
+kde_enable_exceptions()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick Sql Network Concurrent WebEngineQuick Widgets)
 find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n Notifications Wallet)
@@ -51,6 +52,7 @@ find_package(Boost CONFIG REQUIRED)
 find_package(PkgConfig)
 if(PKG_CONFIG_FOUND)
     pkg_check_modules(LIBSECRET libsecret-1)
+    pkg_check_modules(BOTAN REQUIRED IMPORTED_TARGET botan-3)
 endif()
 
 # Work around distro packaging where Kirigami QML plugin targets referenced by
@@ -95,6 +97,7 @@ qt_add_executable(kestrel-mail
     src/core/htmlprocessor.cpp
     src/core/store/datastore.cpp
     src/core/store/contactstore.cpp
+    src/core/crypto/pgpkeymanager.cpp
     src/core/store/folderstatsstore.cpp
     src/core/store/userprefsstore.cpp
     src/core/store/messagestore.cpp
@@ -124,6 +127,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/AccountWizard/AccountWizardStep2.qml
         qml/components/AccountWizard/AccountWizardStep3.qml
         qml/components/AccountWizard/OAuthBrowserWindow.qml
+        qml/components/AccountWizard/AvatarChooserDialog.qml
         qml/components/Attachments/AttachmentCard.qml
         qml/components/Attachments/AttachmentHoverPopup.qml
         qml/components/Calendar/CalendarPane.qml
@@ -192,6 +196,24 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/images/flag.svg
         qml/images/trash.svg
         qml/images/gmail_account_icon.svg
+        qml/images/account-avatars/avatar-01.svg
+        qml/images/account-avatars/avatar-02.svg
+        qml/images/account-avatars/avatar-03.svg
+        qml/images/account-avatars/avatar-04.svg
+        qml/images/account-avatars/avatar-05.svg
+        qml/images/account-avatars/avatar-06.svg
+        qml/images/account-avatars/avatar-07.svg
+        qml/images/account-avatars/avatar-08.svg
+        qml/images/account-avatars/avatar-09.svg
+        qml/images/account-avatars/avatar-10.svg
+        qml/images/account-avatars/avatar-11.svg
+        qml/images/account-avatars/avatar-12.svg
+        qml/images/account-avatars/avatar-13.svg
+        qml/images/account-avatars/avatar-14.svg
+        qml/images/account-avatars/avatar-15.svg
+        qml/images/account-avatars/avatar-16.svg
+        qml/images/account-avatars/avatar-17.svg
+        qml/images/account-avatars/avatar-18.svg
 )
 
 set(KESTREL_PROVIDERS_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/data/providers.json")
@@ -234,6 +256,8 @@ if(LIBSECRET_FOUND)
     target_include_directories(kestrel-mail PRIVATE ${LIBSECRET_INCLUDE_DIRS})
     target_link_libraries(kestrel-mail PRIVATE ${LIBSECRET_LIBRARIES})
 endif()
+
+target_link_libraries(kestrel-mail PRIVATE PkgConfig::BOTAN)
 
 qt_add_executable(kestrel-imap-lab
     src/imaplab_main.cpp

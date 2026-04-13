@@ -339,21 +339,32 @@ Item {
         spacing: 10
 
         onVisibleChanged: {
-            if (visible) Qt.callLater(function() { accountNameField.forceActiveFocus() })
+            if (visible) Qt.callLater(function() { accountNameField.forceActiveFocus(); accountNameField.selectAll() })
         }
 
         QQC2.Label { text: i18n("Account details"); font.pixelSize: 18; font.bold: true }
+        QQC2.Label { text: i18n("Enter additional information about your new account."); opacity: 0.7 }
 
-        Item { Layout.preferredHeight: 7 }
+        Item { Layout.preferredHeight: 4 }
 
-        QQC2.Label { text: i18n("Account name:") }
-        QQC2.TextField {
-            id: accountNameField
+        RowLayout {
             Layout.fillWidth: true
-            placeholderText: i18n("Personal Gmail")
-            text: step1Root.accountNameDraft
-            onTextEdited: step1Root.accountNameDraftChangeRequested(text)
-            onAccepted: step1Root.advanceWizardRequested()
+            spacing: 12
+            QQC2.Label { text: i18n("Account name:"); Layout.alignment: Qt.AlignVCenter }
+            QQC2.TextField {
+                id: accountNameField
+                Layout.fillWidth: true
+                placeholderText: i18n("Personal Gmail")
+                text: step1Root.accountNameDraft
+                onTextEdited: step1Root.accountNameDraftChangeRequested(text)
+                onAccepted: step1Root.advanceWizardRequested()
+            }
+        }
+        QQC2.Label {
+            text: i18n("This is the name for this account that you will see in the account list.")
+            opacity: 0.45
+            font.pixelSize: 12
+            Layout.leftMargin: 100
         }
 
         Item { Layout.fillHeight: true }

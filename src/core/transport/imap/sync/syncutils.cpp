@@ -44,12 +44,18 @@ recentFetchCount() {
     return -1;
 }
 
-std::tuple<bool, QString, OAuthAccountTarget>
-selectOAuthAccount(const QVariantList &accounts) {
+std::tuple<bool, QString, AccountTarget>
+selectAccount(const QVariantList &accounts) {
     for (const auto &a : accounts) {
         const auto acc = a.toMap();
+        const auto authType = acc.value("authType"_L1).toString();
 
-        if (acc.value("authType"_L1).toString() != "oauth2"_L1)
+        const bool isOAuth = authType == "oauth2"_L1
+                          || (!acc.value("oauthClientId"_L1).toString().isEmpty()
+                           && !acc.value("oauthTokenUrl"_L1).toString().isEmpty());
+        const bool isPassword = authType == "password"_L1;
+
+        if (!isOAuth && !isPassword)
             continue;
 
         const auto email = acc.value("email"_L1).toString();
@@ -59,10 +65,10 @@ selectOAuthAccount(const QVariantList &accounts) {
         if (email.isEmpty() || host.isEmpty() || port <= 0)
             return {false, "Realtime sync: account settings incomplete."_L1, {}};
 
-        return {true, {}, {email, host, port, acc}};
+        return {true, {}, {email, host, port, acc, isPassword ? "password"_L1 : "oauth2"_L1}};
     }
 
-    return {false, "Realtime sync: no OAuth account available."_L1, {}};
+    return {false, "Realtime sync: no account available."_L1, {}};
 }
 
 void

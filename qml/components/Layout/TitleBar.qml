@@ -106,7 +106,7 @@ Rectangle {
     Common.PopupMenu {
         id: appMenu
         parent: menuButton
-        QQC2.MenuItem { text: i18n("Add Account..."); onTriggered: titleBar.appRoot.accountWizard.open() }
+        QQC2.MenuItem { text: i18n("Add Account..."); onTriggered: titleBar.appRoot.openAccountWizard() }
         QQC2.MenuSeparator {}
         QQC2.MenuItem { text: i18n("Settings") }
         QQC2.MenuItem { text: i18n("Accounts") }

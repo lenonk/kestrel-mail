@@ -63,6 +63,12 @@ QByteArray buildXOAuth2Command(const QString &tag, const QString &email, const Q
     return tag.toUtf8() + " AUTHENTICATE XOAUTH2 " + authRaw.toBase64() + "\r\n";
 }
 
+QByteArray buildLoginCommand(const QString &tag, const QString &email, const QString &password) {
+    // RFC 9051: tag SP "LOGIN" SP userid SP password
+    // Quoted strings to handle special characters.
+    return tag.toUtf8() + " LOGIN \"" + email.toUtf8() + "\" \"" + password.toUtf8() + "\"\r\n";
+}
+
 QByteArray buildSelectCommand(const QString &tag, const QString &mailbox) {
     const QString quotedMailbox = "\"%1\""_L1.arg(mailbox);
     return tag.toUtf8() + " SELECT " + quotedMailbox.toUtf8() + "\r\n";
@@ -140,11 +146,12 @@ Connection::~Connection()
 
 ConnectResult
 Connection::connectAndAuth(const QString &host, const qint32 port,
-                           const QString &email, const QString &accessToken) {
+                           const QString &email, const QString &credential,
+                           const AuthMethod method) {
     ConnectResult result;
 
-    if (accessToken.isEmpty()) {
-        result.message = "No access token available";
+    if (credential.isEmpty()) {
+        result.message = "No credential available";
         return result;
     }
 
@@ -156,7 +163,8 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     m_host        = host;
     m_port        = port;
     m_email       = email;
-    m_accessToken = accessToken;
+    m_accessToken = credential;
+    m_authMethod  = method;
     m_idleTag.clear();
     m_selectedFolder.clear();
 
@@ -174,17 +182,24 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     }
     (void)m_socket->readAll();
 
-    // Authenticate with XOAUTH2
+    // Authenticate
     const auto authTag = nextTag();
-    const QString authCommand = "AUTHENTICATE XOAUTH2 <base64>"_L1;
-    m_socket->write(buildXOAuth2Command(authTag, email, accessToken));
+    QString authCommand;
+
+    if (method == AuthMethod::Login) {
+        authCommand = "LOGIN <user> <pass>"_L1;
+        m_socket->write(buildLoginCommand(authTag, email, credential));
+    } else {
+        authCommand = "AUTHENTICATE XOAUTH2 <base64>"_L1;
+        m_socket->write(buildXOAuth2Command(authTag, email, credential));
+    }
     m_socket->flush();
 
     auto imapResp = IO::readUntilTagged(*m_socket, authTag, IO::kTaggedReadTimeoutMs);
     observeThrottleState(imapResp);
 
-    // Handle SASL continuation if present
-    if (imapResp.contains("\r\n+ "_L1) || imapResp.startsWith("+ "_L1)) {
+    // Handle SASL continuation if present (XOAUTH2 only)
+    if (method == AuthMethod::XOAuth2 && (imapResp.contains("\r\n+ "_L1) || imapResp.startsWith("+ "_L1))) {
         m_socket->write("\r\n");
         m_socket->flush();
         imapResp += IO::readUntilTagged(*m_socket, authTag, IO::kTaggedReadTimeoutMs);
@@ -194,12 +209,12 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
     appendImapLog(m_logConnId, m_logOwner, email, authCommand, imapResp);
 
     if (!imapResp.contains(authTag + " OK"_L1, Qt::CaseInsensitive)) {
-        // Auth failed — if we have a token refresher, get a fresh token and retry once.
-        if (m_tokenRefresher && !m_authRetried) {
+        // Auth failed — for OAuth, try refreshing the token once.
+        if (method == AuthMethod::XOAuth2 && m_tokenRefresher && !m_authRetried) {
             m_authRetried = true;
             const QString freshToken = m_tokenRefresher(email);
-            if (!freshToken.isEmpty() && freshToken != accessToken) {
-                auto retry = connectAndAuth(host, port, email, freshToken);
+            if (!freshToken.isEmpty() && freshToken != credential) {
+                auto retry = connectAndAuth(host, port, email, freshToken, method);
                 m_authRetried = false;
                 return retry;
             }
@@ -611,7 +626,7 @@ Connection::tryReconnect(const QString &freshToken) {
     const QString token = freshToken.isEmpty() ? m_accessToken : freshToken;
     if (m_host.isEmpty() || m_email.isEmpty() || token.isEmpty())
         return false;
-    return connectAndAuth(m_host, m_port, m_email, token).success;
+    return connectAndAuth(m_host, m_port, m_email, token, m_authMethod).success;
 }
 
 bool

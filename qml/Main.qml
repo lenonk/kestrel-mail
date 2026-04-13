@@ -585,6 +585,8 @@ Kirigami.ApplicationWindow {
         composeDialog.openCompose("", "", "")
     }
 
+    function openAccountWizard() { accountWizard.open() }
+
     function openForwardCompose(subject, body, bodyText, attachments, initialDarkMode) {
         composeDialog.openCompose("", subject || "", body || "", attachments || [], !!initialDarkMode, bodyText || "")
     }
