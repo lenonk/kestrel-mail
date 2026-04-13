@@ -81,9 +81,37 @@ function resolvedMailboxEmail(rawValue, accountEmailHint) {
     return ""
 }
 
+// Extract the display name embedded in a "Name <email>" value.
+// Returns "" when the raw value is bare email or empty.
+// Flips "Last, First" → "First Last" (corporate LDAP convention).
+function _inlineDisplayName(rawValue) {
+    var s = (rawValue || "").toString().trim()
+    if (!s.length) return ""
+    var lt = s.indexOf("<")
+    if (lt > 0) s = s.slice(0, lt).trim()
+    s = s.replace(/["']/g, "").trim()
+    if (!s.length) return ""
+    if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(s)) return ""
+    var parts = s.split(",")
+    if (parts.length === 2) {
+        var first = parts[1].trim()
+        var last = parts[0].trim()
+        if (first.length && last.length) s = first + " " + last
+    }
+    return s
+}
+
 // dataStoreObj may be null; if non-null, uses displayNameForEmail.
+// Prefers the per-message inline name so shared addresses (e.g.
+// notifications@github.com) show the correct sender per message.
 function displayNameForAddress(rawAddressValue, accountEmailHint, dataStoreObj) {
     var raw = (rawAddressValue || "").toString().trim()
+
+    // Prefer the name embedded in this specific message header.
+    var inline = _inlineDisplayName(raw)
+    if (inline.length) return inline
+
+    // Fall back to the contact store when the raw value is a bare email.
     var email = resolvedMailboxEmail(raw, accountEmailHint)
     if (email.length) {
         if (dataStoreObj && dataStoreObj.displayNameForEmail) {

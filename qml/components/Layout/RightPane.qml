@@ -108,7 +108,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: 0
-            PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: i18n("People"); toolTipText: i18n("People"); showLabel: false; hoverFeedback: true }
+            PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: i18n("People"); toolTipText: i18n("People"); showLabel: false; active: appRoot.activeWorkspace === "people"; hoverFeedback: true; onClicked: appRoot.activeWorkspace = "people" }
             PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: i18n("Tasks"); toolTipText: i18n("Tasks"); showLabel: false; hoverFeedback: true }
             PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: i18n("Mail"); toolTipText: i18n("Mail"); showLabel: false; active: appRoot.activeWorkspace === "mail"; hoverFeedback: true; onClicked: appRoot.activeWorkspace = "mail" }
             PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: i18n("Calendar"); toolTipText: i18n("Calendar"); showLabel: false; active: appRoot.activeWorkspace === "calendar"; hoverFeedback: true; onClicked: appRoot.activeWorkspace = "calendar" }
@@ -136,16 +136,6 @@ Rectangle {
             }
         }
 
-        Repeater {
-            model: ["view-calendar-day", "mail-message", "user-identity", "task-complete"]
-            delegate: IconOnlyFlatButton {
-                implicitWidth: parent.width
-                implicitHeight: 44
-                iconName: modelData
-                iconSize: 24
-            }
-        }
-
         Item { Layout.fillHeight: true }
 
         Common.PaneDivider {}
@@ -153,7 +143,7 @@ Rectangle {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 0
-            PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
+            PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); active: appRoot.activeWorkspace === "people"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: appRoot.activeWorkspace = "people" }
             PaneIconButton { Layout.fillWidth: true; iconName: "task-complete"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4 }
             PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: appRoot.activeWorkspace === "mail"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: appRoot.activeWorkspace = "mail" }
             PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: appRoot.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnRight: true; sideIndicatorInset: 4; onClicked: appRoot.activeWorkspace = "calendar" }

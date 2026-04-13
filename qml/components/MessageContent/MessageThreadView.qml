@@ -24,6 +24,7 @@ Item {
     property var cardSelectedKey: ({})
     property var cardDarkModes: ({})
     property bool threadLoadingOlder: false
+    readonly property int _maxWebViewH: 8000
     property int threadScrollEpoch: 0
     property var threadExpandedSet: null
     property bool threadShowAll: false
@@ -721,7 +722,7 @@ Item {
                                             onClicked: appRoot.openComposerTo(appRoot.senderEmail(threadCard.modelData.sender || ""), i18n("sender"))
                                         }
                                         ContactHoverPopup {
-                                            anchorItem: threadSenderLabel
+                                            anchorItem: threadSenderMouse
                                             avatarSources: root._threadAvatarSources(threadCard.modelData)
                                             avatarText: appRoot.avatarInitials(root._threadSenderName(threadCard.modelData))
                                             primaryButtonText: i18n("Send mail")
@@ -996,7 +997,7 @@ Item {
                                             }
                                             onContentsSizeChanged: {
                                                 const h = Number(contentsSize.height);
-                                                const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24);
+                                                const target = Math.max(24, Math.min(isFinite(h) && h >= 0 ? h : 24, root._maxWebViewH));
                                                 if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
                                                     threadCard.bodyHeight = target;
                                                     root.threadScrollEpoch++;
@@ -1006,7 +1007,7 @@ Item {
                                                 if (req.status === WebEngineLoadingInfo.LoadSucceededStatus) {
                                                     runJavaScript("document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';");
                                                     const h = Number(contentsSize.height);
-                                                    const target = Math.max(24, isFinite(h) && h >= 0 ? h : 24);
+                                                    const target = Math.max(24, Math.min(isFinite(h) && h >= 0 ? h : 24, root._maxWebViewH));
                                                     if (Math.abs(target - threadCard.bodyHeight) > 0.5) {
                                                         threadCard.bodyHeight = target;
                                                         root.threadScrollEpoch++;

@@ -303,7 +303,10 @@ parseAttachmentParts(const QString &bodyStructureResponse) {
     QList<BodyPart> all = parsePreferredTextParts(bodyStructureResponse);
     QList<BodyPart> out;
     for (const BodyPart &p : all) {
-        if (p.isInline) { continue; }
+        // Skip anonymous inline parts (tracking pixels, embedded images with no name).
+        // Keep inline parts that carry a filename — many clients mark real file
+        // attachments as Content-Disposition: inline.
+        if (p.isInline && p.filename.isEmpty()) { continue; }
         if (p.isAttachment
                 || (p.type != "TEXT"_L1
                     && p.type != "MULTIPART"_L1

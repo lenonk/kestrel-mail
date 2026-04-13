@@ -58,7 +58,6 @@ ArrowPopup {
 
                 QQC2.Label {
                     text: root.titleText
-                    font.bold: true
                     font.pixelSize: root.nameFontPixelSize
                     Layout.fillWidth: true
                     elide: Text.ElideRight

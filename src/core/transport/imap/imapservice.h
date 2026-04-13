@@ -26,6 +26,7 @@ class ImapService : public QObject
     Q_OBJECT
     Q_PROPERTY(QVariantList googleCalendarList READ googleCalendarList NOTIFY googleCalendarListChanged)
     Q_PROPERTY(QVariantList googleWeekEvents READ googleWeekEvents NOTIFY googleWeekEventsChanged)
+    Q_PROPERTY(QVariantList googleContacts READ googleContacts NOTIFY googleContactsChanged)
 public:
     explicit ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent = nullptr);
     ~ImapService() override;
@@ -75,9 +76,11 @@ public:
     Q_INVOKABLE void respondToCalendarInvite(const QString &calendarId,
                                              const QString &eventId,
                                              const QString &response);
+    Q_INVOKABLE void refreshGoogleContacts();
 
     [[nodiscard]] QVariantList googleCalendarList() const { return m_googleCalendarList; }
     [[nodiscard]] QVariantList googleWeekEvents() const { return m_googleWeekEvents; }
+    [[nodiscard]] QVariantList googleContacts() const { return m_googleContacts; }
 
 signals:
     void syncFinished(bool ok, const QString &message);
@@ -92,6 +95,7 @@ signals:
     void googleCalendarListChanged();
     void googleWeekEventsChanged();
     void calendarInviteResponded();
+    void googleContactsChanged();
 
 private:
     // Internal result type for async sync work lambdas.
@@ -146,6 +150,7 @@ private:
 
     QVariantList                                 m_googleCalendarList;
     QVariantList                                 m_googleWeekEvents;
+    QVariantList                                 m_googleContacts;
 
     QSet<QString>                                m_inFlightAttachmentDownloads;
     mutable QMutex                               m_inFlightAttachmentDownloadsMutex;

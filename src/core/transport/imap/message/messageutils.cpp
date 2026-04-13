@@ -92,7 +92,18 @@ QString normalizeSenderValue(const QString &fromHeader, const QString &fallbackH
         }
         name = unescaped.trimmed();
     }
-    if (name.isEmpty() || name.compare(email, Qt::CaseInsensitive) == 0) return email;
+    if (name.isEmpty() || name.compare(email, Qt::CaseInsensitive) == 0) { return email; }
+
+    // "Last, First" → "First Last" (corporate LDAP / directory convention).
+    if (name.count(',') == 1) {
+        const auto parts = name.split(',');
+        const auto last  = parts[0].trimmed();
+        const auto first = parts[1].trimmed();
+        if (!first.isEmpty() && !last.isEmpty()) {
+            name = "%1 %2"_L1.arg(first, last);
+        }
+    }
+
     return "%1 <%2>"_L1.arg(name, email);
 }
 

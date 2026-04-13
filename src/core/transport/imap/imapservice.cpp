@@ -2015,6 +2015,141 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
 
 
 void
+ImapService::refreshGoogleContacts() {
+    if (m_destroying || !m_accounts)
+        return;
+
+    const auto accounts = m_accounts->accounts();
+    if (accounts.isEmpty())
+        return;
+
+    runBackgroundTask([this, accounts]() {
+        const auto resolved = resolveAccounts(accounts);
+        auto it = std::ranges::find_if(resolved, [](const AccountInfo &info) {
+            return info.host.contains("gmail", Qt::CaseInsensitive);
+        });
+        if (it == resolved.end()) { return; }
+        const QString accessToken = it->accessToken;
+        if (accessToken.isEmpty()) { return; }
+
+        QNetworkAccessManager nam;
+        QVariantList out;
+        QString nextPageToken;
+
+        do {
+            QUrl url("https://people.googleapis.com/v1/people/me/connections"_L1);
+            QUrlQuery q;
+            q.addQueryItem("personFields"_L1, "names,emailAddresses,phoneNumbers,photos,organizations"_L1);
+            q.addQueryItem("pageSize"_L1, "1000"_L1);
+            q.addQueryItem("sortOrder"_L1, "LAST_NAME_ASCENDING"_L1);
+            if (!nextPageToken.isEmpty())
+                q.addQueryItem("pageToken"_L1, nextPageToken);
+            url.setQuery(q);
+
+            QNetworkRequest req{url};
+            req.setRawHeader("Authorization", QByteArray("Bearer ") + accessToken.toUtf8());
+
+            QEventLoop loop;
+            QNetworkReply *reply = nam.get(req);
+            QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+            loop.exec();
+
+            const QByteArray payload = reply->readAll();
+            const bool ok = reply->error() == QNetworkReply::NoError;
+            reply->deleteLater();
+            if (!ok) {
+                qWarning() << "[contacts][google] fetch failed";
+                break;
+            }
+
+            const auto doc = QJsonDocument::fromJson(payload);
+            if (!doc.isObject()) { break; }
+
+            const auto connections = doc.object().value("connections").toArray();
+            for (const auto &v : connections) {
+                const auto p = v.toObject();
+
+                const auto names = p.value("names").toArray();
+                const auto emails = p.value("emailAddresses").toArray();
+                const auto phones = p.value("phoneNumbers").toArray();
+                const auto photos = p.value("photos").toArray();
+                const auto orgs = p.value("organizations").toArray();
+
+                QString displayName;
+                QString givenName;
+                QString familyName;
+                if (!names.isEmpty()) {
+                    const auto n = names[0].toObject();
+                    displayName = n.value("displayName").toString();
+                    givenName = n.value("givenName").toString();
+                    familyName = n.value("familyName").toString();
+                }
+                if (displayName.isEmpty()) { continue; }
+
+                QVariantList emailList;
+                for (const auto &e : emails) {
+                    const auto eo = e.toObject();
+                    emailList.push_back(QVariantMap{
+                        {"value"_L1, eo.value("value").toString()},
+                        {"type"_L1, eo.value("type").toString()}
+                    });
+                }
+
+                QVariantList phoneList;
+                for (const auto &ph : phones) {
+                    const auto po = ph.toObject();
+                    phoneList.push_back(QVariantMap{
+                        {"value"_L1, po.value("value").toString()},
+                        {"type"_L1, po.value("type").toString()}
+                    });
+                }
+
+                QString photoUrl;
+                if (!photos.isEmpty()) {
+                    const auto photo = photos[0].toObject();
+                    if (!photo.value("default").toBool(false))
+                        photoUrl = photo.value("url").toString();
+                }
+
+                QString organization;
+                QString title;
+                if (!orgs.isEmpty()) {
+                    const auto org = orgs[0].toObject();
+                    organization = org.value("name").toString();
+                    title = org.value("title").toString();
+                }
+
+                QVariantMap row;
+                row.insert("resourceName"_L1, p.value("resourceName").toString());
+                row.insert("displayName"_L1, displayName);
+                row.insert("givenName"_L1, givenName);
+                row.insert("familyName"_L1, familyName);
+                row.insert("emails"_L1, emailList);
+                row.insert("phones"_L1, phoneList);
+                row.insert("photoUrl"_L1, photoUrl);
+                row.insert("organization"_L1, organization);
+                row.insert("title"_L1, title);
+                out.push_back(row);
+            }
+
+            nextPageToken = doc.object().value("nextPageToken").toString();
+        } while (!nextPageToken.isEmpty());
+
+        std::ranges::sort(out, [](const QVariant &a, const QVariant &b) {
+            return a.toMap().value("displayName"_L1).toString()
+                       .compare(b.toMap().value("displayName"_L1).toString(), Qt::CaseInsensitive) < 0;
+        });
+
+        qInfo() << "[contacts][google] fetched" << out.size() << "contacts";
+
+        QMetaObject::invokeMethod(this, [this, out]() {
+            m_googleContacts = out;
+            emit googleContactsChanged();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void
 ImapService::respondToCalendarInvite(const QString &calendarId,
                                       const QString &eventId,
                                       const QString &response) {

@@ -448,7 +448,7 @@ HtmlProcessor::prepare(const QString &html, const bool darkMode) const {
         "</style>");
 
     const auto headInsert = QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss);
-    return injectHeadAndDarkMode(html, headInsert, false, darkMode);
+    return injectHeadAndDarkMode(html, headInsert, true, darkMode);
 }
 
 QString

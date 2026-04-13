@@ -486,7 +486,6 @@ Rectangle {
                 QQC2.Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    font.bold: true
                     font.pixelSize: 14
                     text: messageCard.nameLabel
                     wrapMode: Text.NoWrap
@@ -509,6 +508,7 @@ Rectangle {
                     elide: Text.ElideRight
                     font.bold: !!modelUnread
                     font.pixelSize: 13
+                    opacity: 0.85
                     text: (modelSubject || i18n("(No subject)"))
                     wrapMode: Text.NoWrap
                 }

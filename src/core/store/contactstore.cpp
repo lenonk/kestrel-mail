@@ -105,42 +105,46 @@ ContactStore::extractExplicitDisplayName(const QString &raw, const QString &know
     }
 
     // If this is a mailbox list, pick the segment most likely associated with knownEmail.
-    if (const auto parts = s.split(kReCsvSemicolonOutsideQuotes, Qt::SkipEmptyParts); parts.size() > 1) {
-        QString best;
-        qint32 bestScore = std::numeric_limits<int>::min() / 4;
-        for (const auto &pRaw : parts) {
-            const auto p = pRaw.trimmed();
-            if (p.isEmpty()) { continue; }
+    // Skip the split when the string contains only one email — a bare comma in the
+    // display name (e.g. "Fried, Garret <x@y>") is not an address separator.
+    if (s.count('@') > 1) {
+        if (const auto parts = s.split(kReCsvSemicolonOutsideQuotes, Qt::SkipEmptyParts); parts.size() > 1) {
+            QString best;
+            qint32 bestScore = std::numeric_limits<int>::min() / 4;
+            for (const auto &pRaw : parts) {
+                const auto p = pRaw.trimmed();
+                if (p.isEmpty()) { continue; }
 
-            const auto pEmail = extractFirstEmail(p);
-            if (!email.isEmpty() && !pEmail.isEmpty() && pEmail != email) { continue; }
+                const auto pEmail = extractFirstEmail(p);
+                if (!email.isEmpty() && !pEmail.isEmpty() && pEmail != email) { continue; }
 
-            QString candidate = p;
-            if (const auto lt2 = static_cast<int>(candidate.indexOf('<')); lt2 > 0) {
-                candidate = candidate.left(lt2).trimmed();
+                QString candidate = p;
+                if (const auto lt2 = static_cast<int>(candidate.indexOf('<')); lt2 > 0) {
+                    candidate = candidate.left(lt2).trimmed();
+                }
+
+                candidate.remove('"');
+                candidate.remove('\'');
+                candidate = candidate.trimmed();
+
+                if (candidate.isEmpty()) { continue; }
+
+                if (kReEmailAddress.match(candidate).hasMatch()) { continue; }
+
+                const auto scoreEmail = email.isEmpty() ? pEmail : email;
+
+                if (!scoreEmail.isEmpty()) {
+                    const auto at = static_cast<int>(scoreEmail.indexOf('@'));
+                    const auto local = (at > 0) ? scoreEmail.left(at) : scoreEmail;
+                    if (!local.isEmpty() && candidate.compare(local, Qt::CaseInsensitive) == 0) { continue; }
+                }
+
+                if (const auto sc = displayNameScoreForEmail(candidate, scoreEmail); sc > bestScore) {
+                    bestScore = sc; best = candidate;
+                }
             }
-
-            candidate.remove('"');
-            candidate.remove('\'');
-            candidate = candidate.trimmed();
-
-            if (candidate.isEmpty()) { continue; }
-
-            if (kReEmailAddress.match(candidate).hasMatch()) { continue; }
-
-            const auto scoreEmail = email.isEmpty() ? pEmail : email;
-
-            if (!scoreEmail.isEmpty()) {
-                const auto at = static_cast<int>(scoreEmail.indexOf('@'));
-                const auto local = (at > 0) ? scoreEmail.left(at) : scoreEmail;
-                if (!local.isEmpty() && candidate.compare(local, Qt::CaseInsensitive) == 0) { continue; }
-            }
-
-            if (const int sc = displayNameScoreForEmail(candidate, scoreEmail); sc > bestScore) {
-                bestScore = sc; best = candidate;
-            }
+            if (!best.isEmpty()) { return best; }
         }
-        if (!best.isEmpty()) return best;
     }
 
     if (const auto lt = static_cast<int>(s.indexOf('<')); lt > 0) {

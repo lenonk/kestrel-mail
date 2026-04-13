@@ -135,6 +135,11 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/Calendar/CalendarAllDayRow.qml
         qml/components/Calendar/CalendarSidebarPane.qml
         qml/components/Calendar/InviteCard.qml
+        qml/components/Contacts/ContactsPane.qml
+        qml/components/Contacts/ContactGroupsSidebar.qml
+        qml/components/Contacts/ContactList.qml
+        qml/components/Contacts/ContactCard.qml
+        qml/components/Contacts/ContactDetailPane.qml
         qml/components/Common/qmldir
         qml/components/Common/KestrelColors.qml
         qml/components/Common/ArrowPopup.qml

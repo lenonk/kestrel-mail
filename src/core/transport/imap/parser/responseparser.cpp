@@ -74,9 +74,11 @@ extractField(const QString &input, const QString &field) {
         QMutexLocker locker(&s_cacheMutex);
         auto it = s_reCache.find(field);
         if (it == s_reCache.end()) {
+            // Capture the first line plus any RFC 5322 continuation lines
+            // (lines starting with whitespace).
             it = s_reCache.insert(field,
                 QRegularExpression(
-                    "(?:^|\\r?\\n)%1:\\s*([^\\r\\n]+)"_L1
+                    "(?:^|\\r?\\n)%1:\\s*([^\\r\\n]+(?:\\r?\\n[ \\t]+[^\\r\\n]+)*)"_L1
                         .arg(QRegularExpression::escape(field)),
                     QRegularExpression::CaseInsensitiveOption));
         }
@@ -84,7 +86,11 @@ extractField(const QString &input, const QString &field) {
     }
 
     const auto m = re.match(input);
-    return m.hasMatch() ? m.captured(1).trimmed() : QString();
+    if (!m.hasMatch()) return {};
+
+    // Unfold RFC 5322 continuation lines into a single line.
+    static const QRegularExpression foldRe("\\r?\\n[ \\t]+"_L1);
+    return m.captured(1).replace(foldRe, " "_L1).trimmed();
 }
 
 QString

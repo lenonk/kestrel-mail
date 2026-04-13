@@ -223,18 +223,14 @@ int main(int argc, char *argv[])
 
             n->sendEvent();
         });
-    // Enable notifications after the first successful sync so a cold-start
-    // bulk import doesn't spam the desktop. On warm starts (DB already has
-    // messages), enable immediately so the very first IDLE message is notified.
-    if (dataStore.inboxCount() > 0) {
-        dataStore.setDesktopNotifyEnabled(true);
-    } else {
+    // Enable notifications only after the first successful sync completes,
+    // so neither cold-start bulk imports nor warm-start re-syncs spam the desktop.
+    {
         auto enableNotify = [&dataStore](bool ok, const QString &) {
             if (ok && !dataStore.desktopNotifyEnabled())
                 dataStore.setDesktopNotifyEnabled(true);
         };
         QObject::connect(&imapService, &ImapService::syncFinished, &dataStore, enableNotify);
-        QObject::connect(&imapService, &ImapService::realtimeStatus, &dataStore, enableNotify);
     }
 
     CalendarLayoutHelper calendarLayoutHelper(&engine);

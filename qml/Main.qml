@@ -14,6 +14,7 @@ import "components/MessageList" as MessageList
 import "components/MessageContent" as MessageContent
 import "components/Compose" as Compose
 import "components/Calendar" as Calendar
+import "components/Contacts" as Contacts
 import "utils/ColorUtilities.js" as ColorUtils
 import "utils/FolderUtils.js" as FolderUtils
 import "utils/DisplayUtils.js" as DisplayUtils
@@ -154,6 +155,7 @@ Kirigami.ApplicationWindow {
     property bool gmailCalendarsExpanded: true
     property var calendarSources: []
     property var calendarEvents: []
+    property var googleContacts: []
     readonly property var upcomingInvites: {
         if (!calendarEvents || calendarEvents.length === 0) { return [] }
         // dayIndex is days since range start (Monday of current week).
@@ -607,7 +609,11 @@ Kirigami.ApplicationWindow {
 
     function openReplyCompose(d, isReplyAll, darkMode) {
         if (!d) return
-        var replyTo = (d.replyTo && d.replyTo.length > 0) ? d.replyTo : d.sender
+        // Prefer Reply-To, then sender, then returnPath — skip headers
+        // that are display-name-only (no '@') so we reach a real address.
+        var replyTo = [d.replyTo, d.sender, d.returnPath]
+            .filter(function(a) { return a && /@/.test(a) })[0]
+            || d.sender || ""
         var quoted = ComposeUtils._buildQuotedContent(d, "Original Message", root._localeFmt)
         var params = {
             toList: [replyTo],
@@ -948,6 +954,9 @@ Kirigami.ApplicationWindow {
             if (root.imapServiceObj && root.imapServiceObj.refreshGoogleCalendars) {
                 root.imapServiceObj.refreshGoogleCalendars()
             }
+            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleContacts) {
+                root.imapServiceObj.refreshGoogleContacts()
+            }
         })
     }
 
@@ -961,6 +970,8 @@ Kirigami.ApplicationWindow {
             if (ok)
                 root.accountConnected = true
             root.showInlineStatus(message, !ok)
+            if (ok && root.googleContacts.length === 0 && root.imapServiceObj)
+                root.imapServiceObj.refreshGoogleContacts()
             if (ok && root.hasFetchedFolders() && root.bootstrapFolderSyncRequested) {
                 root.bootstrapFolderSyncRequested = false
                 root.syncSelectedFolder(false)
@@ -1017,6 +1028,10 @@ Kirigami.ApplicationWindow {
 
         function onCalendarInviteResponded() {
             root.refreshVisibleGoogleWeekEvents()
+        }
+
+        function onGoogleContactsChanged() {
+            root.googleContacts = root.imapServiceObj ? root.imapServiceObj.googleContacts : []
         }
     }
 
@@ -1084,6 +1099,9 @@ Kirigami.ApplicationWindow {
             }
             if (root.imapServiceObj && root.imapServiceObj.refreshGoogleCalendars) {
                 root.imapServiceObj.refreshGoogleCalendars()
+            }
+            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleContacts) {
+                root.imapServiceObj.refreshGoogleContacts()
             }
         }
     }
@@ -1281,6 +1299,16 @@ Kirigami.ApplicationWindow {
                 systemPalette: systemPalette
                 allEvents: root.calendarEvents
                 visibleCalendarIds: root.visibleCalendarSourceIds()
+            }
+
+            Contacts.ContactsPane {
+                id: contactsPane
+                visible: root.activeWorkspace === "people"
+                QQC2.SplitView.minimumWidth: visible ? 720 : 0
+                QQC2.SplitView.preferredWidth: visible ? 980 : 0
+                QQC2.SplitView.fillWidth: root.activeWorkspace === "people"
+                systemPalette: systemPalette
+                allContacts: root.googleContacts
             }
 
             AppLayout.RightPane {

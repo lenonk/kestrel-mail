@@ -282,7 +282,7 @@ Rectangle {
             items: [
                 { iconName: "mail-message", label: i18n("Mail"), toolTipText: i18n("Mail"), active: appRoot.activeWorkspace === "mail" },
                 { iconName: "office-calendar", label: i18n("Calendar"), toolTipText: i18n("Calendar"), active: appRoot.activeWorkspace === "calendar" },
-                { iconName: "user-identity", label: i18n("People"), toolTipText: i18n("People") },
+                { iconName: "user-identity", label: i18n("People"), toolTipText: i18n("People"), active: appRoot.activeWorkspace === "people" },
                 { iconName: "overflow-menu-horizontal", label: i18n("More"), toolTipText: i18n("More"), useHorizontalDots: true }
             ]
             onItemClicked: function(_index, item) {
@@ -291,6 +291,8 @@ Rectangle {
                     appRoot.activeWorkspace = "mail";
                 else if (icon === "office-calendar")
                     appRoot.activeWorkspace = "calendar";
+                else if (icon === "user-identity")
+                    appRoot.activeWorkspace = "people";
             }
         }
     }
@@ -351,7 +353,7 @@ Rectangle {
             spacing: 0
             PaneIconButton { Layout.fillWidth: true; iconName: "mail-message"; label: ""; showLabel: false; toolTipText: i18n("Mail"); active: appRoot.activeWorkspace === "mail"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: appRoot.activeWorkspace = "mail" }
             PaneIconButton { Layout.fillWidth: true; iconName: "office-calendar"; label: ""; showLabel: false; toolTipText: i18n("Calendar"); active: appRoot.activeWorkspace === "calendar"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: appRoot.activeWorkspace = "calendar" }
-            PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
+            PaneIconButton { Layout.fillWidth: true; iconName: "user-identity"; label: ""; showLabel: false; toolTipText: i18n("People"); active: appRoot.activeWorkspace === "people"; hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4; onClicked: appRoot.activeWorkspace = "people" }
             PaneIconButton { Layout.fillWidth: true; iconName: "view-task"; label: ""; showLabel: false; toolTipText: i18n("Tasks"); hoverFeedback: true; underlineOnLeft: true; sideIndicatorInset: 4 }
             PaneIconButton { Layout.fillWidth: true; iconName: "overflow-menu-horizontal"; label: ""; showLabel: false; hoverFeedback: true; toolTipText: i18n("More"); useHorizontalDots: true; underlineOnLeft: true; sideIndicatorInset: 4 }
         }

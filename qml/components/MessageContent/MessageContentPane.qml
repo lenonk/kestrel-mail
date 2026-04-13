@@ -861,7 +861,6 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 140
                 elide: Text.ElideRight
-                font.bold: true
                 font.pixelSize: 16
                 text: root.messageSubject
             }
@@ -983,7 +982,6 @@ Rectangle {
                     Layout.fillWidth: false
                     color: KestrelColors.linkBlue
                     elide: Text.ElideRight
-                    font.bold: true
                     font.pixelSize: 13
                     text: root.senderName
 
@@ -1030,7 +1028,7 @@ Rectangle {
                             readonly property bool isAddress: modelData.type === "address"
                             text: isAddress ? modelData.label : modelData.text
                             color: isAddress ? KestrelColors.linkBlue : Kirigami.Theme.textColor
-                            font.bold: isAddress
+                            font.bold: false
                             font.pixelSize: 13
                             opacity: isAddress ? 0.95 : 0.9
 

@@ -20,6 +20,7 @@ Window {
     readonly property int _icoSz: Kirigami.Units.gridUnit - 4
     readonly property int _lblW: 72
     readonly property int _rowH: 36
+    readonly property int _maxWebViewH: 8000
     readonly property int _titleH: Kirigami.Units.gridUnit + 12
 
     // ── Public API ─────────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ Window {
     property bool sending: false
     property bool showCcBcc: false
     property bool composeDarkView: false
-    readonly property bool _isHtmlBody: /<(?:html|body|table)\b/i.test(root._rawBody)
+    readonly property bool _isHtmlBody: /<[a-z][a-z0-9]*[\s>\/]/i.test(root._rawBody)
     property string _rawBody: ""
     property var smtpServiceObj: null
     property var imapServiceObj: null
@@ -117,6 +118,13 @@ Window {
         if (root._isHtmlBody && root._rawBody.length)
             return userText.length ? userText + "\n\n" + root._rawBody : root._rawBody;
         return userText;
+    }
+
+    function _syncComposeWebView() {
+        if (root._isHtmlBody) {
+            const html = root._renderedHtml();
+            Qt.callLater(function() { composeWebView.loadHtml(html, "file:///"); });
+        }
     }
 
     function _renderedHtml() {
@@ -245,9 +253,10 @@ Window {
         if (bodyText && bodyText.length > 0)
             bodyArea.text = bodyText;
         else
-            bodyArea.text = /<(?:html|body|table)\b/i.test(_rawBody) ? "" : _rawBody;
+            bodyArea.text = root._isHtmlBody ? "" : _rawBody;
         if (to && to.trim().length > 0)
             _addChipToModel(toChipModel, to.trim());
+        _syncComposeWebView();
         root.show();
         root.raise();
         root.requestActivate();
@@ -277,7 +286,7 @@ Window {
         if (params.bodyText !== undefined)
             bodyArea.text = params.bodyText || "";
         else
-            bodyArea.text = /<(?:html|body|table)\b/i.test(_rawBody) ? "" : _rawBody;
+            bodyArea.text = root._isHtmlBody ? "" : _rawBody;
         const toList = params.toList || [];
         for (let i = 0; i < toList.length; i++)
             _addChipToModel(toChipModel, toList[i]);
@@ -285,6 +294,7 @@ Window {
             for (let i = 0; i < params.ccList.length; i++)
                 _addChipToModel(ccChipModel, params.ccList[i]);
         }
+        _syncComposeWebView();
         root.show();
         root.raise();
         root.requestActivate();
@@ -1026,9 +1036,10 @@ Window {
             // Single Flickable containing both the compose TextArea and (when
             // forwarding/replying HTML) the WebEngineView — one shared scrollbar,
             // both items at their natural full height with no internal scroll.
-            Item {
+            Rectangle {
                 Layout.fillHeight: true
                 Layout.fillWidth: true
+                color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
 
                 Flickable {
                     id: bodyFlickable
@@ -1224,7 +1235,7 @@ Window {
                         WebEngineView {
                             id: composeWebView
 
-                            height: root._isHtmlBody ? Math.max(200, composeWebView.contentsSize.height) : 0
+                            height: root._isHtmlBody ? Math.max(200, Math.min(composeWebView.contentsSize.height, root._maxWebViewH)) : 0
                             width: parent.width
                             backgroundColor: root.composeDarkView
                                 ? Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
@@ -1251,16 +1262,10 @@ Window {
                             Connections {
                                 target: root
                                 function onComposeDarkViewChanged() {
-                                    if (root._isHtmlBody)
-                                        composeWebView.loadHtml(root._renderedHtml(), "file:///");
-                                }
-                                function on_RawBodyChanged() {
-                                    if (root._isHtmlBody)
-                                        composeWebView.loadHtml(root._renderedHtml(), "file:///");
+                                    root._syncComposeWebView();
                                 }
                                 function onWebViewRefreshNeeded() {
-                                    if (root._isHtmlBody)
-                                        composeWebView.loadHtml(root._renderedHtml(), "file:///");
+                                    root._syncComposeWebView();
                                 }
                             }
                         }
@@ -1451,20 +1456,21 @@ Window {
         signal tabPressed
 
         function _acceptHighlighted() {
-            if (_highlightedIndex >= 0 && _highlightedIndex < _suggestions.length) {
-                const s = _suggestions[_highlightedIndex];
-                chipModel.append({
-                    display: s.displayName || s.email,
-                    email: s.email
-                });
-                chipInput.text = "";
-                _showSuggestions = false;
-                _suggestions = [];
-                _highlightedIndex = -1;
-                Qt.callLater(() => {
-                    chipFlick.contentY = Math.max(0, chipFlick.contentHeight - chipFlick.height);
-                });
-            }
+            if (_highlightedIndex >= 0 && _highlightedIndex < _suggestions.length)
+                _acceptSuggestion(_suggestions[_highlightedIndex]);
+        }
+        function _acceptSuggestion(s) {
+            chipModel.append({
+                display: s.displayName || s.email,
+                email: s.email
+            });
+            chipInput.text = "";
+            _showSuggestions = false;
+            _suggestions = [];
+            _highlightedIndex = -1;
+            Qt.callLater(() => {
+                chipFlick.contentY = Math.max(0, chipFlick.contentHeight - chipFlick.height);
+            });
         }
         function _doAdd(raw) {
             const text = raw.trim();
@@ -1763,14 +1769,7 @@ Window {
                             hoverEnabled: true
 
                             onClicked: {
-                                rowRoot.chipModel.append({
-                                    display: modelData.displayName || modelData.email,
-                                    email: modelData.email
-                                });
-                                chipInput.text = "";
-                                rowRoot._showSuggestions = false;
-                                rowRoot._suggestions = [];
-                                rowRoot._highlightedIndex = -1;
+                                rowRoot._acceptSuggestion(modelData);
                                 chipInput.forceActiveFocus();
                             }
                         }

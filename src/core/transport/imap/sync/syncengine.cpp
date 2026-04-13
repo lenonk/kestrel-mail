@@ -417,8 +417,15 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     const auto listIdDomain = extractListIdDomain(headerSource);
     const auto bimiLogoUrl  = extractBimiLogoUrl(headerSource);
 
-    const auto senderFallback = !senderHeader.isEmpty()  ? senderHeader :
-                                                           !replyToHeader.isEmpty() ? replyToHeader : returnPathHeader;
+    // Prefer fallback headers that contain an extractable email so the
+    // sender column always carries an address when one exists anywhere.
+    auto hasEmail = [](const QString &h) { return !h.isEmpty() && !extractEmailAddress(h).isEmpty(); };
+    const auto senderFallback = hasEmail(senderHeader)    ? senderHeader
+                              : hasEmail(replyToHeader)    ? replyToHeader
+                              : hasEmail(returnPathHeader) ? returnPathHeader
+                              : !senderHeader.isEmpty()    ? senderHeader
+                              : !replyToHeader.isEmpty()   ? replyToHeader
+                              :                              returnPathHeader;
 
     h.insert("sender"_L1, normalizeSenderValue(fromHeader, senderFallback));
     h.insert("recipient"_L1, toHeader);
