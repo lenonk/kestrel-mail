@@ -53,6 +53,10 @@ void AccountSetupController::setSmtpHost(const QString &v) { if (m_smtpHost != v
 void AccountSetupController::setSmtpPort(const int v) { if (m_smtpPort != v) { m_smtpPort = v; emit smtpPortChanged(); } }
 void AccountSetupController::setImapUsername(const QString &v) { if (m_imapUsername != v) { m_imapUsername = v; emit imapUsernameChanged(); } }
 void AccountSetupController::setPassword(const QString &v) { if (m_password != v) { m_password = v; emit passwordChanged(); } }
+void AccountSetupController::setAvatarIcon(const QString &v) { if (m_avatarIcon != v) { m_avatarIcon = v; emit avatarIconChanged(); } }
+void AccountSetupController::setUserDisplayName(const QString &v) { if (m_userDisplayName != v) { m_userDisplayName = v; emit userDisplayNameChanged(); } }
+QString AccountSetupController::avatarIcon() const { return m_avatarIcon; }
+QString AccountSetupController::userDisplayName() const { return m_userDisplayName; }
 
 // ── Email setter ─────────────────────────────────────────────────────────────
 
@@ -190,6 +194,10 @@ AccountSetupController::saveCurrentAccount(const QString &accountName, const QSt
     account.insert("smtpPort"_L1, isManual ? m_smtpPort : m_selectedProvider.value("smtpPort"_L1).toInt());
     account.insert("accountName"_L1, accountName.trimmed().isEmpty() ? m_email.trimmed() : accountName.trimmed());
     account.insert("encryption"_L1, encryption);
+    if (!m_avatarIcon.isEmpty())
+        account.insert("avatarIcon"_L1, m_avatarIcon);
+    if (!m_userDisplayName.isEmpty())
+        account.insert("displayName"_L1, m_userDisplayName);
 
     if (isManual) {
         account.insert("authType"_L1, "password"_L1);

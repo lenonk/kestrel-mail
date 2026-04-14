@@ -510,6 +510,30 @@ bool DataStore::init()
         return false;
     }
 
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS accounts (
+          email TEXT PRIMARY KEY NOT NULL,
+          account_name TEXT NOT NULL DEFAULT '',
+          display_name TEXT NOT NULL DEFAULT '',
+          avatar_icon TEXT NOT NULL DEFAULT '',
+          provider_id TEXT NOT NULL DEFAULT 'generic',
+          provider_name TEXT NOT NULL DEFAULT '',
+          auth_type TEXT NOT NULL DEFAULT 'password',
+          imap_host TEXT NOT NULL DEFAULT '',
+          imap_port INTEGER NOT NULL DEFAULT 993,
+          smtp_host TEXT NOT NULL DEFAULT '',
+          smtp_port INTEGER NOT NULL DEFAULT 587,
+          encryption TEXT NOT NULL DEFAULT 'Auto',
+          oauth_token_url TEXT NOT NULL DEFAULT '',
+          oauth_client_id TEXT NOT NULL DEFAULT '',
+          oauth_client_secret TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    )"_L1)) {
+        return false;
+    }
+
     // Idempotent migrations for message_attachments.
     q.exec("ALTER TABLE message_attachments ADD COLUMN local_path TEXT DEFAULT ''"_L1);
 
@@ -778,6 +802,111 @@ QVariantMap DataStore::folderSyncStatus(const QString &accountEmail, const QStri
 void DataStore::upsertFolderSyncStatus(const QString &accountEmail, const QString &folder, const qint64 uidNext, const qint64 highestModSeq, const qint64 messages) { m_folderStats->upsertFolderSyncStatus(accountEmail, folder, uidNext, highestModSeq, messages); }
 qint64 DataStore::folderLastSyncModSeq(const QString &accountEmail, const QString &folder) const { return m_folderStats->folderLastSyncModSeq(accountEmail, folder); }
 void DataStore::updateFolderLastSyncModSeq(const QString &accountEmail, const QString &folder, const qint64 modseq) { m_folderStats->updateFolderLastSyncModSeq(accountEmail, folder, modseq); }
+
+// ─── Account storage ────────────────────────────────────────────────
+
+QVariantList DataStore::loadAccounts() const {
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return {};
+    QSqlQuery q(database);
+    q.prepare("SELECT email, account_name, display_name, avatar_icon, provider_id, provider_name, auth_type, imap_host, imap_port, smtp_host, smtp_port, encryption, oauth_token_url, oauth_client_id, oauth_client_secret FROM accounts ORDER BY rowid"_L1);
+    if (!q.exec()) return {};
+    QVariantList out;
+    while (q.next()) {
+        QVariantMap row;
+        row.insert("email"_L1,             q.value(0).toString());
+        row.insert("accountName"_L1,       q.value(1).toString());
+        row.insert("displayName"_L1,       q.value(2).toString());
+        row.insert("avatarIcon"_L1,        q.value(3).toString());
+        row.insert("providerId"_L1,        q.value(4).toString());
+        row.insert("providerName"_L1,      q.value(5).toString());
+        row.insert("authType"_L1,          q.value(6).toString());
+        row.insert("imapHost"_L1,          q.value(7).toString());
+        row.insert("imapPort"_L1,          q.value(8).toInt());
+        row.insert("smtpHost"_L1,          q.value(9).toString());
+        row.insert("smtpPort"_L1,          q.value(10).toInt());
+        row.insert("encryption"_L1,        q.value(11).toString());
+        row.insert("oauthTokenUrl"_L1,     q.value(12).toString());
+        row.insert("oauthClientId"_L1,     q.value(13).toString());
+        row.insert("oauthClientSecret"_L1, q.value(14).toString());
+        out.push_back(row);
+    }
+    return out;
+}
+
+bool DataStore::upsertAccount(const QVariantMap &account) {
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return false;
+    QSqlQuery q(database);
+    q.prepare(R"(
+        INSERT INTO accounts (email, account_name, display_name, avatar_icon, provider_id, provider_name,
+                              auth_type, imap_host, imap_port, smtp_host, smtp_port, encryption,
+                              oauth_token_url, oauth_client_id, oauth_client_secret, updated_at)
+        VALUES (:email, :account_name, :display_name, :avatar_icon, :provider_id, :provider_name,
+                :auth_type, :imap_host, :imap_port, :smtp_host, :smtp_port, :encryption,
+                :oauth_token_url, :oauth_client_id, :oauth_client_secret, datetime('now'))
+        ON CONFLICT(email) DO UPDATE SET
+            account_name = CASE WHEN excluded.account_name != '' THEN excluded.account_name ELSE accounts.account_name END,
+            display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE accounts.display_name END,
+            avatar_icon = CASE WHEN excluded.avatar_icon != '' THEN excluded.avatar_icon ELSE accounts.avatar_icon END,
+            provider_id = excluded.provider_id,
+            provider_name = excluded.provider_name,
+            auth_type = excluded.auth_type,
+            imap_host = excluded.imap_host,
+            imap_port = excluded.imap_port,
+            smtp_host = excluded.smtp_host,
+            smtp_port = excluded.smtp_port,
+            encryption = excluded.encryption,
+            oauth_token_url = CASE WHEN excluded.oauth_token_url != '' THEN excluded.oauth_token_url ELSE accounts.oauth_token_url END,
+            oauth_client_id = CASE WHEN excluded.oauth_client_id != '' THEN excluded.oauth_client_id ELSE accounts.oauth_client_id END,
+            oauth_client_secret = CASE WHEN excluded.oauth_client_secret != '' THEN excluded.oauth_client_secret ELSE accounts.oauth_client_secret END,
+            updated_at = datetime('now')
+    )"_L1);
+    q.bindValue(":email"_L1,              account.value("email"_L1).toString().trimmed().toLower());
+    q.bindValue(":account_name"_L1,       account.value("accountName"_L1).toString().trimmed());
+    q.bindValue(":display_name"_L1,       account.value("displayName"_L1).toString().trimmed());
+    q.bindValue(":avatar_icon"_L1,        account.value("avatarIcon"_L1).toString().trimmed());
+    q.bindValue(":provider_id"_L1,        account.value("providerId"_L1).toString().trimmed());
+    q.bindValue(":provider_name"_L1,      account.value("providerName"_L1).toString().trimmed());
+    q.bindValue(":auth_type"_L1,          account.value("authType"_L1).toString().trimmed());
+    q.bindValue(":imap_host"_L1,          account.value("imapHost"_L1).toString().trimmed());
+    q.bindValue(":imap_port"_L1,          account.value("imapPort"_L1).toInt());
+    q.bindValue(":smtp_host"_L1,          account.value("smtpHost"_L1).toString().trimmed());
+    q.bindValue(":smtp_port"_L1,          account.value("smtpPort"_L1).toInt());
+    q.bindValue(":encryption"_L1,         account.value("encryption"_L1).toString().trimmed());
+    q.bindValue(":oauth_token_url"_L1,    account.value("oauthTokenUrl"_L1).toString().trimmed());
+    q.bindValue(":oauth_client_id"_L1,    account.value("oauthClientId"_L1).toString().trimmed());
+    q.bindValue(":oauth_client_secret"_L1,account.value("oauthClientSecret"_L1).toString().trimmed());
+    return q.exec();
+}
+
+bool DataStore::deleteAccount(const QString &email) {
+    auto database = db();
+    if (!database.isValid() || !database.isOpen()) return false;
+
+    const auto norm = email.trimmed().toLower();
+
+    // Cascade: remove all data associated with this account.
+    for (const auto &sql : {
+        "DELETE FROM message_folder_map WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM message_labels WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM message_tag_map WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM message_participants WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM message_attachments WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM messages WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM folders WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM folder_sync_status WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM account_pgp_keys WHERE lower(account_email) = :email"_L1,
+        "DELETE FROM accounts WHERE lower(email) = :email"_L1,
+    }) {
+        QSqlQuery q(database);
+        q.prepare(sql);
+        q.bindValue(":email"_L1, norm);
+        q.exec();
+    }
+
+    return true;
+}
 
 // ─── Contact / avatar forwarding to ContactStore ───────────────────
 

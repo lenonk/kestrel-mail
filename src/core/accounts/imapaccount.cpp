@@ -53,6 +53,8 @@ ImapAccount::accountName() const {
 
 QString
 ImapAccount::avatarSource() const {
+    const auto custom = m_config.value("avatarIcon"_L1).toString().trimmed();
+    if (!custom.isEmpty()) return custom;
     return "qrc:/qml/images/account-avatars/avatar-01.svg"_L1;
 }
 

@@ -1,12 +1,15 @@
 #pragma once
 
+#include <QObject>
 #include <QVariantList>
+
+class DataStore;
 
 class AccountRepository : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
 public:
-    explicit AccountRepository(QObject *parent = nullptr);
+    explicit AccountRepository(DataStore *store, QObject *parent = nullptr);
 
     Q_INVOKABLE void addOrUpdateAccount(const QVariantMap &account);
     Q_INVOKABLE bool removeAccount(const QString &email);
@@ -17,9 +20,9 @@ signals:
     void accountsChanged();
 
 private:
+    DataStore *m_store;
     QVariantList m_accounts;
-    QString m_path;
 
     void load();
-    void save() const;
+    void migrateFromJson();
 };

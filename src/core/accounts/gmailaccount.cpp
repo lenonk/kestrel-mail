@@ -66,6 +66,8 @@ GmailAccount::accountName() const {
 
 QString
 GmailAccount::avatarSource() const {
+    const auto custom = m_config.value("avatarIcon"_L1).toString().trimmed();
+    if (!custom.isEmpty()) return custom;
     return "qrc:/qml/images/gmail_account_icon.svg"_L1;
 }
 

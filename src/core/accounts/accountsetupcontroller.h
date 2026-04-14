@@ -27,6 +27,8 @@ class AccountSetupController : public QObject {
     Q_PROPERTY(bool testPassed READ testPassed NOTIFY testPassedChanged)
     Q_PROPERTY(bool testing READ testing NOTIFY testingChanged)
     Q_PROPERTY(QString testResult READ testResult NOTIFY testResultChanged)
+    Q_PROPERTY(QString avatarIcon READ avatarIcon WRITE setAvatarIcon NOTIFY avatarIconChanged)
+    Q_PROPERTY(QString userDisplayName READ userDisplayName WRITE setUserDisplayName NOTIFY userDisplayNameChanged)
 
 public:
     explicit AccountSetupController(ProviderProfileService *profiles, OAuthService *oauth,
@@ -53,12 +55,17 @@ public:
     [[nodiscard]] bool testing() const;
     [[nodiscard]] QString testResult() const;
 
+    [[nodiscard]] QString avatarIcon() const;
+    [[nodiscard]] QString userDisplayName() const;
+
     void setImapHost(const QString &v);
     void setImapPort(int v);
     void setSmtpHost(const QString &v);
     void setSmtpPort(int v);
     void setImapUsername(const QString &v);
     void setPassword(const QString &v);
+    void setAvatarIcon(const QString &v);
+    void setUserDisplayName(const QString &v);
 
     Q_INVOKABLE void discoverProvider();
     Q_INVOKABLE void applyDiscoveryResult(const QVariantMap &result);
@@ -85,6 +92,8 @@ signals:
     void testPassedChanged();
     void testingChanged();
     void testResultChanged();
+    void avatarIconChanged();
+    void userDisplayNameChanged();
 
 private:
     ProviderProfileService *m_profiles;
@@ -105,6 +114,8 @@ private:
     int m_smtpPort = 587;
     QString m_imapUsername;
     QString m_password;
+    QString m_avatarIcon;
+    QString m_userDisplayName;
     bool m_testPassed = false;
     bool m_testing = false;
     QString m_testResult;

@@ -128,7 +128,6 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextObject(new KLocalizedContext(&engine));
 
     ProviderProfileService providerProfiles(&engine);
-    AccountRepository accountRepository(&engine);
     // Token storage: prefer KWallet, then libsecret (GNOME Keyring), then plaintext file.
     std::unique_ptr<TokenVault> tokenVault;
     if (KWallet::Wallet::isEnabled()) {
@@ -147,10 +146,11 @@ int main(int argc, char *argv[])
     }
 #endif
     OAuthService oauthService(tokenVault.get(), &engine);
-    AccountSetupController accountSetup(&providerProfiles, &oauthService, &accountRepository, tokenVault.get(), &engine);
     DataStore dataStore(&engine);
     dataStore.init();
     dataStore.quickCheck();
+    AccountRepository accountRepository(&dataStore, &engine);
+    AccountSetupController accountSetup(&providerProfiles, &oauthService, &accountRepository, tokenVault.get(), &engine);
     MessageListModel messageListModel(&engine);
     messageListModel.setDataStore(&dataStore);
     HtmlProcessor htmlProcessor(&engine);
