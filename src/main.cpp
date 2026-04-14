@@ -40,6 +40,7 @@
 #include "core/transport/imap/imapservice.h"
 #include "core/transport/smtp/smtpservice.h"
 #include "core/crypto/pgpkeymanager.h"
+#include "core/accounts/accountmanager.h"
 #include <KNotification>
 
 using namespace Qt::Literals::StringLiterals;
@@ -158,6 +159,7 @@ int main(int argc, char *argv[])
     imapService.initializeConnectionPool();
     SmtpService smtpService(&accountRepository, tokenVault.get(), &engine);
     PgpKeyManager pgpKeyManager(&dataStore, &engine);
+    AccountManager accountManager(&accountRepository, &dataStore, &imapService, tokenVault.get(), &engine);
 
     // Desktop notification for new mail.
     QObject::connect(&dataStore, &DataStore::newMailReceived, &app,
@@ -247,6 +249,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("imapService", &imapService);
     engine.rootContext()->setContextProperty("smtpService", &smtpService);
     engine.rootContext()->setContextProperty("pgpKeyManager", &pgpKeyManager);
+    engine.rootContext()->setContextProperty("accountManager", &accountManager);
 
     // Find a condensed sans-serif font, preferring specific families.
     {

@@ -90,6 +90,10 @@ qt_add_executable(kestrel-mail
     src/core/accounts/providerprofileservice.cpp
     src/core/accounts/accountrepository.cpp
     src/core/accounts/accountsetupcontroller.cpp
+    src/core/accounts/iaccount.cpp
+    src/core/accounts/accountmanager.cpp
+    src/core/accounts/gmailaccount.cpp
+    src/core/accounts/imapaccount.cpp
     src/core/auth/filetokenvault.cpp
     src/core/auth/kwallettokenvault.cpp
     $<$<BOOL:${LIBSECRET_FOUND}>:src/core/auth/libsecrettokenvault.cpp>
