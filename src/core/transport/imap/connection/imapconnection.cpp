@@ -95,29 +95,43 @@ QVariantList parseListResponse(const QString &listResp) {
 
         const auto flags = line.mid(flagsStart + 1, flagsEnd - flagsStart - 1).trimmed();
 
-        const auto nameStart = line.lastIndexOf('"');
-        QString name;
-        if (nameStart > 0) {
-            if (const auto nfq = line.lastIndexOf('"', nameStart - 1); nfq >= 0 && nameStart > nfq)
-                name = line.mid(nfq + 1, nameStart - nfq - 1);
+        // After flags: skip separator (quoted, e.g. "/"), then the rest is the folder name.
+        // Format: * LIST (flags) "sep" name   OR   * LIST (flags) "sep" "quoted name"
+        auto pos = flagsEnd + 1;
+        while (pos < line.size() && line[pos].isSpace()) ++pos;
+        if (pos < line.size() && line[pos] == u'"') {
+            ++pos;
+            while (pos < line.size() && line[pos] != u'"') ++pos;
+            if (pos < line.size()) ++pos;
+        } else {
+            while (pos < line.size() && !line[pos].isSpace()) ++pos;
         }
-        if (name.isEmpty()) {
-            if (const auto tail = line.lastIndexOf(' '); tail > flagsEnd)
-                name = line.mid(tail + 1).trimmed();
+        while (pos < line.size() && line[pos].isSpace()) ++pos;
+
+        QString name;
+        if (pos < line.size() && line[pos] == u'"') {
+            const auto qStart = pos + 1;
+            auto qEnd = qStart;
+            while (qEnd < line.size()) {
+                if (line[qEnd] == u'\\' && qEnd + 1 < line.size()) { qEnd += 2; continue; }
+                if (line[qEnd] == u'"') break;
+                ++qEnd;
+            }
+            name = line.mid(qStart, qEnd - qStart);
+            name.replace("\\\""_L1, "\""_L1);
+        } else if (pos < line.size()) {
+            name = line.mid(pos).trimmed();
         }
         if (name.isEmpty())
             continue;
-
-        if (name.startsWith('"') && name.endsWith('"') && name.size() >= 2)
-            name = name.mid(1, name.size() - 2);
-        name.replace("\\\""_L1, "\""_L1);
 
         QString specialUse;
         if      (flags.contains("\\Inbox"_L1,  Qt::CaseInsensitive)) specialUse = "inbox"_L1;
         else if (flags.contains("\\Sent"_L1,   Qt::CaseInsensitive)) specialUse = "sent"_L1;
         else if (flags.contains("\\Trash"_L1,  Qt::CaseInsensitive)) specialUse = "trash"_L1;
         else if (flags.contains("\\Drafts"_L1, Qt::CaseInsensitive)) specialUse = "drafts"_L1;
-        else if (flags.contains("\\Spam"_L1,   Qt::CaseInsensitive)) specialUse = "junk"_L1;
+        else if (flags.contains("\\Spam"_L1,   Qt::CaseInsensitive)
+              || flags.contains("\\Junk"_L1,   Qt::CaseInsensitive)) specialUse = "junk"_L1;
         else if (flags.contains("\\All"_L1,    Qt::CaseInsensitive)) specialUse = "all"_L1;
         if (name.compare("INBOX"_L1, Qt::CaseInsensitive) == 0)
             specialUse = "inbox"_L1;

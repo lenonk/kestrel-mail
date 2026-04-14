@@ -1242,10 +1242,10 @@ ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
 
 
 void
-ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &, const QString &folder,
+ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &email, const QString &folder,
                                            const QString &) {
-    QMetaObject::invokeMethod(this, [this, folder]() {
-        syncFolder(folder, false);
+    QMetaObject::invokeMethod(this, [this, folder, email]() {
+        syncFolder(folder, false, email);
     }, Qt::QueuedConnection);
 }
 
@@ -3224,8 +3224,11 @@ ImapService::syncAll(bool announce) {
                     }
                 }
 
-                // Gmail fallback: if the folder list was empty, use known Gmail system folders
-                if (targets.size() == 1) {
+                // Gmail fallback: if the folder list was empty, use known Gmail system folders.
+                // Only for Gmail accounts — non-Gmail servers don't have [Gmail]/ folders.
+                const bool isGmailHost = host.contains("gmail.com"_L1, Qt::CaseInsensitive)
+                                      || host.contains("google"_L1, Qt::CaseInsensitive);
+                if (targets.size() == 1 && isGmailHost) {
                     targets << "[Gmail]/All Mail"_L1
                             << "[Gmail]/Sent Mail"_L1
                             << "[Gmail]/Drafts"_L1

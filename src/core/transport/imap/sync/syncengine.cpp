@@ -1159,10 +1159,12 @@ SyncEngine::fetchFolders(std::shared_ptr<Connection> cxn, QString *statusOut, co
 
     const QString email = cxn->email();
 
-    static QVariantList cachedFolders;
-    if (!refresh && !cachedFolders.isEmpty()) {
-        if (statusOut) *statusOut = QStringLiteral("Using cached folders (%1).").arg(cachedFolders.size());
-        return cachedFolders;
+    static QHash<QString, QVariantList> cachedFoldersMap;
+    const QString cacheKey = email.toLower();
+    if (!refresh && cachedFoldersMap.contains(cacheKey)) {
+        const auto &cached = cachedFoldersMap[cacheKey];
+        if (statusOut) *statusOut = QStringLiteral("Using cached folders (%1).").arg(cached.size());
+        return cached;
     }
 
     QVariantList out = cxn->list();
@@ -1172,13 +1174,13 @@ SyncEngine::fetchFolders(std::shared_ptr<Connection> cxn, QString *statusOut, co
         entry = row;
     }
 
-    if (out.isEmpty()) {
+    if (out.isEmpty() && cxn->isGmail()) {
         if (statusOut) *statusOut = "Using default Gmail folders."_L1;
-        cachedFolders = defaultGmailFolders(email);
-        return cachedFolders;
+        cachedFoldersMap[cacheKey] = defaultGmailFolders(email);
+        return cachedFoldersMap[cacheKey];
     }
 
-    cachedFolders = out;
+    cachedFoldersMap[cacheKey] = out;
     if (statusOut) *statusOut = QStringLiteral("Fetched %1 folders.").arg(out.size());
     return out;
 }
