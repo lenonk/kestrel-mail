@@ -267,31 +267,7 @@ endif()
 
 target_link_libraries(kestrel-mail PRIVATE PkgConfig::BOTAN)
 
-qt_add_executable(kestrel-imap-lab
-    src/imaplab_main.cpp
-    src/tools/imaplabcontroller.cpp
-    src/core/accounts/accountrepository.cpp
-    src/core/auth/filetokenvault.cpp
-    src/core/auth/kwallettokenvault.cpp
-)
-
-qt_add_resources(kestrel-imap-lab kestrel_imap_lab_qml
-    PREFIX "/"
-    FILES
-        qml/ImapLab.qml
-)
-
-target_link_libraries(kestrel-imap-lab
-    PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Qml
-        Qt6::Quick
-        Qt6::Network
-        KF6::Wallet
-)
-
-install(TARGETS kestrel-mail kestrel-imap-lab ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+install(TARGETS kestrel-mail ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 
 install(FILES kestrel-mail.desktop
     DESTINATION ${KDE_INSTALL_APPDIR}

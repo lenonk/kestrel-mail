@@ -19,11 +19,15 @@ Window {
     property int selectedIndex: 0
     property string selectedCustomPath: ""
     property string chosenAvatar: ""
+    property string providerId: ""
 
     signal avatarChosen(string avatarPath)
 
     readonly property var avatarFiles: {
         var list = []
+        // Add provider-specific icon first if available.
+        if (root.providerId === "gmail")
+            list.push("qrc:/qml/images/gmail_account_icon.svg")
         for (var i = 1; i <= 18; i++) {
             var num = i < 10 ? "0" + i : "" + i
             list.push("qrc:/qml/images/account-avatars/avatar-" + num + ".svg")

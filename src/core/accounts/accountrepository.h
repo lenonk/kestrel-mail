@@ -24,5 +24,6 @@ private:
     QVariantList m_accounts;
 
     void load();
+    void loadFromJson();
     void migrateFromJson();
 };

@@ -24,8 +24,10 @@ GmailAccount::GmailAccount(const QVariantMap &config, DataStore *store,
     }
     if (m_imap) {
         connect(m_imap, &ImapService::syncFinished, this, [this](bool ok, const QString &msg) {
-            m_syncing = false;
-            emit syncingChanged();
+            if (m_syncing) {
+                m_syncing = false;
+                emit syncingChanged();
+            }
             emit syncFinished(ok, msg);
         });
         connect(m_imap, &ImapService::accountNeedsReauth, this, [this](const QString &acct) {

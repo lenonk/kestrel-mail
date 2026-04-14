@@ -209,7 +209,10 @@ FolderStatsStore::statsKeysFromFolders() const {
 
         const auto email = f.value("accountEmail"_L1).toString().trimmed().toLower();
         keys << (email.isEmpty() ? ("account:"_L1 + norm) : ("account:"_L1 + email + ":"_L1 + norm));
-        if (f.value("specialUse"_L1).toString().trimmed().isEmpty()
+        // Only emit tag: keys for folders that belong to Gmail accounts (labels).
+        // Non-Gmail folders are just folders, not tags.
+        const bool isGmail = email.contains("gmail.com"_L1) || email.contains("google"_L1);
+        if (isGmail && f.value("specialUse"_L1).toString().trimmed().isEmpty()
                 && !norm.contains(QLatin1Char('/'))) {
             keys << ("tag:"_L1 + norm);
         }
@@ -438,9 +441,15 @@ FolderStatsStore::tagItems() const {
         byLabel.insert("important"_L1, row);
     }
 
-    // Fallback/union with top-level custom folders.
+    // Fallback/union with top-level custom folders from Gmail accounts only.
+    // Non-Gmail folders are real IMAP folders, not tags/labels.
     QSqlQuery qFolders(database);
-    qFolders.prepare("SELECT lower(name), lower(flags) FROM folders"_L1);
+    qFolders.prepare(R"(
+        SELECT lower(f.name), lower(f.flags)
+        FROM folders f
+        JOIN accounts a ON lower(a.email) = lower(f.account_email)
+        WHERE lower(a.imap_host) LIKE '%gmail%' OR lower(a.imap_host) LIKE '%google%'
+    )"_L1);
 
     if (qFolders.exec()) {
         while (qFolders.next()) {

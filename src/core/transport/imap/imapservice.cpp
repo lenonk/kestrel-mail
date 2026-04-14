@@ -3111,8 +3111,10 @@ ImapService::syncFolder(const QString &folderName, bool announce, const QString 
             if (announce) {
                 if (!r.ok)
                     emit syncFinished(false, r.message);
-                else if (syncedCount > 0)
-                    emit syncFinished(true, QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount));
+                else
+                    emit syncFinished(true, syncedCount > 0
+                        ? QStringLiteral("%1 synced %2 messages.").arg(folderLabel).arg(syncedCount)
+                        : QString());
                 releaseSyncTarget();
                 return;
             }

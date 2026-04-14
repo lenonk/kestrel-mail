@@ -862,22 +862,35 @@ bool DataStore::upsertAccount(const QVariantMap &account) {
             oauth_client_secret = CASE WHEN excluded.oauth_client_secret != '' THEN excluded.oauth_client_secret ELSE accounts.oauth_client_secret END,
             updated_at = datetime('now')
     )"_L1);
+    // Ensure no null QVariants reach the bind — SQLite NOT NULL rejects them
+    // even when DEFAULT '' is set, because a bound NULL overrides the default.
+    auto str = [&](const QString &key) -> QVariant {
+        const auto v = account.value(key);
+        const auto s = v.isNull() ? ""_L1 : v.toString().trimmed();
+        return QVariant(s);
+    };
+
     q.bindValue(":email"_L1,              account.value("email"_L1).toString().trimmed().toLower());
-    q.bindValue(":account_name"_L1,       account.value("accountName"_L1).toString().trimmed());
-    q.bindValue(":display_name"_L1,       account.value("displayName"_L1).toString().trimmed());
-    q.bindValue(":avatar_icon"_L1,        account.value("avatarIcon"_L1).toString().trimmed());
-    q.bindValue(":provider_id"_L1,        account.value("providerId"_L1).toString().trimmed());
-    q.bindValue(":provider_name"_L1,      account.value("providerName"_L1).toString().trimmed());
-    q.bindValue(":auth_type"_L1,          account.value("authType"_L1).toString().trimmed());
-    q.bindValue(":imap_host"_L1,          account.value("imapHost"_L1).toString().trimmed());
+    q.bindValue(":account_name"_L1,       str("accountName"_L1));
+    q.bindValue(":display_name"_L1,       str("displayName"_L1));
+    q.bindValue(":avatar_icon"_L1,        str("avatarIcon"_L1));
+    q.bindValue(":provider_id"_L1,        str("providerId"_L1));
+    q.bindValue(":provider_name"_L1,      str("providerName"_L1));
+    q.bindValue(":auth_type"_L1,          str("authType"_L1));
+    q.bindValue(":imap_host"_L1,          str("imapHost"_L1));
     q.bindValue(":imap_port"_L1,          account.value("imapPort"_L1).toInt());
-    q.bindValue(":smtp_host"_L1,          account.value("smtpHost"_L1).toString().trimmed());
+    q.bindValue(":smtp_host"_L1,          str("smtpHost"_L1));
     q.bindValue(":smtp_port"_L1,          account.value("smtpPort"_L1).toInt());
-    q.bindValue(":encryption"_L1,         account.value("encryption"_L1).toString().trimmed());
-    q.bindValue(":oauth_token_url"_L1,    account.value("oauthTokenUrl"_L1).toString().trimmed());
-    q.bindValue(":oauth_client_id"_L1,    account.value("oauthClientId"_L1).toString().trimmed());
-    q.bindValue(":oauth_client_secret"_L1,account.value("oauthClientSecret"_L1).toString().trimmed());
-    return q.exec();
+    q.bindValue(":encryption"_L1,         str("encryption"_L1));
+    q.bindValue(":oauth_token_url"_L1,    str("oauthTokenUrl"_L1));
+    q.bindValue(":oauth_client_id"_L1,    str("oauthClientId"_L1));
+    q.bindValue(":oauth_client_secret"_L1,str("oauthClientSecret"_L1));
+    if (!q.exec()) {
+        qWarning().noquote() << "[upsertAccount] SQL error:" << q.lastError().text()
+                             << "email=" << account.value("email"_L1).toString();
+        return false;
+    }
+    return true;
 }
 
 bool DataStore::deleteAccount(const QString &email) {

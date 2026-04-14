@@ -115,6 +115,7 @@ Kirigami.ApplicationWindow {
     property bool tagsExpanded: true
     property bool accountExpanded: true
     property var accountExpandedState: ({})
+    property var moreExpandedState: ({})
     property bool moreExpanded: false
     property var moreFolderExpandedState: ({})
     property bool localFoldersExpanded: false
@@ -199,9 +200,20 @@ Kirigami.ApplicationWindow {
     property var _cachedTagFolderItems: []
 
     function _rebuildTagCache() {
-        var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
+        // Collect folders only from accounts that have tags (Gmail returns labels, IMAP returns empty).
+        var tagFolders = []
+        if (typeof accountManager !== "undefined" && accountManager.accounts.length > 0) {
+            var accts = accountManager.accounts
+            for (var a = 0; a < accts.length; ++a) {
+                if (accts[a].tagList.length === 0 && accts[a].categoryTabs.length === 0)
+                    continue
+                var acctFolders = accts[a].folderList
+                for (var f = 0; f < acctFolders.length; ++f)
+                    tagFolders.push(acctFolders[f])
+            }
+        }
         var tags = (root.dataStoreObj && root.dataStoreObj.tagItems) ? root.dataStoreObj.tagItems() : []
-        root._cachedTagFolderItems = FolderUtils.tagFolderItems(folders, tags, root.tagColorForName)
+        root._cachedTagFolderItems = FolderUtils.tagFolderItems(tagFolders, tags, root.tagColorForName)
     }
 
     Connections {
@@ -368,7 +380,8 @@ Kirigami.ApplicationWindow {
 
     function accountFolderItemsForEmail(email) {
         var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
-        var tabs = root.dataStoreObj ? root.dataStoreObj.inboxCategoryTabs : ["Primary"]
+        var acct = root.accountForEmail(email)
+        var tabs = acct ? acct.categoryTabs : []
         return FolderUtils.accountFolderItems(folders, tabs, i18n, email)
     }
 
@@ -860,12 +873,59 @@ Kirigami.ApplicationWindow {
         return !!folders && folders.length > 0
     }
 
+    function allAccountsHaveFolders() {
+        if (!root.accountRepositoryObj) return false
+        var accounts = root.accountRepositoryObj.accounts
+        if (!accounts || accounts.length === 0) return false
+        var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
+        if (!folders || folders.length === 0) return false
+        var folderEmails = {}
+        for (var i = 0; i < folders.length; ++i) {
+            var e = (folders[i].accountEmail || "").toString().toLowerCase()
+            if (e.length) folderEmails[e] = true
+        }
+        for (var j = 0; j < accounts.length; ++j) {
+            var acctEmail = (accounts[j].email || "").toString().toLowerCase()
+            if (acctEmail.length && !folderEmails[acctEmail]) return false
+        }
+        return true
+    }
+
     function bootstrapSyncIfNeeded() {
         if (!root.imapServiceObj || root.bootstrapFolderSyncRequested) return
-        if (root.hasFetchedFolders()) return
+        if (root.allAccountsHaveFolders()) return
         root.bootstrapFolderSyncRequested = true
         root.accountRefreshing = true
-        root.imapServiceObj.refreshFolderList()
+        root.refreshAllFolderLists()
+    }
+
+    function accountForEmail(email) {
+        if (typeof accountManager === "undefined" || !email) return null
+        return accountManager.accountByEmail(email)
+    }
+
+    function accountForFolderKey(key) {
+        return accountForEmail(FolderUtils.accountEmailFromKey(key))
+    }
+
+    function refreshAllFolderLists() {
+        if (typeof accountManager === "undefined") {
+            if (root.imapServiceObj) root.imapServiceObj.refreshFolderList()
+            return
+        }
+        var accts = accountManager.accounts
+        for (var i = 0; i < accts.length; ++i)
+            accts[i].refreshFolderList()
+    }
+
+    function syncAllAccounts() {
+        if (typeof accountManager === "undefined") {
+            if (root.imapServiceObj) root.imapServiceObj.syncAll(false)
+            return
+        }
+        var accts = accountManager.accounts
+        for (var i = 0; i < accts.length; ++i)
+            accts[i].syncAll()
     }
 
     function syncSelectedFolder(forceFetch, silent) {
@@ -878,9 +938,12 @@ Kirigami.ApplicationWindow {
 
         var folder = root.selectedImapFolderName()
         if (!folder.length) return
-        var email = FolderUtils.accountEmailFromKey(root.selectedFolderKey)
-        root.accountRefreshing = true
-        root.imapServiceObj.syncFolder(folder, !silent, email)
+        var acct = root.accountForFolderKey(root.selectedFolderKey)
+        if (acct) {
+            acct.syncFolder(folder)
+        } else {
+            root.imapServiceObj.syncFolder(folder, !silent)
+        }
     }
 
     function syncMessageListModelSelection() {
@@ -974,6 +1037,13 @@ Kirigami.ApplicationWindow {
         if (root.accountRepositoryObj && root.accountRepositoryObj.accounts.length === 0) {
             root._needsAccountWizard = true
         }
+        // Set initial folder key to the first account's inbox (new account-scoped format).
+        if (root.selectedFolderKey === "account:inbox"
+                && root.accountRepositoryObj && root.accountRepositoryObj.accounts.length > 0) {
+            var firstEmail = (root.accountRepositoryObj.accounts[0].email || "").toString().toLowerCase()
+            if (firstEmail.length)
+                root.selectedFolderKey = "account:" + firstEmail + ":inbox"
+        }
         Qt.callLater(function() {
             root.paneAutoToggleEnabled = true
             root.bootstrapSyncIfNeeded()
@@ -998,7 +1068,8 @@ Kirigami.ApplicationWindow {
             root.accountRefreshing = false
             if (ok)
                 root.accountConnected = true
-            root.showInlineStatus(message, !ok)
+            if (message && message.length > 0)
+                root.showInlineStatus(message, !ok)
             if (ok && root.googleContacts.length === 0 && root.imapServiceObj)
                 root.imapServiceObj.refreshGoogleContacts()
             if (ok && root.hasFetchedFolders() && root.bootstrapFolderSyncRequested) {
@@ -1075,7 +1146,7 @@ Kirigami.ApplicationWindow {
                 if (root.imapServiceObj) {
                     root.accountRefreshing = true
                     root.refreshInProgress = true
-                    root.imapServiceObj.syncAll(false)
+                    root.syncAllAccounts()
                 }
             }
         }
@@ -1114,8 +1185,11 @@ Kirigami.ApplicationWindow {
             if (root.imapServiceObj && root.imapServiceObj.initialize)
                 root.imapServiceObj.initialize()
 
+            // Always refresh folder list — a new account needs its folders fetched
+            // even if other accounts already have theirs.
+            root.refreshAllFolderLists()
+
             root.bootstrapFolderSyncRequested = false
-            var hadFolders = root.hasFetchedFolders()
             root.bootstrapSyncIfNeeded()
 
             if (root.imapServiceObj) {
@@ -1146,7 +1220,7 @@ Kirigami.ApplicationWindow {
             root.showInlineStatus(i18n("Re-authentication successful. Reconnecting..."), false)
             if (root.imapServiceObj) {
                 root.imapServiceObj.initialize()
-                root.imapServiceObj.syncAll(false)
+                root.syncAllAccounts()
             }
         }
     }
@@ -1223,7 +1297,7 @@ Kirigami.ApplicationWindow {
         }
     }
     onSelectedFolderCategoriesChanged: {
-        if (root.selectedFolderKey === "account:inbox" && root.selectedFolderCategories.length > 0 && !root.categorySelectionExplicit) {
+        if (FolderUtils.normalizedFolderFromKey(root.selectedFolderKey) === "inbox" && root.selectedFolderCategories.length > 0 && !root.categorySelectionExplicit) {
             root.categorySelectionExplicit = true
             root.selectedCategoryIndex = Math.min(root.selectedCategoryIndex, root.selectedFolderCategories.length - 1)
             root.syncMessageListModelSelection()

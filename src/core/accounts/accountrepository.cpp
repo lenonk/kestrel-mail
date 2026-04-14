@@ -14,8 +14,12 @@ using namespace Qt::Literals::StringLiterals;
 
 AccountRepository::AccountRepository(DataStore *store, QObject *parent)
     : QObject(parent), m_store(store) {
-    migrateFromJson();
-    load();
+    if (m_store) {
+        migrateFromJson();
+        load();
+    } else {
+        loadFromJson();
+    }
 }
 
 QVariantList
@@ -74,6 +78,18 @@ AccountRepository::load() {
     m_accounts.clear();
     if (m_store)
         m_accounts = m_store->loadAccounts();
+}
+
+void
+AccountRepository::loadFromJson() {
+    const auto base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/kestrel-mail"_L1;
+    const auto jsonPath = base + "/accounts.json"_L1;
+    QFile f(jsonPath);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const auto doc = QJsonDocument::fromJson(f.readAll());
+    m_accounts.clear();
+    for (const auto &v : doc.array())
+        m_accounts.push_back(v.toObject().toVariantMap());
 }
 
 void

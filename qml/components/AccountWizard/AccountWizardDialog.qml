@@ -344,7 +344,7 @@ Window {
                                 onAccountNameDraftChangeRequested: function(text) { root.accountNameDraft = text }
                             }
                             AccountWizardStep2   { id: manualStep2Enc; accountSetupObj: root.accountSetupObj }
-                            AccountWizardStep3   {}
+                            AccountWizardStep3   { providerId: root.selectedProviderId; accountSetupObj: root.accountSetupObj }
 
                             // OAuth flow pages (indices 7-9)
                             AccountWizardStep1   {
@@ -364,7 +364,7 @@ Window {
                                 onAccountNameDraftChangeRequested: function(text) { root.accountNameDraft = text }
                             }
                             AccountWizardStep2   { id: oauthStep2Enc; accountSetupObj: root.accountSetupObj }
-                            AccountWizardStep3   {}
+                            AccountWizardStep3   { providerId: root.selectedProviderId; accountSetupObj: root.accountSetupObj }
                         }
                     }
                 }

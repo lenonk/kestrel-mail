@@ -122,6 +122,16 @@ AccountSetupController::applyDiscoveryResult(const QVariantMap &result) {
 void
 AccountSetupController::beginOAuth() {
     if (!m_oauth) return;
+
+    // Reset oauthReady so the signal fires again when the new token arrives.
+    // Without this, re-authenticating an existing account (which already has a
+    // stored refresh token) won't trigger onOauthReadyChanged because the
+    // value never transitions from false to true.
+    if (m_oauthReady) {
+        m_oauthReady = false;
+        emit oauthReadyChanged();
+    }
+
     m_oauthUrl = m_oauth->startAuthorization(m_selectedProvider, m_email);
     m_statusMessage = m_oauth->lastStatus();
     emit oauthUrlChanged();

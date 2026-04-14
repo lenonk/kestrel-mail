@@ -6,12 +6,20 @@ import org.kde.kirigami as Kirigami
 Item {
     id: step3Root
 
-    property string avatarSource: "qrc:/qml/images/account-avatars/avatar-01.svg"
+    property string avatarSource: providerId === "gmail" ? "qrc:/qml/images/gmail_account_icon.svg" : "qrc:/qml/images/account-avatars/avatar-01.svg"
+    property string providerId: ""
+    property var accountSetupObj: null
+
+    onAvatarSourceChanged: {
+        if (accountSetupObj)
+            accountSetupObj.avatarIcon = avatarSource
+    }
 
     SystemPalette { id: systemPalette }
 
     AvatarChooserDialog {
         id: avatarChooser
+        providerId: step3Root.providerId
         onAvatarChosen: function(avatarPath) {
             step3Root.avatarSource = avatarPath
         }

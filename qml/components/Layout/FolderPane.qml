@@ -129,31 +129,47 @@ Rectangle {
 
         // ── Per-account folder sections ──────────────────────────────
         Repeater {
-            model: (appRoot.activeWorkspace === "mail") ? appRoot.accountEmails : []
-            delegate: Column {
+            model: (appRoot.activeWorkspace === "mail" && typeof accountManager !== "undefined")
+                   ? accountManager.accounts : []
+            delegate: ColumnLayout {
                 required property int index
-                required property string modelData
-                readonly property string acctEmail: modelData
+                required property var modelData
+                readonly property var account: modelData
+                readonly property string acctEmail: account ? account.email : ""
                 readonly property bool acctExpanded: appRoot.accountExpandedState[acctEmail] !== false
+                readonly property bool acctMoreExpanded: !!appRoot.moreExpandedState[acctEmail]
                 Layout.fillWidth: true
+                spacing: 0
 
                 FolderSectionButton {
                     visible: true
                     Layout.topMargin: index === 0 ? 6 : 2
                     expanded: acctExpanded
-                    sectionIcon: "mail-message"
-                    title: acctEmail
+                    sectionIcon: account ? account.avatarSource : "mail-message"
+                    title: account ? account.accountName : ""
                     titleOpacity: 0.85
                     rowHeight: appRoot.folderRowHeight
                     chevronSize: appRoot.sectionChevronSize
                     sectionIconSize: appRoot.folderListSectionIconSize
-                    rightActivityIcon: appRoot.accountRefreshing ? "view-refresh" : ""
-                    rightActivitySpinning: appRoot.accountRefreshing
-                    rightStatusIcon: appRoot.accountNeedsReauth ? "dialog-password" : (appRoot.accountConnected ? "network-connect" : "network-disconnect")
+                    rightActivityIcon: (account && account.syncing) ? "view-refresh" : ""
+                    rightActivitySpinning: account ? account.syncing : false
+                    rightStatusIcon: (account && account.needsReauth) ? "dialog-password"
+                                   : (account && account.connected) ? "network-connect"
+                                   : "network-disconnect"
+                    rightThrottleIcon: (account && account.throttled) ? "dialog-warning" : ""
+                    rightThrottleTooltip: (account && account.needsReauth)
+                        ? i18n("Authentication expired. Click to re-authenticate.")
+                        : (account && account.throttled)
+                          ? i18n("Account is being throttled.")
+                          : ""
                     onActivated: {
-                        var s = appRoot.accountExpandedState
-                        s[acctEmail] = !acctExpanded
-                        appRoot.accountExpandedState = s
+                        if (account && account.needsReauth) {
+                            account.reauthenticate()
+                        } else {
+                            var s = Object.assign({}, appRoot.accountExpandedState)
+                            s[acctEmail] = !acctExpanded
+                            appRoot.accountExpandedState = s
+                        }
                     }
                 }
 
@@ -171,7 +187,7 @@ Rectangle {
                         unreadCount: folderStats.unread
                         newMessageCount: folderStats.newMessages || 0
                         selected: appRoot.selectedFolderKey === modelData.key
-                        tooltipText: appRoot.folderTooltipText(modelData.name, modelData.key, rawFolderName)
+                        tooltipText: modelData.name + " - " + (folderStats.total || 0) + " items (" + (folderStats.unread || 0) + " unread)"
                         acceptsDrop: true
                         dropRawFolderName: rawFolderName
                         onActivated: appRoot.selectedFolderKey = modelData.key
@@ -190,12 +206,16 @@ Rectangle {
                     folderIcon: "overflow-menu-horizontal"
                     indentLevel: 1
                     hasChildren: true
-                    expanded: appRoot.moreExpanded
-                    onToggleRequested: appRoot.moreExpanded = !appRoot.moreExpanded
+                    expanded: acctMoreExpanded
+                    onToggleRequested: {
+                        var s = Object.assign({}, appRoot.moreExpandedState)
+                        s[acctEmail] = !acctMoreExpanded
+                        appRoot.moreExpandedState = s
+                    }
                 }
 
                 Repeater {
-                    model: (acctExpanded && appRoot.moreExpanded) ? appRoot.moreAccountFolderItemsForEmail(acctEmail) : []
+                    model: (acctExpanded && acctMoreExpanded) ? appRoot.moreAccountFolderItemsForEmail(acctEmail) : []
                     delegate: FolderItemDelegate {
                         readonly property string rawFolderName: (modelData.rawName || modelData.name || "")
                         readonly property var folderStats: appRoot.folderStatsByKey(modelData.key, rawFolderName)
@@ -210,7 +230,7 @@ Rectangle {
                         unreadCount: modelData.noselect ? 0 : folderStats.unread
                         newMessageCount: modelData.noselect ? 0 : (folderStats.newMessages || 0)
                         selected: appRoot.selectedFolderKey === modelData.key
-                        tooltipText: appRoot.folderTooltipText(modelData.name, modelData.key, rawFolderName)
+                        tooltipText: modelData.name + " - " + (folderStats.total || 0) + " items (" + (folderStats.unread || 0) + " unread)"
                         acceptsDrop: !modelData.noselect
                         dropRawFolderName: rawFolderName
                         onToggleRequested: appRoot.toggleMoreFolderExpanded(rawFolderName)
