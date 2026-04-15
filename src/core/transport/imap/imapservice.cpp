@@ -2292,7 +2292,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
         return;
     }
 
-    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
+    (void)QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
         auto cxn = poolForEmail(accountEmail)->acquire("move-message", accountEmail);
@@ -2438,7 +2438,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
         return;
     }
 
-    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, messageId, unreadVal]() {
+    (void)QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
         auto cxn = poolForEmail(accountEmail)->acquire("add-folder-membership", accountEmail);
@@ -2646,7 +2646,7 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
         return;
     }
 
-    const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, targetUid]() {
+    (void)QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, targetUid]() {
         if (m_destroying.load())
             return;
 

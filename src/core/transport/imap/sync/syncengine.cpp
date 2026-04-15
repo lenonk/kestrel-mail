@@ -66,7 +66,6 @@ namespace Imap {
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
-constexpr bool kImapVerboseLogEnabled = true;
 constexpr int  kInitialBodyPeekBytes  = 65536;
 
 // ── Folder-list helpers (used by fetchFolders) ───────────────────────────────
@@ -577,9 +576,6 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
                                  << "labels=" << rawLabels
                                  << "subject=" << h.value("subject"_L1).toString().left(120);
         }
-    }
-
-    if (kImapVerboseLogEnabled) {
     }
 
     // Attachment metadata from BODYSTRUCTURE — stored in DB so the UI needs no IMAP round-trip.

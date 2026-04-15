@@ -49,21 +49,8 @@ QString extractGmailCategoryFolder(const QString &fetchResp);
 QString extractInternalDateRaw(const QString &fetchResp);
 
 /**
- * Extract first literal bytes from FETCH response.
- * Returns content between first {length}\r\n...\r\n markers.
- */
-QByteArray extractFirstLiteralBytesFromFetch(const QByteArray &fetchRespRaw);
-
-/**
- * Extract last literal bytes from FETCH response.
- * Returns content between last {length}\r\n...\r\n markers with highest score.
- * Prefers literals marked as BODY.PEEK[...] over headers.
- */
-QByteArray extractLastLiteralBytesFromFetch(const QByteArray &fetchRespRaw);
-
-/**
  * Parse best available datetime from header Date or INTERNALDATE fallback.
  */
 QDateTime parseBestDateTime(const QString &headerDate, const QString &fetchResp);
 
-} // namespace ImapParser
+} // namespace Imap::Parser

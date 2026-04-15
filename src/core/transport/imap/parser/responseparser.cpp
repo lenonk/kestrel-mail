@@ -4,7 +4,6 @@
 #include <QLocale>
 #include <QMutex>
 #include <QHash>
-#include <limits>
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -218,78 +217,4 @@ parseBestDateTime(const QString &headerDate, const QString &fetchResp) {
     return dt;
 }
 
-QByteArray
-extractFirstLiteralBytesFromFetch(const QByteArray &fetchRespRaw) {
-    auto i = fetchRespRaw.indexOf('{');
-
-    while (i >= 0) {
-        auto j = i + 1;
-
-        while (j < fetchRespRaw.size() && fetchRespRaw[j] >= '0' && fetchRespRaw[j] <= '9') {
-            ++j;
-        }
-
-        if (j > i + 1 && fetchRespRaw[j] == '}') {
-            auto ok = false;
-            if (const auto len = fetchRespRaw.mid(i + 1, j - i - 1).toInt(&ok); ok && len > 0) {
-                auto start = j + 1;
-                if (start < fetchRespRaw.size() && (fetchRespRaw[start] == '\r' || fetchRespRaw[start] == '\n')) {
-                    ++start;
-                }
-
-                if (start + len <= fetchRespRaw.size())
-                    return fetchRespRaw.mid(start, len);
-            }
-        }
-        i = fetchRespRaw.indexOf('{', i + 1);
-    }
-
-    return {};
-}
-
-QByteArray
-extractLastLiteralBytesFromFetch(const QByteArray &fetchRespRaw) {
-    QByteArray last;
-    auto bestScore = std::numeric_limits<int>::min();
-
-    auto i = fetchRespRaw.indexOf('{');
-
-    while (i >= 0) {
-        auto j = i + 1;
-
-        while (j < fetchRespRaw.size() && fetchRespRaw[j] >= '0' && fetchRespRaw[j] <= '9') {
-            ++j;
-        }
-
-        if (j > i + 1 && fetchRespRaw[j] == '}') {
-            bool ok = false;
-            if (const int len = fetchRespRaw.mid(i + 1, j - i - 1).toInt(&ok); ok && len > 0) {
-                auto start = j + 1;
-                if (start < fetchRespRaw.size() && (fetchRespRaw[start] == '\r' || fetchRespRaw[start] == '\n')) {
-                    ++start;
-                }
-
-                if (start + len <= fetchRespRaw.size()) {
-                    const auto literal = fetchRespRaw.mid(start, len);
-
-                    int score = 0;
-                    const auto ctxStart = qMax(0, i - 160);
-                    const auto ctx = fetchRespRaw.mid(ctxStart, i - ctxStart).toLower();
-                    if (ctx.contains("body.peek[text") || ctx.contains("body[text")) score += 100;
-                    if (ctx.contains("body.peek[") || ctx.contains("body[")) score += 20;
-                    if (ctx.contains("header.fields")) score -= 80;
-                    if (ctx.contains("bodystructure")) score -= 40;
-
-                    if (score >= bestScore) {
-                        bestScore = score;
-                        last = literal;
-                    }
-                }
-            }
-        }
-        i = fetchRespRaw.indexOf('{', i + 1);
-    }
-    return last;
-}
-
-} // namespace ImapParser
+} // namespace Imap::Parser
