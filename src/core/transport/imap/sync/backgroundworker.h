@@ -11,6 +11,7 @@
 
 namespace Imap {
 class Connection;
+class ConnectionPool;
 
 class BackgroundWorker : public QObject {
     Q_OBJECT
@@ -19,6 +20,7 @@ public:
 
     [[nodiscard]] bool isRunning() const { return m_running.load(); }
     void setIntervalSeconds(const int seconds) { m_intervalSeconds = seconds; }
+    void setConnectionPool(ConnectionPool *p) { m_pool = p; }
 
 public slots:
     void start();
@@ -66,6 +68,7 @@ private:
     // Returns a map keyed by lowercased folder name.
     QHash<QString, FolderStatus> fetchAllFolderStatuses() const;
 
+    ConnectionPool *m_pool = nullptr;
     QHash<QString, FolderStatus> m_lastFolderStatus;
 };
 

@@ -56,9 +56,7 @@ using Imap::AvatarResolver::writeAvatarFile;
 namespace {
 
 // Transitional shim: file-scope pointer to the (still-singleton) ImapService's pool.
-// Used by the static getPooledConnection/getDedicatedHydrateConnection methods.
 // Removed in Step 3 when BackgroundWorker receives the pool via injection.
-Imap::ConnectionPool *g_poolShim = nullptr;
 
 bool offlineModeEnabledFromEnv() {
     const QByteArray raw = qgetenv("KESTREL_OFFLINE_MODE").trimmed().toLower();
@@ -82,17 +80,7 @@ QString stripGmailPrefix(const QString &folder) {
 }
 }
 
-std::shared_ptr<Imap::Connection>
-ImapService::getPooledConnection(const QString &email, const QString &owner) {
-    if (!g_poolShim) return {};
-    return g_poolShim->acquire(owner, email);
-}
 
-std::shared_ptr<Imap::Connection>
-ImapService::getDedicatedHydrateConnection(const QString &email) {
-    if (!g_poolShim) return {};
-    return g_poolShim->acquireHydrate(email);
-}
 
 ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
     : QObject(parent)
@@ -134,7 +122,6 @@ ImapService::initializeConnectionPool() {
     if (!m_pool)
         m_pool = std::make_unique<Imap::ConnectionPool>();
 
-    g_poolShim = m_pool.get();
 
     m_pool->setTokenRefresher([this](const QString &email) -> QString {
         if (!m_accounts) return {};
@@ -249,7 +236,6 @@ ImapService::shutdown() {
 
     if (m_pool) {
         m_pool->shutdown();
-        g_poolShim = nullptr;
     }
 
     // Account-owned workers are shut down by AccountManager.
@@ -556,7 +542,7 @@ ImapService::prefetchAttachmentsInternal(const QString &accountEmail, const QStr
             }
         } taskGuard{this, taskKey};
 
-        auto cxn = getPooledConnection(accountEmail, label);
+        auto cxn = m_pool->acquire(label, accountEmail);
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
             return;
@@ -1160,7 +1146,7 @@ ImapService::fetchFolderHeaders(const QString &email,
                                 qint64 minUidExclusive,
                                 bool reconcileDeletes,
                                 qint32 fetchBudget) {
-    auto pooled = getPooledConnection(email, "fetch-folder-headers");
+    auto pooled = m_pool->acquire("fetch-folder-headers", email);
     if (!pooled) {
         if (statusOut)
             *statusOut = "Operational IMAP pool timeout."_L1;
@@ -1415,7 +1401,7 @@ ImapService::refreshFolderList(bool announce) {
                     return r;
                 }
 
-                auto pooled = getPooledConnection(email, "refresh-folder-list");
+                auto pooled = m_pool->acquire("refresh-folder-list", email);
                 if (!pooled) continue;
 
                 QString status;
@@ -2177,17 +2163,17 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             std::shared_ptr<Imap::Connection> pooled;
             bool usedDedicated = false;
             if (userInitiated) {
-                pooled = getDedicatedHydrateConnection(emailCopy);
+                pooled = m_pool->acquireHydrate(emailCopy);
                 if (pooled) {
                     usedDedicated = true;
                 } else {
                     qint8 poolAttempts = 0;
-                    pooled = getPooledConnection(emailCopy, "hydrate-user"_L1);
+                    pooled = m_pool->acquire("hydrate-user"_L1, emailCopy);
                     while (!pooled && poolAttempts++ < 10)
-                        pooled = getPooledConnection(emailCopy, "hydrate-user-fallback"_L1);
+                        pooled = m_pool->acquire("hydrate-user-fallback"_L1, emailCopy);
                 }
             } else {
-                pooled = getPooledConnection(emailCopy, "bg-hydrate"_L1);
+                pooled = m_pool->acquire("bg-hydrate"_L1, emailCopy);
             }
 
             const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
@@ -2261,7 +2247,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
-        auto cxn = getPooledConnection(accountEmail, "move-message");
+        auto cxn = m_pool->acquire("move-message", accountEmail);
         if (!cxn) return;
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2311,7 +2297,7 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
     (void)QtConcurrent::run([this, accountEmail, folder, uid]() {
         if (m_destroying.load()) { return; }
 
-        auto cxn = getPooledConnection(accountEmail, "mark-read");
+        auto cxn = m_pool->acquire("mark-read", accountEmail);
         if (!cxn) { return; }
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2338,7 +2324,7 @@ ImapService::markMessageFlagged(const QString &accountEmail, const QString &fold
     (void)QtConcurrent::run([this, accountEmail, folder, uid, flags]() {
         if (m_destroying.load()) { return; }
 
-        auto cxn = getPooledConnection(accountEmail, "flag-message");
+        auto cxn = m_pool->acquire("flag-message", accountEmail);
         if (!cxn) { return; }
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2407,7 +2393,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
-        auto cxn = getPooledConnection(accountEmail, "add-folder-membership");
+        auto cxn = m_pool->acquire("add-folder-membership", accountEmail);
         if (!cxn) return;
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2479,7 +2465,7 @@ ImapService::copyToLocalFolder(const QString &accountEmail, const QString &folde
 
         // 1. Hydrate body if missing.
         if (m_store && !m_store->hasUsableBodyForEdge(accountEmail, folder, uid)) {
-            auto cxn = getPooledConnection(accountEmail, "local-copy-hydrate");
+            auto cxn = m_pool->acquire("local-copy-hydrate", accountEmail);
             if (cxn) {
                 Imap::MessageHydrator::Request req;
                 req.cxn        = cxn;
@@ -2500,7 +2486,7 @@ ImapService::copyToLocalFolder(const QString &accountEmail, const QString &folde
         const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folder, uid);
         if (attachments.isEmpty()) { return; }
 
-        auto cxn = getPooledConnection(accountEmail, "local-copy-attachments");
+        auto cxn = m_pool->acquire("local-copy-attachments", accountEmail);
         if (!cxn) { return; }
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2616,7 +2602,7 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
         if (m_destroying.load())
             return;
 
-        auto cxn = getPooledConnection(accountEmail, "remove-folder-membership");
+        auto cxn = m_pool->acquire("remove-folder-membership", accountEmail);
         if (!cxn)
             return;
 

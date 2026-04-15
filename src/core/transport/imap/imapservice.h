@@ -35,8 +35,6 @@ public:
     ~ImapService() override;
 
     // syncAll removed — accounts own their own syncAll via IAccount.
-    static std::shared_ptr<Imap::Connection> getPooledConnection(const QString &email = {}, const QString &owner = {});
-    static std::shared_ptr<Imap::Connection> getDedicatedHydrateConnection(const QString &email);
     [[nodiscard]] Imap::ConnectionPool* pool() const { return m_pool.get(); }
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true, const QString &accountEmail = {});
     Q_INVOKABLE void refreshFolderList(bool announce = true);

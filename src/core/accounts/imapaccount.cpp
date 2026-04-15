@@ -196,6 +196,7 @@ void ImapAccount::startBackgroundWorker() {
 
     m_bgThread = new QThread(this);
     m_bgWorker = new Imap::BackgroundWorker();
+    if (m_imap) m_bgWorker->setConnectionPool(m_imap->pool());
     m_bgWorker->moveToThread(m_bgThread);
 
     connect(m_bgThread, &QThread::started, m_bgWorker, &Imap::BackgroundWorker::start);

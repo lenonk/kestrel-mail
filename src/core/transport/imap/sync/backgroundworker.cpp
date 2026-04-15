@@ -2,7 +2,7 @@
 
 #include "syncutils.h"
 #include "syncengine.h"
-#include "../imapservice.h"
+#include "../connection/connectionpool.h"
 
 #include <QSet>
 #include <QRegularExpression>
@@ -51,7 +51,7 @@ BackgroundWorker::fetchAllFolderStatuses() const {
 
     std::shared_ptr<Connection> cxn;
     while (m_running.load() && !cxn)
-        cxn = ImapService::getPooledConnection(m_activeEmail, "bg-folder-status");
+        cxn = m_pool ? m_pool->acquire("bg-folder-status"_L1, m_activeEmail) : nullptr;
     if (!cxn)
         return out;
 
@@ -145,7 +145,7 @@ BackgroundWorker::start() {
 
         std::shared_ptr<Connection> pooled;
         while (m_running.load() && !pooled)
-            pooled = ImapService::getPooledConnection(m_activeEmail, "bg-list-folders");
+            pooled = m_pool ? m_pool->acquire("bg-list-folders"_L1, m_activeEmail) : nullptr;
         if (!pooled)
             continue;
 
