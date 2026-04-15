@@ -3,9 +3,16 @@
 #include "iaccount.h"
 #include <QVariantMap>
 
+class QThread;
+class QTimer;
 class DataStore;
 class ImapService;
 class TokenVault;
+
+namespace Imap {
+class IdleWatcher;
+class BackgroundWorker;
+}
 
 /**
  * Generic IMAP account implementation.
@@ -21,6 +28,7 @@ public:
     explicit ImapAccount(const QVariantMap &config, DataStore *store,
                           ImapService *imap, TokenVault *vault,
                           QObject *parent = nullptr);
+    ~ImapAccount() override;
 
     // ── Identity ──────────────────────────────────────────────────
     [[nodiscard]] QString email() const override;
@@ -34,6 +42,9 @@ public:
     [[nodiscard]] QVariantList tagList() const override;
     [[nodiscard]] QStringList categoryTabs() const override;
     Q_INVOKABLE QVariantMap folderStats(const QString &folderKey) const override;
+
+    // ── Sync targets ─────────────────────────────────────────────
+    [[nodiscard]] QStringList syncTargets() const override;
 
     // ── Sync ──────────────────────────────────────────────────────
     Q_INVOKABLE void syncAll() override;
@@ -52,11 +63,24 @@ public:
     [[nodiscard]] bool needsReauth() const override;
 
 private:
+    void startIdleWatcher();
+    void stopIdleWatcher();
+    void startBackgroundWorker();
+    void stopBackgroundWorker();
+    void updateSyncState(bool active);
+
     QVariantMap m_config;
     DataStore *m_store;
     ImapService *m_imap;
     TokenVault *m_vault;
     QString m_email;
+
+    Imap::IdleWatcher *m_idleWatcher = nullptr;
+    QThread *m_idleThread = nullptr;
+    Imap::BackgroundWorker *m_bgWorker = nullptr;
+    QThread *m_bgThread = nullptr;
+    QTimer *m_syncTimer = nullptr;
+
     bool m_syncing = false;
     int m_syncCount = 0;
     bool m_connected = true;

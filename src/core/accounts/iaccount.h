@@ -4,12 +4,21 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+class QThread;
+
+namespace Imap {
+class IdleWatcher;
+class BackgroundWorker;
+}
+
 /**
  * Abstract interface for a mail account.
  *
  * The UI binds to this interface without knowing whether the underlying
  * implementation is Gmail (OAuth, categories, labels), generic IMAP
  * (password, standard folders), or POP3 (future).
+ *
+ * Each account owns its own IDLE watcher and background worker threads.
  */
 class IAccount : public QObject
 {
@@ -48,6 +57,9 @@ public:
     [[nodiscard]] virtual QVariantList tagList() const = 0;
     [[nodiscard]] virtual QStringList categoryTabs() const = 0;
     Q_INVOKABLE virtual QVariantMap folderStats(const QString &folderKey) const = 0;
+
+    // ── Sync targets ─────────────────────────────────────────────
+    [[nodiscard]] virtual QStringList syncTargets() const = 0;
 
     // ── Sync ──────────────────────────────────────────────────────
     Q_INVOKABLE virtual void syncAll() = 0;

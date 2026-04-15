@@ -73,6 +73,7 @@ AccountManager::rebuildFromRepository() {
 
         if (auto *acct = createAccount(config)) {
             m_accounts.push_back(acct);
+            acct->initialize();
         }
     }
 

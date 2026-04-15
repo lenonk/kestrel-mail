@@ -433,8 +433,8 @@ ImapService::initialize() {
         return;
     }
 
-    startBackgroundWorker();
-    startIdleWatcher();
+    // Idle watchers and background workers are now owned by individual account
+    // objects (IAccount::initialize). ImapService only manages the connection pool.
 }
 
 void
@@ -1250,6 +1250,111 @@ ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
     else
         QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
 }
+
+void
+ImapService::wireIdleWatcher(Imap::IdleWatcher *watcher, const QString &accountEmail) {
+    if (!watcher) return;
+
+    connect(watcher, &Imap::IdleWatcher::requestAccounts,
+            this, [this](QVariantList *out) {
+                if (out) *out = workerGetAccounts();
+            }, Qt::BlockingQueuedConnection);
+
+    connect(watcher, &Imap::IdleWatcher::requestRefreshAccessToken,
+            this, [this](const QVariantMap &account, const QString &email, QString *out) {
+                if (!out) return;
+                if (account.value("authType"_L1).toString() == "password"_L1)
+                    *out = m_vault ? m_vault->loadPassword(email) : QString{};
+                else
+                    *out = workerRefreshAccessToken(account, email);
+            }, Qt::BlockingQueuedConnection);
+
+    connect(watcher, &Imap::IdleWatcher::requestFolderUids,
+            this, [this](const QString &email, const QString &folder, QStringList *out) {
+                if (out && m_store) *out = m_store->folderUids(email, folder);
+            }, Qt::DirectConnection);
+
+    connect(watcher, &Imap::IdleWatcher::pruneFolderToUidsRequested,
+            this, [this](const QString &email, const QString &folder, const QStringList &uids) {
+                if (m_store) m_store->pruneFolderToUids(email, folder, uids);
+            }, Qt::DirectConnection);
+
+    connect(watcher, &Imap::IdleWatcher::removeUidsRequested,
+            this, [this](const QString &email, const QStringList &uids) {
+                if (m_store) m_store->removeAccountUidsEverywhere(email, uids);
+            }, Qt::DirectConnection);
+
+    connect(watcher, &Imap::IdleWatcher::realtimeStatus,
+            this, [this](const bool ok, const QString &message) {
+                workerEmitRealtimeStatus(ok, message);
+            }, Qt::QueuedConnection);
+
+    Q_UNUSED(accountEmail)
+}
+
+void
+ImapService::wireBackgroundWorker(Imap::BackgroundWorker *worker, const QString &accountEmail) {
+    if (!worker) return;
+
+    connect(worker, &Imap::BackgroundWorker::requestAccounts,
+            this, [this](QVariantList *out) {
+                if (out) *out = workerGetAccounts();
+            }, Qt::BlockingQueuedConnection);
+
+    connect(worker, &Imap::BackgroundWorker::requestRefreshAccessToken,
+            this, [this](const QVariantMap &account, const QString &email, QString *out) {
+                if (!out) return;
+                if (account.value("authType"_L1).toString() == "password"_L1)
+                    *out = m_vault ? m_vault->loadPassword(email) : QString{};
+                else
+                    *out = workerRefreshAccessToken(account, email);
+            }, Qt::BlockingQueuedConnection);
+
+    connect(worker, &Imap::BackgroundWorker::requestAccountThrottled,
+            this, [this](const QString &email, bool *out) {
+                if (out) *out = m_accountThrottleState.value(Kestrel::normalizeEmail(email), false);
+            }, Qt::BlockingQueuedConnection);
+
+    connect(worker, &Imap::BackgroundWorker::upsertFoldersRequested,
+            this, [this](const QVariantList &folders) {
+                for (const auto &fv : folders)
+                    if (m_store) m_store->upsertFolder(fv.toMap());
+            }, Qt::DirectConnection);
+
+    connect(worker, &Imap::BackgroundWorker::loadFolderStatusSnapshotRequested,
+            this, [this](const QString &email, const QString &folder,
+                         qint64 *uidNext, qint64 *highestModSeq, qint64 *messages, bool *found) {
+                const auto snap = loadFolderStatusSnapshot(email, folder);
+                if (found) *found = !snap.isEmpty();
+                if (uidNext) *uidNext = snap.value("uidNext"_L1).toLongLong();
+                if (highestModSeq) *highestModSeq = snap.value("highestModSeq"_L1).toLongLong();
+                if (messages) *messages = snap.value("messages"_L1).toLongLong();
+            }, Qt::DirectConnection);
+
+    connect(worker, &Imap::BackgroundWorker::saveFolderStatusSnapshotRequested,
+            this, [this](const QString &email, const QString &folder,
+                         qint64 uidNext, qint64 highestModSeq, qint64 messages) {
+                saveFolderStatusSnapshot(email, folder, uidNext, highestModSeq, messages);
+            }, Qt::DirectConnection);
+
+    connect(worker, &Imap::BackgroundWorker::idleLiveUpdateRequested,
+            this, [this](const QVariantMap &, const QString &email) {
+                backgroundOnIdleLiveUpdate({}, email);
+            }, Qt::QueuedConnection);
+
+    connect(worker, &Imap::BackgroundWorker::loopError,
+            this, [this](const QString &message) {
+                workerEmitRealtimeStatus(false, message);
+            }, Qt::QueuedConnection);
+
+    connect(worker, &Imap::BackgroundWorker::realtimeStatus,
+            this, [this](const bool ok, const QString &message) {
+                workerEmitRealtimeStatus(ok, message);
+            }, Qt::QueuedConnection);
+
+    Q_UNUSED(accountEmail)
+}
+
 
 
 void
@@ -2497,7 +2602,8 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         const bool isOAuth = account.value("authType"_L1).toString() == "oauth2"_L1
                           || (!account.value("oauthClientId"_L1).toString().isEmpty()
                            && !account.value("oauthTokenUrl"_L1).toString().isEmpty());
-        if (!isOAuth) {
+        const bool isPassword = account.value("authType"_L1).toString() == "password"_L1;
+        if (!isOAuth && !isPassword) {
             return {};
         }
 

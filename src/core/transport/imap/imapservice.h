@@ -52,6 +52,10 @@ public:
 
     Q_INVOKABLE void initialize();
     void initializeConnectionPool();
+
+    // Wire an idle watcher / background worker owned by an account.
+    void wireIdleWatcher(Imap::IdleWatcher *watcher, const QString &accountEmail);
+    void wireBackgroundWorker(Imap::BackgroundWorker *worker, const QString &accountEmail);
     qint32 expectedPoolConnections() const;
     qint32 poolConnectionsReady() const;
     Q_INVOKABLE void shutdown();
@@ -161,7 +165,11 @@ private:
         bool announce = true;
     };
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
+
+public:
     QStringList syncTargetsForAccount(const QString &email, const QString &host) const;
+
+private:
 
     void startIdleWatcher();
     void stopIdleWatcher(bool waitForStop = true) const;
