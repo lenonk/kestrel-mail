@@ -38,6 +38,7 @@
 #include "core/store/datastore.h"
 #include "core/store/messagelistmodel.h"
 #include "core/transport/imap/imapservice.h"
+#include "core/transport/imap/googleapiservice.h"
 #include "core/transport/smtp/smtpservice.h"
 #include "core/crypto/pgpkeymanager.h"
 #include "core/accounts/accountmanager.h"
@@ -156,10 +157,20 @@ int main(int argc, char *argv[])
     HtmlProcessor htmlProcessor(&engine);
     ImapService imapService(&dataStore, tokenVault.get(), &engine);
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &imapService, &ImapService::shutdown);
+    GoogleApiService googleApiService(
+        [&imapService]() { return imapService.accountConfigList(); },
+        [&imapService](const QVariantMap &acc, const QString &email) {
+            return imapService.refreshAccessToken(acc, email);
+        },
+        [&tokenVault](const QString &email) {
+            return tokenVault ? tokenVault->loadPassword(email) : QString();
+        },
+        &dataStore, &engine);
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &googleApiService, &GoogleApiService::shutdown);
     // Pool initialization is handled per-account by AccountManager::createAccount().
     SmtpService smtpService(&accountRepository, tokenVault.get(), &engine);
     PgpKeyManager pgpKeyManager(&dataStore, &engine);
-    AccountManager accountManager(&accountRepository, &dataStore, &imapService, tokenVault.get(), &engine);
+    AccountManager accountManager(&accountRepository, &dataStore, &imapService, &googleApiService, tokenVault.get(), &engine);
 
     // Desktop notification for new mail.
     QObject::connect(&dataStore, &DataStore::newMailReceived, &app,
@@ -253,6 +264,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("messageListModel", &messageListModel);
     engine.rootContext()->setContextProperty("htmlProcessor", &htmlProcessor);
     engine.rootContext()->setContextProperty("imapService", &imapService);
+    engine.rootContext()->setContextProperty("googleApiService", &googleApiService);
     engine.rootContext()->setContextProperty("smtpService", &smtpService);
     engine.rootContext()->setContextProperty("pgpKeyManager", &pgpKeyManager);
     engine.rootContext()->setContextProperty("accountManager", &accountManager);

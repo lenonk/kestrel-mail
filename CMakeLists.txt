@@ -108,6 +108,7 @@ qt_add_executable(kestrel-mail
     src/core/store/messagestore.cpp
     src/core/store/messagelistmodel.cpp
     src/core/transport/imap/imapservice.cpp
+    src/core/transport/imap/googleapiservice.cpp
     src/core/transport/imap/parser/responseparser.cpp
     src/core/transport/imap/connection/imapio.cpp
     src/core/transport/imap/connection/imapconnection.cpp

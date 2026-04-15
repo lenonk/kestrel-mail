@@ -5,13 +5,14 @@
 #include "imapaccount.h"
 #include "iaccount.h"
 #include "../transport/imap/imapservice.h"
+#include "../transport/imap/googleapiservice.h"
 
 using namespace Qt::Literals::StringLiterals;
 
 AccountManager::AccountManager(AccountRepository *repo, DataStore *store,
-                                ImapService *imap, TokenVault *vault,
-                                QObject *parent)
-    : QObject(parent), m_repo(repo), m_store(store), m_imap(imap), m_vault(vault)
+                                ImapService *imap, GoogleApiService *googleApi,
+                                TokenVault *vault, QObject *parent)
+    : QObject(parent), m_repo(repo), m_store(store), m_imap(imap), m_googleApi(googleApi), m_vault(vault)
 {
     if (m_repo) {
         connect(m_repo, &AccountRepository::accountsChanged, this, &AccountManager::rebuildFromRepository);
@@ -96,7 +97,7 @@ AccountManager::createAccount(const QVariantMap &config) {
     auto *accountImap = new ImapService(config, m_store, m_vault);
 
     IAccount *account = isGmail
-        ? static_cast<IAccount*>(new GmailAccount(config, m_store, accountImap, m_vault, this))
+        ? static_cast<IAccount*>(new GmailAccount(config, m_store, accountImap, m_googleApi, m_vault, this))
         : static_cast<IAccount*>(new ImapAccount(config, m_store, accountImap, m_vault, this));
 
     accountImap->setParent(account);

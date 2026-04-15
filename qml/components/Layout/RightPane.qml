@@ -92,9 +92,9 @@ Rectangle {
                 responseStatus: modelData.selfResponseStatus || ""
                 sectionSpacing: appRoot.sectionSpacing
                 radiusValue: appRoot.defaultRadius
-                onAccepted: appRoot.imapServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "accepted")
-                onDeclined: appRoot.imapServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "declined")
-                onTentative: appRoot.imapServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "tentative")
+                onAccepted: appRoot.googleApiServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "accepted")
+                onDeclined: appRoot.googleApiServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "declined")
+                onTentative: appRoot.googleApiServiceObj.respondToCalendarInvite(modelData.calendarId, modelData.eventId, "tentative")
             }
         }
 

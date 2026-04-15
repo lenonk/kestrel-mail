@@ -2,6 +2,8 @@
 
 #include "baseaccount.h"
 
+class GoogleApiService;
+
 /**
  * Gmail account implementation.
  *
@@ -21,11 +23,14 @@ class GmailAccount : public BaseAccount
 
 public:
     explicit GmailAccount(const QVariantMap &config, DataStore *store,
-                           ImapService *imap, TokenVault *vault,
-                           QObject *parent = nullptr);
+                           ImapService *imap, GoogleApiService *googleApi,
+                           TokenVault *vault, QObject *parent = nullptr);
 
     // -- Overrides ------------------------------------------------------------
     [[nodiscard]] QString avatarSource() const override;
     [[nodiscard]] QStringList categoryTabs() const override;
     Q_INVOKABLE void syncAll() override;
+
+private:
+    GoogleApiService *m_googleApi = nullptr;
 };

@@ -27,9 +27,6 @@ class QElapsedTimer;
 class ImapService : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QVariantList googleCalendarList READ googleCalendarList NOTIFY googleCalendarListChanged)
-    Q_PROPERTY(QVariantList googleWeekEvents READ googleWeekEvents NOTIFY googleWeekEventsChanged)
-    Q_PROPERTY(QVariantList googleContacts READ googleContacts NOTIFY googleContactsChanged)
 public:
     // Per-account constructor — each account owns its own ImapService instance.
     ImapService(const QVariantMap &accountConfig, DataStore *store, TokenVault *vault,
@@ -85,19 +82,6 @@ public:
     Q_INVOKABLE QString cachedAttachmentPath(const QString &accountEmail, const QString &uid, const QString &partId) const;
     Q_INVOKABLE QString attachmentPreviewPath(const QString &accountEmail, const QString &uid, const QString &partId,
                                               const QString &fileName, const QString &mimeType);
-    Q_INVOKABLE void refreshGoogleCalendars();
-    Q_INVOKABLE void refreshGoogleWeekEvents(const QStringList &calendarIds,
-                                             const QString &weekStartIso,
-                                             const QString &weekEndIso);
-    Q_INVOKABLE void respondToCalendarInvite(const QString &calendarId,
-                                             const QString &eventId,
-                                             const QString &response);
-    Q_INVOKABLE void refreshGoogleContacts();
-    Q_INVOKABLE void refreshGooglePeopleAvatars(const QString &accountEmail);
-
-    [[nodiscard]] QVariantList googleCalendarList() const { return m_googleCalendarList; }
-    [[nodiscard]] QVariantList googleWeekEvents() const { return m_googleWeekEvents; }
-    [[nodiscard]] QVariantList googleContacts() const { return m_googleContacts; }
 
 signals:
     void syncFinished(bool ok, const QString &message);
@@ -110,10 +94,6 @@ signals:
     void accountNeedsReauth(const QString &accountEmail);
     void attachmentReady(const QString &accountEmail, const QString &uid, const QString &partId, const QString &localPath);
     void attachmentDownloadProgress(const QString &accountEmail, const QString &uid, const QString &partId, int progressPercent);
-    void googleCalendarListChanged();
-    void googleWeekEventsChanged();
-    void calendarInviteResponded();
-    void googleContactsChanged();
 
 private:
     // Internal result type for async sync work lambdas.
@@ -175,9 +155,6 @@ private:
     mutable QHash<QString, AttachmentCacheEntry> m_attachmentFileCache;
     mutable QMutex                               m_attachmentFileCacheMutex;
 
-    QVariantList                                 m_googleCalendarList;
-    QVariantList                                 m_googleWeekEvents;
-    QVariantList                                 m_googleContacts;
 
     QSet<QString>                                m_inFlightAttachmentDownloads;
     mutable QMutex                               m_inFlightAttachmentDownloadsMutex;
@@ -187,12 +164,15 @@ private:
         bool announce = true;
     };
     [[nodiscard]] bool isPerAccountMode() const { return !m_email.isEmpty(); }
-    [[nodiscard]] QVariantList accountConfigList() const;
     [[nodiscard]] Imap::ConnectionPool* poolForEmail(const QString &email) const;
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
 
 public:
     QStringList syncTargetsForAccount(const QString &email, const QString &host) const;
+
+    // Exposed for GoogleApiService wiring.
+    [[nodiscard]] QVariantList accountConfigList() const;
+    QString refreshAccessToken(const QVariantMap &account, const QString &email);
 
 private:
 
@@ -214,7 +194,6 @@ private:
     void attachmentCacheInsert(const QString &key, const QString &localPath);
 
     QString workerRefreshAccessToken(const QVariantMap &account, const QString &email);
-    QString refreshAccessToken(const QVariantMap &account, const QString &email);
 
     void backgroundOnIdleLiveUpdate(const QVariantMap &account, const QString &email);
 

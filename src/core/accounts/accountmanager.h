@@ -6,6 +6,7 @@
 class IAccount;
 class AccountRepository;
 class DataStore;
+class GoogleApiService;
 class ImapService;
 class TokenVault;
 
@@ -22,8 +23,8 @@ class AccountManager : public QObject
 
 public:
     explicit AccountManager(AccountRepository *repo, DataStore *store,
-                            ImapService *imap, TokenVault *vault,
-                            QObject *parent = nullptr);
+                            ImapService *imap, GoogleApiService *googleApi,
+                            TokenVault *vault, QObject *parent = nullptr);
 
     [[nodiscard]] QList<IAccount*> accounts() const;
     [[nodiscard]] QList<QObject*> accountsAsObjects() const;
@@ -40,6 +41,7 @@ private:
     AccountRepository *m_repo;
     DataStore *m_store;
     ImapService *m_imap;
+    GoogleApiService *m_googleApi;
     TokenVault *m_vault;
     QList<IAccount*> m_accounts;
 };

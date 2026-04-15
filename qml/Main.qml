@@ -280,6 +280,7 @@ Kirigami.ApplicationWindow {
     readonly property var dataStoreObj: (typeof dataStore !== "undefined") ? dataStore : null
     readonly property var messageListModelObj: (typeof messageListModel !== "undefined") ? messageListModel : null
     readonly property var imapServiceObj: (typeof imapService !== "undefined") ? imapService : null
+    readonly property var googleApiServiceObj: (typeof googleApiService !== "undefined") ? googleApiService : null
     readonly property string primaryAccountName: (root.accountRepositoryObj && root.accountRepositoryObj.accounts.length > 0 && root.accountRepositoryObj.accounts[0].accountName)
                                                ? root.accountRepositoryObj.accounts[0].accountName
                                                : i18n("Account")
@@ -977,17 +978,17 @@ Kirigami.ApplicationWindow {
     }
 
     function refreshVisibleGoogleWeekEvents() {
-        if (!root.imapServiceObj || !root.imapServiceObj.refreshGoogleWeekEvents)
+        if (!root.googleApiServiceObj || !root.googleApiServiceObj.refreshGoogleWeekEvents)
             return
         var ids = root.visibleCalendarSourceIds()
         var b = MailActions.calendarWeekBoundsIso()
-        root.imapServiceObj.refreshGoogleWeekEvents(ids, b.startIso, b.endIso)
+        root.googleApiServiceObj.refreshGoogleWeekEvents(ids, b.startIso, b.endIso)
     }
 
     function rebuildCalendarSourcesFromGoogle() {
-        if (!root.imapServiceObj || !root.imapServiceObj.googleCalendarList)
+        if (!root.googleApiServiceObj || !root.googleApiServiceObj.googleCalendarList)
             return
-        var incoming = root.imapServiceObj.googleCalendarList
+        var incoming = root.googleApiServiceObj.googleCalendarList
         var accs = root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
         var primaryEmail = (accs.length > 0 ? String(accs[0].email || "").toLowerCase() : "")
         root.calendarSources = MailActions.rebuildCalendarSourcesFromGoogle(root.calendarSources, incoming, primaryEmail, i18n("Calendar"))
@@ -1044,11 +1045,11 @@ Kirigami.ApplicationWindow {
         Qt.callLater(function() {
             root.paneAutoToggleEnabled = true
             root.bootstrapSyncIfNeeded()
-            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleCalendars) {
-                root.imapServiceObj.refreshGoogleCalendars()
+            if (root.googleApiServiceObj && root.googleApiServiceObj.refreshGoogleCalendars) {
+                root.googleApiServiceObj.refreshGoogleCalendars()
             }
-            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleContacts) {
-                root.imapServiceObj.refreshGoogleContacts()
+            if (root.googleApiServiceObj && root.googleApiServiceObj.refreshGoogleContacts) {
+                root.googleApiServiceObj.refreshGoogleContacts()
             }
         })
     }
@@ -1064,8 +1065,8 @@ Kirigami.ApplicationWindow {
                 root.accountConnected = true
             if (message && message.length > 0)
                 root.showInlineStatus(message, !ok)
-            if (ok && root.googleContacts.length === 0 && root.imapServiceObj)
-                root.imapServiceObj.refreshGoogleContacts()
+            if (ok && root.googleContacts.length === 0 && root.googleApiServiceObj)
+                root.googleApiServiceObj.refreshGoogleContacts()
             if (ok && root.hasFetchedFolders() && root.bootstrapFolderSyncRequested) {
                 root.bootstrapFolderSyncRequested = false
                 root.syncSelectedFolder(false)
@@ -1112,12 +1113,18 @@ Kirigami.ApplicationWindow {
             root.refreshInProgress = !!active
         }
 
+    }
+
+    Connections {
+        target: root.googleApiServiceObj
+        ignoreUnknownSignals: true
+
         function onGoogleCalendarListChanged() {
             root.rebuildCalendarSourcesFromGoogle()
         }
 
         function onGoogleWeekEventsChanged() {
-            root.calendarEvents = root.imapServiceObj ? root.imapServiceObj.googleWeekEvents : []
+            root.calendarEvents = root.googleApiServiceObj ? root.googleApiServiceObj.googleWeekEvents : []
         }
 
         function onCalendarInviteResponded() {
@@ -1125,7 +1132,11 @@ Kirigami.ApplicationWindow {
         }
 
         function onGoogleContactsChanged() {
-            root.googleContacts = root.imapServiceObj ? root.imapServiceObj.googleContacts : []
+            root.googleContacts = root.googleApiServiceObj ? root.googleApiServiceObj.googleContacts : []
+        }
+
+        function onStatusMessage(ok, message) {
+            root.showInlineStatus(message, !ok)
         }
     }
 
@@ -1191,11 +1202,11 @@ Kirigami.ApplicationWindow {
             if (hadFolders) {
                 root.syncSelectedFolder(true, true)
             }
-            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleCalendars) {
-                root.imapServiceObj.refreshGoogleCalendars()
+            if (root.googleApiServiceObj && root.googleApiServiceObj.refreshGoogleCalendars) {
+                root.googleApiServiceObj.refreshGoogleCalendars()
             }
-            if (root.imapServiceObj && root.imapServiceObj.refreshGoogleContacts) {
-                root.imapServiceObj.refreshGoogleContacts()
+            if (root.googleApiServiceObj && root.googleApiServiceObj.refreshGoogleContacts) {
+                root.googleApiServiceObj.refreshGoogleContacts()
             }
         }
     }
