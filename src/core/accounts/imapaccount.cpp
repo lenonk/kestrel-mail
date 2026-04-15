@@ -6,6 +6,8 @@
 #include "../auth/tokenvault.h"
 #include "../utils.h"
 
+#include <QTimer>
+
 using namespace Qt::Literals::StringLiterals;
 
 ImapAccount::ImapAccount(const QVariantMap &config, DataStore *store,
@@ -22,6 +24,26 @@ ImapAccount::ImapAccount(const QVariantMap &config, DataStore *store,
         });
     }
     if (m_imap) {
+        connect(m_imap, &ImapService::accountSyncActivity, this, [this](const QString &acct, bool active) {
+            if (acct.compare(m_email, Qt::CaseInsensitive) != 0) return;
+            if (active) {
+                m_syncCount++;
+                if (!m_syncing) {
+                    m_syncing = true;
+                    emit syncingChanged();
+                }
+            } else {
+                m_syncCount = qMax(0, m_syncCount - 1);
+                if (m_syncCount == 0) {
+                    QTimer::singleShot(500, this, [this]() {
+                        if (m_syncCount == 0 && m_syncing) {
+                            m_syncing = false;
+                            emit syncingChanged();
+                        }
+                    });
+                }
+            }
+        });
         connect(m_imap, &ImapService::syncFinished, this, [this](bool ok, const QString &msg) {
             if (m_syncing) {
                 m_syncing = false;

@@ -94,6 +94,7 @@ Window {
         setupStarted = true
         oauthFlowStarted = false
         flowType = "manual"
+        selectedProviderId = "generic"
         accountSetupObj.applyDiscoveryResult({
             "id": "generic", "displayName": "Generic IMAP/SMTP",
             "imapHost": "", "imapPort": 993,
@@ -193,6 +194,7 @@ Window {
             if (!accountSetupObj) return
             accountSetupObj.applyDiscoveryResult(result)
             root.flowType = (result.flowType || "oauth").toString()
+            root.selectedProviderId = (result.id || "generic").toString()
         }
     }
 

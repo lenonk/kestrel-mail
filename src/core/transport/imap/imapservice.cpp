@@ -1005,6 +1005,17 @@ ImapService::startIdleWatcher() {
     if (m_destroying || m_idleWatcher)
         return;
 
+    // Periodic sync timer — triggers a full sync every 2 minutes to catch
+    // changes that IDLE doesn't cover (non-IDLE accounts, flag changes, etc.).
+    if (!m_syncTimer) {
+        m_syncTimer = new QTimer(this);
+        m_syncTimer->setInterval(120'000);
+        connect(m_syncTimer, &QTimer::timeout, this, [this]() {
+            syncAll(false);
+        });
+        m_syncTimer->start();
+    }
+
     m_idleThread = new QThread(this);
     m_idleWatcher = new Imap::IdleWatcher();
     m_idleWatcher->moveToThread(m_idleThread);
@@ -3129,6 +3140,59 @@ ImapService::syncFolder(const QString &folderName, bool announce, const QString 
     );
 }
 
+QStringList
+ImapService::syncTargetsForAccount(const QString &email, const QString &host) const {
+    QStringList targets = { "INBOX"_L1 };
+    QSet<QString> seen  = { "inbox"_L1 };
+
+    if (!m_store) return targets;
+
+    // Read the account's folders from the DB.
+    const auto allFolders = m_store->folders();
+
+    QSet<QString> parentContainers;
+    for (const auto &fv : allFolders) {
+        const auto f = fv.toMap();
+        if (f.value("accountEmail"_L1).toString().compare(email, Qt::CaseInsensitive) != 0)
+            continue;
+        const auto name = f.value("name"_L1).toString().trimmed();
+        if (const auto slash = name.indexOf('/'); slash > 0)
+            parentContainers.insert(name.left(slash).toLower());
+    }
+
+    for (const auto &fv : allFolders) {
+        const auto f = fv.toMap();
+        if (f.value("accountEmail"_L1).toString().compare(email, Qt::CaseInsensitive) != 0)
+            continue;
+        const auto name = f.value("name"_L1).toString().trimmed();
+        const auto flags = f.value("flags"_L1).toString().toLower();
+        const auto canonName = stripGmailPrefix(name).toLower();
+
+        if (name.isEmpty()
+            || name.contains("/Categories/"_L1, Qt::CaseInsensitive)
+            || name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
+            || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0
+            || flags.contains("\\noselect"_L1)
+            || parentContainers.contains(name.toLower()))
+            continue;
+
+        if (!seen.contains(canonName)) {
+            seen.insert(canonName);
+            targets << name;
+        }
+    }
+
+    // Gmail fallback when folder list is empty.
+    const bool isGmailHost = host.contains("gmail.com"_L1, Qt::CaseInsensitive)
+                          || host.contains("google"_L1, Qt::CaseInsensitive);
+    if (targets.size() == 1 && isGmailHost) {
+        targets << "[Gmail]/All Mail"_L1 << "[Gmail]/Sent Mail"_L1
+                << "[Gmail]/Drafts"_L1 << "[Gmail]/Spam"_L1 << "[Gmail]/Trash"_L1;
+    }
+
+    return targets;
+}
+
 void
 ImapService::syncAll(bool announce) {
     if (m_destroying)
@@ -3158,14 +3222,12 @@ ImapService::syncAll(bool announce) {
         return;
     }
 
+    // Refresh folder lists first, then sync each account's folders.
+    refreshFolderList(false);
+
     runAsync(
-        [this, accounts, announce]() -> SyncResult {
+        [this, accounts]() -> SyncResult {
             SyncResult result;
-            qint32 inboxInserted = 0;
-            QVariantList pendingHeaders;
-            QElapsedTimer flushTimer;
-            flushTimer.start();
-            auto flush = makeSyncFlushLambda(pendingHeaders, flushTimer);
 
             QString googleAccessToken;
             for (const auto &[email, host, accessToken, port, acctAuthType] : resolveAccounts(accounts)) {
@@ -3174,112 +3236,24 @@ ImapService::syncAll(bool announce) {
                     googleAccessToken = accessToken;
 
                 if (m_cancelRequested.load()) {
-                    SyncResult r;
-                    r.message = "Refresh aborted.";
-                    return r;
+                    result.message = "Refresh aborted."_L1;
+                    return result;
                 }
 
-                // Fetch and store folder list
-                auto pooled = getPooledConnection(email, "sync-all-folders");
-                if (!pooled) continue;
-                QString folderStatus;
-                const auto folders = Imap::SyncEngine::fetchFolders(pooled, &folderStatus, true);
-                pooled.reset();
-                for (const auto &fv : folders) {
-                    if (m_store) m_store->upsertFolder(fv.toMap());
-                }
+                // Build sync targets from the account's folder list in the DB.
+                const QStringList targets = syncTargetsForAccount(email, host);
 
-                // Build ordered sync target list (INBOX first, then all non-category folders)
-                auto canonicalFolderKey = [](const QString &folderName) -> QString {
-                    return stripGmailPrefix(folderName.trimmed()).toLower();
-                };
-
-                QStringList targets = { "INBOX"_L1 };
-                QSet<QString> seen  = { "inbox"_L1 };
-
-                QSet<QString> parentContainers;
-                for (const auto &fv : folders) {
-                    const auto name = fv.toMap().value("name"_L1).toString().trimmed();
-                    const qint32 slash = static_cast<qint32>(name.indexOf('/'));
-                    if (slash > 0)
-                        parentContainers.insert(name.left(slash).toLower());
-                }
-
-                for (const auto &fv : folders) {
-                    const auto row = fv.toMap();
-                    const auto name = row.value("name"_L1).toString().trimmed();
-                    const auto flags = row.value("flags"_L1).toString().toLower();
-                    const auto lowerName = name.toLower();
-                    const auto canonName = canonicalFolderKey(name);
-
-                    const bool isCategory = name.contains("/Categories/"_L1, Qt::CaseInsensitive);
-                    const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
-                                              || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0;
-                    const bool isNoSelect = flags.contains("\\noselect"_L1);
-                    const bool isParentContainer = parentContainers.contains(lowerName);
-
-                    if (name.isEmpty() || isCategory || isContainerRoot || isNoSelect || isParentContainer)
-                        continue;
-
-                    if (!seen.contains(canonName)) {
-                        seen.insert(canonName); targets << name;
-                    }
-                }
-
-                // Gmail fallback: if the folder list was empty, use known Gmail system folders.
-                // Only for Gmail accounts — non-Gmail servers don't have [Gmail]/ folders.
-                const bool isGmailHost = host.contains("gmail.com"_L1, Qt::CaseInsensitive)
-                                      || host.contains("google"_L1, Qt::CaseInsensitive);
-                if (targets.size() == 1 && isGmailHost) {
-                    targets << "[Gmail]/All Mail"_L1
-                            << "[Gmail]/Sent Mail"_L1
-                            << "[Gmail]/Drafts"_L1
-                            << "[Gmail]/Spam"_L1
-                            << "[Gmail]/Trash"_L1;
-                }
-
-                // Sync each folder through the same canonical folder-sync path.
-                qint32 seqNum = 0;
                 for (const auto &folderTarget : targets) {
-                    if (m_cancelRequested)
-                        break;
-
-                    const auto folderLabel = stripGmailPrefix(folderTarget);
-
-                    const auto folderHeaders = syncFolderInternal(AccountInfo{email, host, accessToken, port, acctAuthType},
-                        folderTarget, SyncFolderOptions{announce}, seqNum, inboxInserted,
-                        pendingHeaders, result.headers, flushTimer, flush);
-
-                    QSet<QString> uniqueUids;
-                    for (const auto &hv : folderHeaders) {
-                        const auto u = hv.toMap().value("uid"_L1).toString().trimmed();
-                        if (!u.isEmpty())
-                            uniqueUids.insert(u);
-                    }
-                    const qint32 syncedCount = static_cast<qint32>(uniqueUids.size());
-                    if (syncedCount <= 0)
-                        continue;
-
-                    const auto toast = QStringLiteral("%1 synced %2 messages.")
-                                           .arg(folderLabel).arg(syncedCount);
-                    QMetaObject::invokeMethod(this, [this, announce, toast]() {
-                        if (announce)
-                            emit syncFinished(true, toast);
-                        else
-                            emit realtimeStatus(true, toast);
-                    }, Qt::QueuedConnection);
+                    if (m_cancelRequested.load()) break;
+                    syncFolder(folderTarget, false, email);
                 }
             }
 
-            flush();
-
-            // Re-fetch Google People contact photos that are stale or missing.
-            // Runs after the main sync so the access token is known and valid.
+            // Re-fetch Google People contact photos.
             if (!m_cancelRequested.load() && !googleAccessToken.isEmpty()) {
                 QStringList staleEmails;
                 if (m_store)
                     staleEmails = m_store->staleGooglePeopleEmails();
-
                 for (const QString &sEmail : staleEmails) {
                     if (m_cancelRequested.load()) break;
                     const QString url = resolveGooglePeopleAvatarUrl(sEmail, googleAccessToken);
@@ -3293,9 +3267,7 @@ ImapService::syncAll(bool announce) {
             }
 
             result.ok      = true;
-            result.inserted = inboxInserted;
-            result.message  = QStringLiteral("All folders synced: %1 inbox messages.").arg(inboxInserted);
-
+            result.message  = QStringLiteral("All folders synced.");
             return result;
         },
         [this, announce](const SyncResult &r) {

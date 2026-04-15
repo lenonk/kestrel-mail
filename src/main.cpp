@@ -227,14 +227,20 @@ int main(int argc, char *argv[])
 
             n->sendEvent();
         });
-    // Enable notifications only after the first successful sync completes,
-    // so neither cold-start bulk imports nor warm-start re-syncs spam the desktop.
+    // Enable notifications only after the initial full sync completes.
+    // Individual folder syncs during the initial bulk import should not
+    // trigger desktop notifications — that's too spammy.
     {
-        auto enableNotify = [&dataStore](bool ok, const QString &) {
-            if (ok && !dataStore.desktopNotifyEnabled())
-                dataStore.setDesktopNotifyEnabled(true);
-        };
-        QObject::connect(&imapService, &ImapService::syncFinished, &dataStore, enableNotify);
+        auto *initialSyncDone = new bool(false);
+        QObject::connect(&imapService, &ImapService::syncFinished, &dataStore,
+            [&dataStore, initialSyncDone](bool ok, const QString &msg) {
+                if (*initialSyncDone) return;
+                // syncAll's final message contains "All folders synced" — that's our cue.
+                if (ok && msg.contains("All folders synced"_L1)) {
+                    *initialSyncDone = true;
+                    dataStore.setDesktopNotifyEnabled(true);
+                }
+            });
     }
 
     CalendarLayoutHelper calendarLayoutHelper(&engine);

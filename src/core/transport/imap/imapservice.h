@@ -85,6 +85,7 @@ public:
 signals:
     void syncFinished(bool ok, const QString &message);
     void syncActivityChanged(bool active);
+    void accountSyncActivity(const QString &accountEmail, bool active);
     void hydrateStatus(bool ok, const QString &message);
     void realtimeStatus(bool ok, const QString &message);
     void accountThrottled(const QString &accountEmail, const QString &message);
@@ -160,6 +161,7 @@ private:
         bool announce = true;
     };
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
+    QStringList syncTargetsForAccount(const QString &email, const QString &host) const;
 
     void startIdleWatcher();
     void stopIdleWatcher(bool waitForStop = true) const;

@@ -637,6 +637,13 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
             && inferredCategoryFolder.compare(messageFolder, Qt::CaseInsensitive) != 0) {
         QVariantMap categoryRow = h;
         categoryRow.insert("folder"_L1, inferredCategoryFolder);
+        // Ensure the category label is in rawGmailLabels so it gets persisted
+        // to message_labels — the category view query uses labels, not folder edges.
+        auto labels = categoryRow.value("rawGmailLabels"_L1).toString();
+        if (!labels.contains(inferredCategoryFolder, Qt::CaseInsensitive)) {
+            labels += " \""_L1 + inferredCategoryFolder + "\""_L1;
+            categoryRow.insert("rawGmailLabels"_L1, labels);
+        }
         commitRow(categoryRow, inferredCategoryFolder);
     }
 }

@@ -59,6 +59,7 @@ private:
     TokenVault *m_vault;
     QString m_email;
     bool m_syncing = false;
+    int m_syncCount = 0;
     bool m_connected = true;
     bool m_throttled = false;
     bool m_needsReauth = false;
