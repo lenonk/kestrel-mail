@@ -5,6 +5,7 @@
 #include <memory>
 #include <QFuture>
 #include <QHash>
+#include <QReadWriteLock>
 #include <QSet>
 #include <QVariantList>
 
@@ -134,6 +135,7 @@ private:
     Imap::AuthMethod m_authMethod = Imap::AuthMethod::XOAuth2;
 
     std::unique_ptr<Imap::ConnectionPool> m_pool;
+    mutable QReadWriteLock                m_accountRegistryLock;
     QHash<QString, Imap::ConnectionPool*> m_accountPools;  // per-account pools (global mode)
     QHash<QString, QVariantMap>           m_accountConfigs; // per-account configs (global mode)
 
@@ -165,6 +167,7 @@ private:
     QMutex                    m_bgHydrateMutex;
 
     QHash<QString, bool>      m_accountThrottleState;
+    QMutex                    m_throttleStateMutex;
     bool                       m_offlineMode = false;
     qint32                     m_expectedPoolSize = 0;
 

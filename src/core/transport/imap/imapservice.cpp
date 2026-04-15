@@ -124,6 +124,7 @@ ImapService::ImapService(DataStore *store, TokenVault *vault, QObject *parent)
             if (m_destroying.load()) return;
 
             const QString key = Kestrel::normalizeEmail(accountEmail);
+            QMutexLocker tLock(&m_throttleStateMutex);
             const bool prev = m_accountThrottleState.value(key, false);
             m_accountThrottleState.insert(key, throttled);
 
@@ -164,6 +165,7 @@ ImapService::expectedPoolConnections() const {
 qint32
 ImapService::poolConnectionsReady() const {
     qint32 total = m_pool ? m_pool->readyConnections() : 0;
+    QReadLocker lock(&m_accountRegistryLock);
     for (auto *pool : m_accountPools)
         total += pool->readyConnections();
     return total;
@@ -173,6 +175,7 @@ void
 ImapService::registerAccount(const QString &email, const QVariantMap &config,
                              Imap::ConnectionPool *pool) {
     const auto key = email.trimmed().toLower();
+    QWriteLocker lock(&m_accountRegistryLock);
     m_accountConfigs.insert(key, config);
     if (pool) {
         m_accountPools.insert(key, pool);
@@ -183,6 +186,7 @@ ImapService::registerAccount(const QString &email, const QVariantMap &config,
 void
 ImapService::unregisterAccount(const QString &email) {
     const auto key = email.trimmed().toLower();
+    QWriteLocker lock(&m_accountRegistryLock);
     m_accountConfigs.remove(key);
     if (auto *pool = m_accountPools.value(key)) {
         m_expectedPoolSize -= pool->expectedConnections();
@@ -195,6 +199,7 @@ ImapService::poolForEmail(const QString &email) const {
     if (isPerAccountMode())
         return m_pool.get();
     const auto key = email.trimmed().toLower();
+    QReadLocker lock(&m_accountRegistryLock);
     if (auto *pool = m_accountPools.value(key))
         return pool;
     return m_pool.get();
@@ -945,7 +950,11 @@ ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, co
     }
 
     // Throttle gate — rate-limit the skip log to once per minute per account.
-    if (m_accountThrottleState.value(Kestrel::normalizeEmail(email), false)) {
+    const bool isThrottled = [this, &email]() {
+        QMutexLocker tLock(&m_throttleStateMutex);
+        return m_accountThrottleState.value(Kestrel::normalizeEmail(email), false);
+    }();
+    if (isThrottled) {
         static QHash<QString, qint64> s_lastThrottleSkipLogMs;
         const auto nowMs = QDateTime::currentMSecsSinceEpoch();
         const auto k = Kestrel::normalizeEmail(email);
@@ -1144,6 +1153,7 @@ QVariantList
 ImapService::accountConfigList() const {
     if (isPerAccountMode())
         return { m_accountConfig };
+    QReadLocker lock(&m_accountRegistryLock);
     QVariantList result;
     result.reserve(m_accountConfigs.size());
     for (const auto &config : m_accountConfigs)

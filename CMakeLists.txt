@@ -92,6 +92,7 @@ qt_add_executable(kestrel-mail
     src/core/accounts/accountsetupcontroller.cpp
     src/core/accounts/iaccount.cpp
     src/core/accounts/accountmanager.cpp
+    src/core/accounts/baseaccount.cpp
     src/core/accounts/gmailaccount.cpp
     src/core/accounts/imapaccount.cpp
     src/core/auth/filetokenvault.cpp
