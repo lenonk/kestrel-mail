@@ -52,10 +52,9 @@ Rectangle {
                 text: i18n("Refresh")
                 spinning: toolbar.appRoot.refreshInProgress
                 onTriggered: {
-                    if (!toolbar.appRoot.imapServiceObj) return
                     toolbar.appRoot.refreshInProgress = true
                     toolbar.appRoot.accountRefreshing = true
-                    toolbar.appRoot.imapServiceObj.syncAll()
+                    toolbar.appRoot.syncAllAccounts()
                 }
             }
         }

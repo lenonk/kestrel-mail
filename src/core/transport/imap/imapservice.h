@@ -16,7 +16,6 @@ class Connection;
 }
 #include "connection/connectionpool.h"
 
-class AccountRepository;
 class DataStore;
 class TokenVault;
 class QFutureWatcherBase;
@@ -35,8 +34,8 @@ public:
     ImapService(const QVariantMap &accountConfig, DataStore *store, TokenVault *vault,
                 QObject *parent = nullptr);
 
-    // Legacy global constructor — still used during transition.
-    explicit ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent = nullptr);
+    // Global facade constructor — QML-facing, routes to per-account pools.
+    explicit ImapService(DataStore *store, TokenVault *vault, QObject *parent = nullptr);
     ~ImapService() override;
 
     // syncAll removed — accounts own their own syncAll via IAccount.
@@ -64,9 +63,9 @@ public:
     void wireIdleWatcher(Imap::IdleWatcher *watcher, const QString &accountEmail);
     void wireBackgroundWorker(Imap::BackgroundWorker *worker, const QString &accountEmail);
 
-    // Per-account pool registry (global mode only).
-    void registerAccountPool(const QString &email, Imap::ConnectionPool *pool);
-    void unregisterAccountPool(const QString &email);
+    // Per-account registry (global mode only).
+    void registerAccount(const QString &email, const QVariantMap &config, Imap::ConnectionPool *pool);
+    void unregisterAccount(const QString &email);
 
     qint32 expectedPoolConnections() const;
     qint32 poolConnectionsReady() const;
@@ -124,7 +123,6 @@ private:
         int inserted = 0;
     };
 
-    AccountRepository *m_accounts   = nullptr;
     DataStore         *m_store      = nullptr;
     TokenVault        *m_vault      = nullptr;
 
@@ -136,7 +134,8 @@ private:
     Imap::AuthMethod m_authMethod = Imap::AuthMethod::XOAuth2;
 
     std::unique_ptr<Imap::ConnectionPool> m_pool;
-    QHash<QString, Imap::ConnectionPool*> m_accountPools; // per-account pools (global mode)
+    QHash<QString, Imap::ConnectionPool*> m_accountPools;  // per-account pools (global mode)
+    QHash<QString, QVariantMap>           m_accountConfigs; // per-account configs (global mode)
 
     std::atomic_int   m_syncInProgress { 0 };
     std::atomic_bool  m_cancelRequested { false };

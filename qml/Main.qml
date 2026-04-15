@@ -1044,9 +1044,6 @@ Kirigami.ApplicationWindow {
         Qt.callLater(function() {
             root.paneAutoToggleEnabled = true
             root.bootstrapSyncIfNeeded()
-            if (root.imapServiceObj && root.imapServiceObj.initialize) {
-                root.imapServiceObj.initialize()
-            }
             if (root.imapServiceObj && root.imapServiceObj.refreshGoogleCalendars) {
                 root.imapServiceObj.refreshGoogleCalendars()
             }
@@ -1179,9 +1176,6 @@ Kirigami.ApplicationWindow {
         target: root.accountRepositoryObj
         ignoreUnknownSignals: true
         function onAccountsChanged() {
-            if (root.imapServiceObj && root.imapServiceObj.initialize)
-                root.imapServiceObj.initialize()
-
             // Always refresh folder list — a new account needs its folders fetched
             // even if other accounts already have theirs.
             root.refreshAllFolderLists()
@@ -1215,10 +1209,7 @@ Kirigami.ApplicationWindow {
             root.accountNeedsReauth = false
             root.accountNeedsReauthEmail = ""
             root.showInlineStatus(i18n("Re-authentication successful. Reconnecting..."), false)
-            if (root.imapServiceObj) {
-                root.imapServiceObj.initialize()
-                root.syncAllAccounts()
-            }
+            root.syncAllAccounts()
         }
     }
 

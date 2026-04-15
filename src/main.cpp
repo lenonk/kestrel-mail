@@ -154,7 +154,7 @@ int main(int argc, char *argv[])
     MessageListModel messageListModel(&engine);
     messageListModel.setDataStore(&dataStore);
     HtmlProcessor htmlProcessor(&engine);
-    ImapService imapService(&accountRepository, &dataStore, tokenVault.get(), &engine);
+    ImapService imapService(&dataStore, tokenVault.get(), &engine);
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &imapService, &ImapService::shutdown);
     // Pool initialization is handled per-account by AccountManager::createAccount().
     SmtpService smtpService(&accountRepository, tokenVault.get(), &engine);

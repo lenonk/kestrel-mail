@@ -1,6 +1,5 @@
 #include "imapservice.h"
 
-#include "../../accounts/accountrepository.h"
 #include "../../auth/oauthservice.h"
 #include "../../auth/tokenvault.h"
 #include "../../store/datastore.h"
@@ -110,9 +109,8 @@ ImapService::ImapService(const QVariantMap &accountConfig, DataStore *store, Tok
     m_expectedPoolSize = m_pool->expectedConnections();
 }
 
-ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
+ImapService::ImapService(DataStore *store, TokenVault *vault, QObject *parent)
     : QObject(parent)
-    , m_accounts(accounts)
     , m_store(store)
     , m_vault(vault)
     , m_offlineMode(offlineModeEnabledFromEnv()) {
@@ -151,35 +149,10 @@ ImapService::initializeConnectionPool() {
     if (isPerAccountMode())
         return;
 
+    // Global mode: create an empty fallback pool. Per-account pools are
+    // registered by AccountManager and handle all real connections.
     if (!m_pool)
         m_pool = std::make_unique<Imap::ConnectionPool>();
-
-    m_pool->setTokenRefresher([this](const QString &email) -> QString {
-        const auto configs = accountConfigList();
-        auto it = std::ranges::find_if(configs, [&](const QVariant &a) {
-            return a.toMap().value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0;
-        });
-        if (it == configs.end()) return {};
-        const auto acc = it->toMap();
-        if (acc.value("authType"_L1).toString() == "password"_L1)
-            return m_vault ? m_vault->loadPassword(email) : QString{};
-        return refreshAccessToken(acc, email);
-    });
-
-    if (m_offlineMode) {
-        m_expectedPoolSize = 0;
-        return;
-    }
-
-    if (!m_accounts) return;
-
-    const auto accounts = resolveAccounts(accountConfigList());
-    for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
-        const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
-        m_pool->addAccount(email, host, port, method, accessToken);
-    }
-
-    m_expectedPoolSize = m_pool->expectedConnections();
 }
 
 qint32
@@ -196,15 +169,20 @@ ImapService::poolConnectionsReady() const {
 }
 
 void
-ImapService::registerAccountPool(const QString &email, Imap::ConnectionPool *pool) {
-    if (!pool) return;
-    m_accountPools.insert(email.trimmed().toLower(), pool);
-    m_expectedPoolSize += pool->expectedConnections();
+ImapService::registerAccount(const QString &email, const QVariantMap &config,
+                             Imap::ConnectionPool *pool) {
+    const auto key = email.trimmed().toLower();
+    m_accountConfigs.insert(key, config);
+    if (pool) {
+        m_accountPools.insert(key, pool);
+        m_expectedPoolSize += pool->expectedConnections();
+    }
 }
 
 void
-ImapService::unregisterAccountPool(const QString &email) {
+ImapService::unregisterAccount(const QString &email) {
     const auto key = email.trimmed().toLower();
+    m_accountConfigs.remove(key);
     if (auto *pool = m_accountPools.value(key)) {
         m_expectedPoolSize -= pool->expectedConnections();
         m_accountPools.remove(key);
@@ -816,9 +794,10 @@ ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
         // suppressing the raw error toast in favour of the reauth prompt.
         if (!ok && (message.contains("no OAuth account"_L1, Qt::CaseInsensitive)
                  || message.contains("account settings incomplete"_L1, Qt::CaseInsensitive))) {
+            const auto configs = accountConfigList();
             const auto email = isPerAccountMode() ? m_email
-                : (m_accounts && !m_accounts->accounts().isEmpty()
-                    ? m_accounts->accounts().first().toMap().value("email"_L1).toString()
+                : (!configs.isEmpty()
+                    ? configs.first().toMap().value("email"_L1).toString()
                     : QString{});
             if (!email.isEmpty()) {
                 emit accountNeedsReauth(email);
@@ -1164,7 +1143,11 @@ QVariantList
 ImapService::accountConfigList() const {
     if (isPerAccountMode())
         return { m_accountConfig };
-    return m_accounts ? m_accounts->accounts() : QVariantList{};
+    QVariantList result;
+    result.reserve(m_accountConfigs.size());
+    for (const auto &config : m_accountConfigs)
+        result.push_back(config);
+    return result;
 }
 
 QList<ImapService::AccountInfo>

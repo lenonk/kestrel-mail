@@ -54,7 +54,7 @@ AccountManager::rebuildFromRepository() {
     for (auto it = m_accounts.begin(); it != m_accounts.end(); ) {
         if (!configEmails.contains((*it)->email().toLower())) {
             if (m_imap)
-                m_imap->unregisterAccountPool((*it)->email());
+                m_imap->unregisterAccount((*it)->email());
             (*it)->shutdown();
             (*it)->deleteLater();
             it = m_accounts.erase(it);
@@ -101,11 +101,11 @@ AccountManager::createAccount(const QVariantMap &config) {
 
     accountImap->setParent(account);
 
-    // Register the per-account pool with the global ImapService so QML
-    // operations (hydrate, move, mark-read, etc.) route to the right pool.
+    // Register with the global ImapService so QML operations
+    // (hydrate, move, mark-read, etc.) route to the right pool.
     if (m_imap) {
         const auto email = config.value("email"_L1).toString();
-        m_imap->registerAccountPool(email, accountImap->pool());
+        m_imap->registerAccount(email, config, accountImap->pool());
     }
 
     return account;
