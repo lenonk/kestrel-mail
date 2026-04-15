@@ -110,6 +110,7 @@ qt_add_executable(kestrel-mail
     src/core/transport/imap/parser/responseparser.cpp
     src/core/transport/imap/connection/imapio.cpp
     src/core/transport/imap/connection/imapconnection.cpp
+    src/core/transport/imap/connection/connectionpool.cpp
     src/core/transport/imap/sync/syncutils.cpp
     src/core/transport/imap/sync/syncengine.cpp
     src/core/transport/imap/sync/idlewatcher.cpp
