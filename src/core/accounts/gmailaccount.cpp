@@ -141,6 +141,7 @@ GmailAccount::syncAll() {
     const auto targets = syncTargets();
     for (const auto &folder : targets)
         syncFolder(folder);
+    m_imap->refreshGooglePeopleAvatars(m_email);
 }
 
 void

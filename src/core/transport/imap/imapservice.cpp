@@ -501,10 +501,7 @@ ImapService::shutdown() {
         g_poolTokenRefresher = nullptr;
     }
 
-    // Graceful app-exit path: stop worker threads and wait so QThread objects are
-    // not destroyed while still running.
-    stopIdleWatcher(true);
-    stopBackgroundWorker(true);
+    // Account-owned workers are shut down by AccountManager.
 
     // Allow in-flight async watchers to settle before object teardown.
     waitForActiveWatchers(2000);
@@ -965,10 +962,10 @@ ImapService::drainPendingSync() {
         pendingAnnounce = m_pendingAnnounce;  m_pendingAnnounce  = true;
     }
 
-    if (pendingFull)
-        QMetaObject::invokeMethod(this, [this, pendingAnnounce]() { syncAll(pendingAnnounce); },
-                                  Qt::QueuedConnection);
-    else if (!pending.isEmpty())
+    if (pendingFull) {
+        // Full sync is now owned by account objects — nothing to drain here.
+        Q_UNUSED(pendingAnnounce)
+    } else if (!pending.isEmpty())
         QMetaObject::invokeMethod(this, [this, pending, pendingAnnounce]() { syncFolder(pending, pendingAnnounce); },
                                   Qt::QueuedConnection);
 }
@@ -1000,210 +997,9 @@ ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const
     watcher->setFuture(QtConcurrent::run(std::move(work)));
 }
 
-void
-ImapService::startIdleWatcher() {
-    if (m_destroying || m_idleWatcher)
-        return;
-
-    // Periodic sync timer — triggers a full sync every 2 minutes to catch
-    // changes that IDLE doesn't cover (non-IDLE accounts, flag changes, etc.).
-    if (!m_syncTimer) {
-        m_syncTimer = new QTimer(this);
-        m_syncTimer->setInterval(120'000);
-        connect(m_syncTimer, &QTimer::timeout, this, [this]() {
-            syncAll(false);
-        });
-        m_syncTimer->start();
-    }
-
-    m_idleThread = new QThread(this);
-    m_idleWatcher = new Imap::IdleWatcher();
-    m_idleWatcher->moveToThread(m_idleThread);
-
-    connect(m_idleThread, &QThread::started, m_idleWatcher, &Imap::IdleWatcher::start);
-
-    connect(m_idleWatcher, &Imap::IdleWatcher::requestAccounts,
-            this, [this](QVariantList *out) {
-                if (out) *out = workerGetAccounts();
-            }, Qt::BlockingQueuedConnection);
-
-    connect(m_idleWatcher, &Imap::IdleWatcher::requestRefreshAccessToken,
-            this, [this](const QVariantMap &account, const QString &email, QString *out) {
-                if (!out) return;
-                if (account.value("authType"_L1).toString() == "password"_L1)
-                    *out = m_vault ? m_vault->loadPassword(email) : QString{};
-                else
-                    *out = workerRefreshAccessToken(account, email);
-            }, Qt::BlockingQueuedConnection);
-
-    connect(m_idleWatcher, &Imap::IdleWatcher::requestFolderUids,
-            this, [this](const QString &email, const QString &folder, QStringList *out) {
-                if (out && m_store) *out = m_store->folderUids(email, folder);
-            }, Qt::DirectConnection);
-
-    connect(m_idleWatcher, &Imap::IdleWatcher::pruneFolderToUidsRequested,
-            this, [this](const QString &email, const QString &folder, const QStringList &uids) {
-                if (m_store) m_store->pruneFolderToUids(email, folder, uids);
-            }, Qt::DirectConnection);
-
-    connect(m_idleWatcher, &Imap::IdleWatcher::removeUidsRequested,
-            this, [this](const QString &email, const QStringList &uids) {
-                if (m_store) m_store->removeAccountUidsEverywhere(email, uids);
-            }, Qt::DirectConnection);
-
-    connect(m_idleWatcher, &Imap::IdleWatcher::inboxChanged,
-            this, [this]() { idleOnInboxChanged(); }, Qt::QueuedConnection);
-
-    connect(m_idleWatcher, &Imap::IdleWatcher::realtimeStatus,
-            this, [this](const bool ok, const QString &message) {
-                workerEmitRealtimeStatus(ok, message);
-            }, Qt::QueuedConnection);
-
-    connect(m_idleThread, &QThread::finished, m_idleWatcher, &QObject::deleteLater);
-    connect(m_idleThread, &QThread::finished, this, [this]() {
-        m_idleWatcher = nullptr;
-        if (m_idleThread) {
-            m_idleThread->deleteLater();
-            m_idleThread = nullptr;
-        }
-    });
-
-    m_idleThread->start();
-}
-
-void
-ImapService::stopIdleWatcher(const bool waitForStop) const {
-    if (m_syncTimer)
-        m_syncTimer->stop();
-
-    if (!m_idleWatcher || !m_idleThread)
-        return;
-
-    // Call stop() directly — it only stores to an atomic_bool so it is safe
-    // to call from any thread.  A QueuedConnection would never be delivered
-    // because start() runs a tight blocking loop that never yields to the
-    // thread's event loop.
-    m_idleWatcher->stop();
-    m_idleThread->quit();
-
-    if (waitForStop) {
-        // Pump the main-thread event loop in short bursts while waiting.
-        // This prevents a deadlock if the idle thread is currently blocked on a
-        // BlockingQueuedConnection signal (requestAccounts / requestRefreshAccessToken)
-        // waiting for the main thread to respond.
-        while (!m_idleThread->wait(100))
-            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
-    }
-}
-
-void
-ImapService::startBackgroundWorker() {
-    if (m_destroying || m_backgroundWorker)
-        return;
-
-    m_backgroundThread = new QThread(this);
-    m_backgroundWorker = new Imap::BackgroundWorker();
-    m_backgroundWorker->setIntervalSeconds(120);
-    m_backgroundWorker->moveToThread(m_backgroundThread);
-
-    connect(m_backgroundThread, &QThread::started,
-            m_backgroundWorker, &Imap::BackgroundWorker::start);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::requestAccounts,
-            this, [this](QVariantList *out) {
-                if (out) *out = workerGetAccounts();
-            }, Qt::BlockingQueuedConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::requestRefreshAccessToken,
-            this, [this](const QVariantMap &account, const QString &email, QString *out) {
-                if (!out) return;
-                if (account.value("authType"_L1).toString() == "password"_L1)
-                    *out = m_vault ? m_vault->loadPassword(email) : QString{};
-                else
-                    *out = workerRefreshAccessToken(account, email);
-            }, Qt::BlockingQueuedConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::requestAccountThrottled,
-            this, [this](const QString &accountEmail, bool *out) {
-                if (!out) return;
-                *out = m_accountThrottleState.value(Kestrel::normalizeEmail(accountEmail), false);
-            }, Qt::BlockingQueuedConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::upsertFoldersRequested,
-            this, [this](const QVariantList &folders) {
-                if (!m_store) return;
-                for (const QVariant &fv : folders)
-                    m_store->upsertFolder(fv.toMap());
-            }, Qt::DirectConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::loadFolderStatusSnapshotRequested,
-            this, [this](const QString &accountEmail, const QString &folder,
-                         qint64 *uidNext, qint64 *highestModSeq, qint64 *messages, bool *found) {
-                if (!m_store) { if (found) *found = false; return; }
-                const auto row = m_store->folderSyncStatus(accountEmail, folder);
-                const bool exists = !row.isEmpty();
-                if (found) *found = exists;
-                if (!exists) return;
-                if (uidNext) *uidNext = row.value("uidNext"_L1).toLongLong();
-                if (highestModSeq) *highestModSeq = row.value("highestModSeq"_L1).toLongLong();
-                if (messages) *messages = row.value("messages"_L1).toLongLong();
-            }, Qt::DirectConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::saveFolderStatusSnapshotRequested,
-            this, [this](const QString &accountEmail, const QString &folder,
-                         const qint64 uidNext, const qint64 highestModSeq, const qint64 messages) {
-                if (m_store)
-                    m_store->upsertFolderSyncStatus(accountEmail, folder, uidNext, highestModSeq, messages);
-            }, Qt::DirectConnection);
 
 
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::syncHeadersAndFlagsRequested,
-            this, [this](const QVariantMap &account, const QString &email, const QString &folder,
-                         const QString &accessToken) {
-                backgroundSyncHeadersAndFlags(account, email, folder, accessToken);
-            }, Qt::QueuedConnection);
 
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::idleLiveUpdateRequested,
-            this, [this](const QVariantMap &account, const QString &email) {
-                backgroundOnIdleLiveUpdate(account, email);
-            }, Qt::QueuedConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::loopError,
-            this, [this](const QString &message) {
-                workerEmitRealtimeStatus(false, message);
-            }, Qt::QueuedConnection);
-
-    connect(m_backgroundWorker, &Imap::BackgroundWorker::realtimeStatus,
-            this, [this](const bool ok, const QString &message) {
-                workerEmitRealtimeStatus(ok, message);
-            }, Qt::QueuedConnection);
-
-    connect(m_backgroundThread, &QThread::finished, m_backgroundWorker, &QObject::deleteLater);
-    connect(m_backgroundThread, &QThread::finished, this, [this]() {
-        m_backgroundWorker = nullptr;
-        if (m_backgroundThread) {
-            m_backgroundThread->deleteLater();
-            m_backgroundThread = nullptr;
-        }
-    });
-
-    m_backgroundThread->start();
-}
-
-void
-ImapService::stopBackgroundWorker(const bool waitForStop) const {
-    if (!m_backgroundWorker || !m_backgroundThread)
-        return;
-
-    // Same reasoning as stopIdleWatcher: call stop() directly on the atomic.
-    m_backgroundWorker->stop();
-    m_backgroundThread->quit();
-
-    if (waitForStop) {
-        while (!m_backgroundThread->wait(100))
-            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
-    }
-}
 
 QVariantList
 ImapService::workerGetAccounts() const {
@@ -1215,15 +1011,6 @@ ImapService::workerRefreshAccessToken(const QVariantMap &account, const QString 
     return refreshAccessToken(account, email);
 }
 
-void
-ImapService::idleOnInboxChanged() {
-    auto fn = [this]() { syncFolder("INBOX"_L1, false); };
-
-    if (QThread::currentThread() == thread())
-        fn();
-    else
-        QMetaObject::invokeMethod(this, fn, Qt::QueuedConnection);
-}
 
 void
 ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
@@ -1357,13 +1144,6 @@ ImapService::wireBackgroundWorker(Imap::BackgroundWorker *worker, const QString 
 
 
 
-void
-ImapService::backgroundSyncHeadersAndFlags(const QVariantMap &, const QString &email, const QString &folder,
-                                           const QString &) {
-    QMetaObject::invokeMethod(this, [this, folder, email]() {
-        syncFolder(folder, false, email);
-    }, Qt::QueuedConnection);
-}
 
 void
 ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
@@ -1519,11 +1299,6 @@ ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &emai
     auto fn = [this, email]() {
         if (m_destroying)
             return;
-
-        if (!m_idleWatcher || !m_idleWatcher->isRunning()) {
-            startIdleWatcher();
-            emit realtimeStatus(true, "Idle/live watcher (re)started."_L1);
-        }
 
         // Keep background hydration progressing even when folder STATUS values are stable
         // and no header sync is dispatched in this loop. Inbox-only policy is enforced
@@ -3300,85 +3075,33 @@ ImapService::syncTargetsForAccount(const QString &email, const QString &host) co
 }
 
 void
-ImapService::syncAll(bool announce) {
-    if (m_destroying)
-        return;
+ImapService::refreshGooglePeopleAvatars(const QString &accountEmail) {
+    if (m_destroying || !m_accounts || !m_store) return;
 
-    // Clear auth suspension — if we're syncing, the user may have re-authenticated.
-    if (m_idleWatcher)
-        m_idleWatcher->authSuspended.store(false);
+    const auto accounts = m_accounts->accounts();
+    runBackgroundTask([this, accounts, accountEmail]() {
+        const auto resolved = resolveAccounts(accounts);
+        auto it = std::ranges::find_if(resolved, [&](const AccountInfo &info) {
+            return info.email.compare(accountEmail, Qt::CaseInsensitive) == 0;
+        });
+        if (it == resolved.end()) return;
+        const QString accessToken = it->accessToken;
+        if (accessToken.isEmpty()) return;
 
-    if (m_offlineMode) {
-        if (announce)
-            emit syncFinished(true, "Offline mode: skipped sync all."_L1);
-        return;
-    }
+        QStringList staleEmails;
+        if (m_store)
+            staleEmails = m_store->staleGooglePeopleEmails();
 
-    if (!m_accounts || !m_store) {
-        if (announce)
-            emit syncFinished(false, "Sync dependencies not initialized.");
-
-        return;
-    }
-
-    const QVariantList accounts = m_accounts->accounts();
-    if (accounts.isEmpty()) {
-        if (announce)
-            emit syncFinished(false, "No accounts configured yet.");
-        return;
-    }
-
-    // Refresh folder lists first, then sync each account's folders.
-    refreshFolderList(false);
-
-    runAsync(
-        [this, accounts]() -> SyncResult {
-            SyncResult result;
-
-            QString googleAccessToken;
-            for (const auto &[email, host, accessToken, port, acctAuthType] : resolveAccounts(accounts)) {
-                if (googleAccessToken.isEmpty()
-                        && (host.contains("gmail.com"_L1) || host.contains("google"_L1)))
-                    googleAccessToken = accessToken;
-
-                if (m_cancelRequested.load()) {
-                    result.message = "Refresh aborted."_L1;
-                    return result;
-                }
-
-                // Build sync targets from the account's folder list in the DB.
-                const QStringList targets = syncTargetsForAccount(email, host);
-
-                for (const auto &folderTarget : targets) {
-                    if (m_cancelRequested.load()) break;
-                    syncFolder(folderTarget, false, email);
-                }
-            }
-
-            // Re-fetch Google People contact photos.
-            if (!m_cancelRequested.load() && !googleAccessToken.isEmpty()) {
-                QStringList staleEmails;
-                if (m_store)
-                    staleEmails = m_store->staleGooglePeopleEmails();
-                for (const QString &sEmail : staleEmails) {
-                    if (m_cancelRequested.load()) break;
-                    const QString url = resolveGooglePeopleAvatarUrl(sEmail, googleAccessToken);
-                    if (url.isEmpty()) continue;
-                    const QString blob = fetchAvatarBlob(url, googleAccessToken);
-                    if (!blob.startsWith("data:"_L1)) continue;
-                    const QString fileUrl = writeAvatarFile(sEmail, blob);
-                    if (fileUrl.isEmpty()) continue;
-                    if (m_store) m_store->updateContactAvatar(sEmail, fileUrl, "google-people"_L1);
-                }
-            }
-
-            result.ok      = true;
-            result.message  = QStringLiteral("All folders synced.");
-            return result;
-        },
-        [this, announce](const SyncResult &r) {
-            if (announce)
-                emit syncFinished(r.ok, r.message);
+        for (const QString &sEmail : staleEmails) {
+            if (m_destroying.load()) break;
+            const QString url = resolveGooglePeopleAvatarUrl(sEmail, accessToken);
+            if (url.isEmpty()) continue;
+            const QString blob = fetchAvatarBlob(url, accessToken);
+            if (!blob.startsWith("data:"_L1)) continue;
+            const QString fileUrl = writeAvatarFile(sEmail, blob);
+            if (fileUrl.isEmpty()) continue;
+            if (m_store) m_store->updateContactAvatar(sEmail, fileUrl, "google-people"_L1);
         }
-    );
+    });
 }
+

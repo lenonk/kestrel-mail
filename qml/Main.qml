@@ -919,10 +919,7 @@ Kirigami.ApplicationWindow {
     }
 
     function syncAllAccounts() {
-        if (typeof accountManager === "undefined") {
-            if (root.imapServiceObj) root.imapServiceObj.syncAll(false)
-            return
-        }
+        if (typeof accountManager === "undefined") return
         var accts = accountManager.accounts
         for (var i = 0; i < accts.length; ++i)
             accts[i].syncAll()

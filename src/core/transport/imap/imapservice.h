@@ -31,7 +31,7 @@ public:
     explicit ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent = nullptr);
     ~ImapService() override;
 
-    Q_INVOKABLE void syncAll(bool announce = true);
+    // syncAll removed — accounts own their own syncAll via IAccount.
     static std::shared_ptr<Imap::Connection> getPooledConnection(const QString &email = {}, const QString &owner = {});
     static std::shared_ptr<Imap::Connection> getDedicatedHydrateConnection(const QString &email);
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true, const QString &accountEmail = {});
@@ -81,6 +81,7 @@ public:
                                              const QString &eventId,
                                              const QString &response);
     Q_INVOKABLE void refreshGoogleContacts();
+    Q_INVOKABLE void refreshGooglePeopleAvatars(const QString &accountEmail);
 
     [[nodiscard]] QVariantList googleCalendarList() const { return m_googleCalendarList; }
     [[nodiscard]] QVariantList googleWeekEvents() const { return m_googleWeekEvents; }
@@ -124,6 +125,8 @@ private:
     bool     m_pendingFullSync  = false;
     bool     m_pendingAnnounce  = true;
 
+    // Global idle/bg workers are no longer started. These pointers remain null.
+    // Per-account workers are owned by IAccount implementations.
     Imap::IdleWatcher     *m_idleWatcher = nullptr;
     QThread               *m_idleThread = nullptr;
     Imap::BackgroundWorker *m_backgroundWorker = nullptr;
@@ -171,14 +174,9 @@ public:
 
 private:
 
-    void startIdleWatcher();
-    void stopIdleWatcher(bool waitForStop = true) const;
-    void startBackgroundWorker();
-    void stopBackgroundWorker(bool waitForStop = true) const;
-    void idleOnInboxChanged();
+    // Global workers removed — accounts own their own via IAccount::initialize.
+    // wireIdleWatcher/wireBackgroundWorker handle signal setup.
     void workerEmitRealtimeStatus(bool ok, const QString &message);
-    void backgroundSyncHeadersAndFlags(const QVariantMap &account, const QString &email,
-                                       const QString &folder, const QString &accessToken);
     void backgroundFetchBodies(const QVariantMap &account, const QString &email,
                                const QString &folder, const QString &accessToken);
     void hydrateFolderBodies(const QString &email, const QString &folder,
