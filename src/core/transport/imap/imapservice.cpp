@@ -34,12 +34,12 @@
 #include <QFutureWatcher>
 #include <QProcess>
 #include <QSemaphore>
+#include <QElapsedTimer>
 #include <QtConcurrentRun>
 #include <algorithm>
 #include <ranges>
 
 #include "sync/idlewatcher.h"
-#include "sync/kestreltimer.h"
 using namespace Qt::Literals::StringLiterals;
 
 namespace {
@@ -898,7 +898,7 @@ ImapService::wireBackgroundWorker(Imap::BackgroundWorker *worker, const QString 
 
     connect(worker, &Imap::BackgroundWorker::idleLiveUpdateRequested,
             this, [this](const QVariantMap &, const QString &email) {
-                backgroundOnIdleLiveUpdate({}, email);
+                backgroundOnIdleLiveUpdate(email);
             }, Qt::QueuedConnection);
 
     connect(worker, &Imap::BackgroundWorker::loopError,
@@ -918,8 +918,7 @@ ImapService::wireBackgroundWorker(Imap::BackgroundWorker *worker, const QString 
 
 
 void
-ImapService::backgroundFetchBodies(const QVariantMap &, const QString &email, const QString &folder,
-                                   const QString &) {
+ImapService::backgroundFetchBodies(const QString &email, const QString &folder) {
     if (!m_store) {
         return;
     }
@@ -1071,7 +1070,7 @@ ImapService::hydrateFolderBodies(const QString &email, const QString &folder,
 
 
 void
-ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &email) {
+ImapService::backgroundOnIdleLiveUpdate(const QString &email) {
     auto fn = [this, email]() {
         if (m_destroying)
             return;
@@ -1080,7 +1079,7 @@ ImapService::backgroundOnIdleLiveUpdate(const QVariantMap &, const QString &emai
         // and no header sync is dispatched in this loop. Inbox-only policy is enforced
         // inside backgroundFetchBodies().
         if (!email.trimmed().isEmpty())
-            backgroundFetchBodies({}, email, "INBOX"_L1, {});
+            backgroundFetchBodies(email, "INBOX"_L1);
     };
 
     if (QThread::currentThread() == thread())
@@ -1305,7 +1304,7 @@ ImapService::makeSyncFlushLambda(QVariantList &pendingHeaders,
                     continue;
                 }
                 dispatched.insert(key);
-                backgroundFetchBodies({}, email, folder, {});
+                backgroundFetchBodies(email, folder);
             }
         }, Qt::QueuedConnection);
 
@@ -1623,8 +1622,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         m_store->updateBodyForKey(emailNorm, folderNorm, uidNorm, html);
     });
 
-    const QString emailCopy = emailNorm;
-    watcher->setFuture(QtConcurrent::run([this, account, folderNorm, uidNorm, emailCopy, userInitiated]() -> QString {
+    watcher->setFuture(QtConcurrent::run([this, account, emailNorm, folderNorm, uidNorm, userInitiated]() -> QString {
         const QElapsedTimer hydrateTimer = [](){ QElapsedTimer t; t.start(); return t; }();
         if (m_destroying)
             return {};
@@ -1640,7 +1638,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         // Serialize all background hydrations to a single connection slot so
         // the pool stays available for user actions, syncs, and IDLE.
         // User-initiated hydrations skip this entirely.
-        auto *hydratePool = poolForEmail(emailCopy);
+        auto *hydratePool = poolForEmail(emailNorm);
         const bool isBg = !userInitiated;
         if (isBg && hydratePool && !hydratePool->tryAcquireBgHydrate(60'000))
             return {};
@@ -1654,7 +1652,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
 
         QVariantList mappedCandidates;
         if (m_store)
-            mappedCandidates = m_store->fetchCandidatesForMessageKey(emailCopy, folderNorm, uidNorm);
+            mappedCandidates = m_store->fetchCandidatesForMessageKey(emailNorm, folderNorm, uidNorm);
 
         for (const auto &v : mappedCandidates) {
             const auto m = v.toMap();
@@ -1679,21 +1677,21 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             if (attempt > 0)
                 QThread::msleep(kHydrateRetryDelayMs);
 
-            auto *pool = poolForEmail(emailCopy);
+            auto *pool = poolForEmail(emailNorm);
             std::shared_ptr<Imap::Connection> pooled;
             bool usedDedicated = false;
             if (userInitiated) {
-                pooled = pool->acquireHydrate(emailCopy);
+                pooled = pool->acquireHydrate(emailNorm);
                 if (pooled) {
                     usedDedicated = true;
                 } else {
                     qint8 poolAttempts = 0;
-                    pooled = pool->acquire("hydrate-user"_L1, emailCopy);
+                    pooled = pool->acquire("hydrate-user"_L1, emailNorm);
                     while (!pooled && poolAttempts++ < 10)
-                        pooled = pool->acquire("hydrate-user-fallback"_L1, emailCopy);
+                        pooled = pool->acquire("hydrate-user-fallback"_L1, emailNorm);
                 }
             } else {
-                pooled = pool->acquire("bg-hydrate"_L1, emailCopy);
+                pooled = pool->acquire("bg-hydrate"_L1, emailNorm);
             }
 
             const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;

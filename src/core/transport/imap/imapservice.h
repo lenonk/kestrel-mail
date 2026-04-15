@@ -36,7 +36,6 @@ public:
     explicit ImapService(DataStore *store, TokenVault *vault, QObject *parent = nullptr);
     ~ImapService() override;
 
-    // syncAll removed — accounts own their own syncAll via IAccount.
     [[nodiscard]] Imap::ConnectionPool* pool() const { return m_pool.get(); }
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true, const QString &accountEmail = {});
     Q_INVOKABLE void refreshFolderList(bool announce = true);
@@ -179,8 +178,7 @@ private:
     // Global workers removed — accounts own their own via IAccount::initialize.
     // wireIdleWatcher/wireBackgroundWorker handle signal setup.
     void workerEmitRealtimeStatus(bool ok, const QString &message);
-    void backgroundFetchBodies(const QVariantMap &account, const QString &email,
-                               const QString &folder, const QString &accessToken);
+    void backgroundFetchBodies(const QString &email, const QString &folder);
     void hydrateFolderBodies(const QString &email, const QString &folder,
                              const QString &key, qint32 limit);
     void saveFolderStatusSnapshot(const QString &accountEmail, const QString &folder,
@@ -195,7 +193,7 @@ private:
 
     QString workerRefreshAccessToken(const QVariantMap &account, const QString &email);
 
-    void backgroundOnIdleLiveUpdate(const QVariantMap &account, const QString &email);
+    void backgroundOnIdleLiveUpdate(const QString &email);
 
     [[nodiscard]] QVariantList workerGetAccounts() const;
     [[nodiscard]] QVariantMap loadFolderStatusSnapshot(const QString &accountEmail, const QString &folder) const;
@@ -230,4 +228,10 @@ private:
                                     const QString &folderName,
                                     const QString &uid,
                                     bool userInitiated);
+
+    QString executeHydration(const QVariantMap &account,
+                             const QString &email,
+                             const QString &folder,
+                             const QString &uid,
+                             bool userInitiated);
 };

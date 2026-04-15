@@ -44,8 +44,8 @@ bool chunkIsFuzzyContiguous(std::span<const qint32> sortedUids,
                            int maxSingleGap = 3);
 
 /**
- * Get default recent fetch count from environment or default.
- * Reads KESTREL_RECENT_FETCH_COUNT, clamped to [20, 1000].
+ * Get recent fetch count override from environment.
+ * Reads KESTREL_RECENT_FETCH_COUNT; returns -1 if unset.
  */
 int recentFetchCount();
 

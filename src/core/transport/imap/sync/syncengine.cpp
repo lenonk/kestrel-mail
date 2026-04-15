@@ -384,11 +384,15 @@ resolveAvatarForMessage(QVariantMap &h, const QString &senderEmail, const QStrin
     }
 }
 
-// ── Message ingestion ─────────────────────────────────────────────────────────
+// ── Message ingestion helpers ─────────────────────────────────────────────────
 
-void
-ingestMessage(const QString &fetchResp, const QString &uid, const QString &debugPrefix, const QString &messageFolder,
-                   const SyncContext &ctx, IngestState &state) {
+// Extract and decode all message headers from a FETCH response into a QVariantMap.
+// Populates sender/recipient/cc, threading headers, ESP vendor, Gmail IDs,
+// date, snippet, flags, and Gmail labels.  Also stores transient keys
+// (_senderEmail, _listIdDomain, _bimiLogoUrl, _noAddressHeaders) consumed by
+// resolveAndIngestAvatar and the category-routing diagnostic.
+QVariantMap
+extractMessageHeaders(const QString &fetchResp, const QString &uid, const QString &messageFolder) {
     const auto headerFieldsBlock = extractHeaderFieldsLiteral(fetchResp.toUtf8());
     const auto &headerSource = headerFieldsBlock.isEmpty() ? fetchResp : headerFieldsBlock;
 
@@ -406,19 +410,9 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     if (returnPathHeader.isEmpty())
         returnPathHeader = decodeRfc2047(extractField(fetchResp, "Return-Path"_L1)).trimmed();
 
-    const auto hasFrom       = !fromHeader.isEmpty();
-    const auto hasSender     = !senderHeader.isEmpty();
-    const auto hasReplyTo    = !replyToHeader.isEmpty();
-    const auto hasReturnPath = !returnPathHeader.isEmpty();
-
-    const auto senderEmail = resolveSenderEmail(fromHeader, senderHeader, replyToHeader);
-
-    const auto listIdDomain = extractListIdDomain(headerSource);
-    const auto bimiLogoUrl  = extractBimiLogoUrl(headerSource);
-
     // Prefer fallback headers that contain an extractable email so the
     // sender column always carries an address when one exists anywhere.
-    auto hasEmail = [](const QString &h) { return !h.isEmpty() && !extractEmailAddress(h).isEmpty(); };
+    auto hasEmail = [](const QString &v) { return !v.isEmpty() && !extractEmailAddress(v).isEmpty(); };
     const auto senderFallback = hasEmail(senderHeader)    ? senderHeader
                               : hasEmail(replyToHeader)    ? replyToHeader
                               : hasEmail(returnPathHeader) ? returnPathHeader
@@ -444,8 +438,6 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     }
 
     // Additional headers for ESP/sender identification and threading.
-    // Reply-To and Return-Path are already extracted above for sender-fallback purposes;
-    // store them so the UI can use them for vendor detection and reply behaviour.
     if (!replyToHeader.isEmpty())
         h.insert("replyTo"_L1, replyToHeader);
     if (!returnPathHeader.isEmpty())
@@ -469,36 +461,8 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
 
     {
         const auto espVendor = detectEspVendor(headerSource);
-        if (!espVendor.isEmpty()) {
+        if (!espVendor.isEmpty())
             h.insert("espVendor"_L1, espVendor);
-        }
-    }
-
-    // Sent/draft folders: try to resolve the recipient's avatar.
-    const auto folderLower  = messageFolder.toLower();
-    const auto sentLikeFolder  = folderLower.contains("/sent"_L1) || folderLower.contains("/draft"_L1);
-
-    if (sentLikeFolder) {
-        const auto recipientEmail = Kestrel::normalizeEmail(extractEmailAddress(toHeader));
-        bool allowLookup = true;
-
-        if (!recipientEmail.isEmpty() && ctx.avatarShouldRefresh)
-            allowLookup = ctx.avatarShouldRefresh(recipientEmail, 3600, 3);
-
-        if (!recipientEmail.isEmpty() && allowLookup) {
-            const auto url = resolveGooglePeopleAvatarUrl(recipientEmail, ctx.cxn->accessToken());
-            if (!url.isEmpty()) {
-                const QString blob = fetchAvatarBlob(url);
-                const QString fileUrl = blob.startsWith("data:"_L1)
-                                        ? writeAvatarFile(recipientEmail, blob)
-                                        : blob;
-                h.insert("recipientAvatarUrl"_L1,        fileUrl);
-                h.insert("recipientAvatarLookupMiss"_L1, false);
-            }
-            else {
-                h.insert("recipientAvatarLookupMiss"_L1, true);
-            }
-        }
     }
 
     {
@@ -517,25 +481,9 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
 
     h.insert("receivedAt"_L1, dt.toUTC().toString(Qt::ISODate));
 
-    const auto deterministicSnippet = compileDeterministicSnippet(h.value("subject"_L1).toString(), headerSource,
-        fetchResp.toUtf8());
+    const auto deterministicSnippet = compileDeterministicSnippet(
+        h.value("subject"_L1).toString(), headerSource, fetchResp.toUtf8());
     h.insert("snippet"_L1, deterministicSnippet);
-
-    if (!listIdDomain.isEmpty())
-        h.insert("avatarDomain"_L1, listIdDomain);
-
-    // Avatar resolution priority: Google People -> Gravatar -> BIMI header -> BIMI DNS -> favicon.
-    // avatarShouldRefresh returns false for file:// entries (already resolved); gate the
-    // entire pipeline so we skip expensive BIMI/favicon fetches on already-resolved contacts.
-    {
-        bool allowAvatarLookup = true;
-        if (!senderEmail.isEmpty() && ctx.avatarShouldRefresh) {
-            allowAvatarLookup = ctx.avatarShouldRefresh(senderEmail, 3600, 3);
-        }
-        if (allowAvatarLookup) {
-            resolveAvatarForMessage(h, senderEmail, listIdDomain, bimiLogoUrl, ctx.cxn->accessToken());
-        }
-    }
 
     // Body HTML is intentionally not persisted during header sync.
     h.insert("bodyHtml"_L1, QString());
@@ -544,29 +492,105 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     h.insert("flagged"_L1,  fetchResp.contains("\\Flagged"_L1, Qt::CaseInsensitive) ? 1 : 0);
 
     const QString rawLabelsAll = extractGmailLabelsRaw(fetchResp);
-    const QString inferredCategoryFolder = ctx.isInbox()
-            ? extractGmailCategoryFolder(fetchResp)
-            : QString();
     h.insert("rawGmailLabels"_L1, rawLabelsAll);
     if (rawLabelsAll.contains("/Categories/Primary"_L1, Qt::CaseInsensitive))
         h.insert("primaryLabelObserved"_L1, true);
 
-    if (ctx.isInbox()) {
-        const QString rawLabels     = rawLabelsAll.left(240);
-        const QString gmMsgId       = h.value("gmMsgId"_L1).toString().trimmed();
-        const QString msgIdHeader   = h.value("messageIdHeader"_L1).toString();
+    // Transient keys consumed by resolveAndIngestAvatar; removed by ingestMessage before commit.
+    h.insert("_senderEmail"_L1,      resolveSenderEmail(fromHeader, senderHeader, replyToHeader));
+    h.insert("_listIdDomain"_L1,     extractListIdDomain(headerSource));
+    h.insert("_bimiLogoUrl"_L1,      extractBimiLogoUrl(headerSource));
+    h.insert("_noAddressHeaders"_L1, fromHeader.isEmpty() && senderHeader.isEmpty()
+                                      && replyToHeader.isEmpty() && returnPathHeader.isEmpty());
 
+    return h;
+}
+
+// Resolve sender and recipient avatars.  Reads transient keys (_senderEmail,
+// _listIdDomain, _bimiLogoUrl) populated by extractMessageHeaders and inserts
+// avatarUrl / avatarSource / recipientAvatarUrl into |h|.
+void
+resolveAndIngestAvatar(QVariantMap &h, const SyncContext &ctx) {
+    const auto senderEmail  = h.value("_senderEmail"_L1).toString();
+    const auto listIdDomain = h.value("_listIdDomain"_L1).toString();
+    const auto bimiLogoUrl  = h.value("_bimiLogoUrl"_L1).toString();
+    const auto folder       = h.value("folder"_L1).toString();
+    const auto accessToken  = ctx.cxn->accessToken();
+
+    if (!listIdDomain.isEmpty())
+        h.insert("avatarDomain"_L1, listIdDomain);
+
+    // Sent/draft folders: try to resolve the recipient's avatar.
+    const auto folderLower     = folder.toLower();
+    const auto sentLikeFolder  = folderLower.contains("/sent"_L1) || folderLower.contains("/draft"_L1);
+
+    if (sentLikeFolder) {
+        const auto recipientEmail = Kestrel::normalizeEmail(
+            extractEmailAddress(h.value("recipient"_L1).toString()));
+        bool allowLookup = true;
+
+        if (!recipientEmail.isEmpty() && ctx.avatarShouldRefresh)
+            allowLookup = ctx.avatarShouldRefresh(recipientEmail, 3600, 3);
+
+        if (!recipientEmail.isEmpty() && allowLookup) {
+            const auto url = resolveGooglePeopleAvatarUrl(recipientEmail, accessToken);
+            if (!url.isEmpty()) {
+                const QString blob    = fetchAvatarBlob(url);
+                const QString fileUrl = blob.startsWith("data:"_L1)
+                                        ? writeAvatarFile(recipientEmail, blob)
+                                        : blob;
+                h.insert("recipientAvatarUrl"_L1,        fileUrl);
+                h.insert("recipientAvatarLookupMiss"_L1, false);
+            } else {
+                h.insert("recipientAvatarLookupMiss"_L1, true);
+            }
+        }
+    }
+
+    // Sender avatar priority: Google People -> Gravatar -> BIMI header -> BIMI DNS -> favicon.
+    // avatarShouldRefresh returns false for file:// entries (already resolved); gate the
+    // entire pipeline so we skip expensive BIMI/favicon fetches on already-resolved contacts.
+    bool allowAvatarLookup = true;
+    if (!senderEmail.isEmpty() && ctx.avatarShouldRefresh)
+        allowAvatarLookup = ctx.avatarShouldRefresh(senderEmail, 3600, 3);
+
+    if (allowAvatarLookup)
+        resolveAvatarForMessage(h, senderEmail, listIdDomain, bimiLogoUrl, accessToken);
+}
+
+// ── Message ingestion ────────────────────────────────────────────────────────
+
+void
+ingestMessage(const QString &fetchResp, const QString &uid, const QString &debugPrefix, const QString &messageFolder,
+                   const SyncContext &ctx, IngestState &state) {
+    QVariantMap h = extractMessageHeaders(fetchResp, uid, messageFolder);
+
+    resolveAndIngestAvatar(h, ctx);
+
+    // Consume and remove transient keys before commit.
+    const bool noAddressHeaders = h.value("_noAddressHeaders"_L1).toBool();
+    h.remove("_senderEmail"_L1);
+    h.remove("_listIdDomain"_L1);
+    h.remove("_bimiLogoUrl"_L1);
+    h.remove("_noAddressHeaders"_L1);
+
+    // Gmail category routing diagnostics.
+    const QString inferredCategoryFolder = ctx.isInbox()
+            ? extractGmailCategoryFolder(fetchResp)
+            : QString();
+
+    if (ctx.isInbox()) {
+        const QString rawLabels   = h.value("rawGmailLabels"_L1).toString().left(240);
+        const QString gmMsgId     = h.value("gmMsgId"_L1).toString().trimmed();
+        const QString msgIdHeader = h.value("messageIdHeader"_L1).toString();
 
         const bool fullAddressCheck = (debugPrefix == "inbox"_L1 || debugPrefix == "inbox-inc"_L1);
-        if (fullAddressCheck) {
-
-            if (!hasFrom && !hasSender && !hasReplyTo && !hasReturnPath) {
-                qWarning().noquote() << "[imap-address-miss-critical]"
-                                     << "uid=" << uid
-                                     << "messageId=" << msgIdHeader.left(120)
-                                     << "subject=" << h.value("subject"_L1).toString().left(120);
-                ++state.missingAddressHeadersCount;
-            }
+        if (fullAddressCheck && noAddressHeaders) {
+            qWarning().noquote() << "[imap-address-miss-critical]"
+                                 << "uid=" << uid
+                                 << "messageId=" << msgIdHeader.left(120)
+                                 << "subject=" << h.value("subject"_L1).toString().left(120);
+            ++state.missingAddressHeadersCount;
         }
 
         if (inferredCategoryFolder.isEmpty()) {
