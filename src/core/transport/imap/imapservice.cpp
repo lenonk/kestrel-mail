@@ -1623,114 +1623,122 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
     });
 
     watcher->setFuture(QtConcurrent::run([this, account, emailNorm, folderNorm, uidNorm, userInitiated]() -> QString {
-        const QElapsedTimer hydrateTimer = [](){ QElapsedTimer t; t.start(); return t; }();
+        return executeHydration(account, emailNorm, folderNorm, uidNorm, userInitiated);
+    }));
+}
+
+QString
+ImapService::executeHydration(const QVariantMap &account, const QString &email,
+                              const QString &folder, const QString &uid,
+                              const bool userInitiated)
+{
+    const QElapsedTimer hydrateTimer = [](){ QElapsedTimer t; t.start(); return t; }();
+    if (m_destroying)
+        return {};
+
+    const bool isOAuth = account.value("authType"_L1).toString() == "oauth2"_L1
+                      || (!account.value("oauthClientId"_L1).toString().isEmpty()
+                       && !account.value("oauthTokenUrl"_L1).toString().isEmpty());
+    const bool isPassword = account.value("authType"_L1).toString() == "password"_L1;
+    if (!isOAuth && !isPassword)
+        return {};
+
+    // Serialize all background hydrations to a single connection slot so
+    // the pool stays available for user actions, syncs, and IDLE.
+    // User-initiated hydrations skip this entirely.
+    auto *hydratePool = poolForEmail(email);
+    const bool isBg = !userInitiated;
+    if (isBg && hydratePool && !hydratePool->tryAcquireBgHydrate(60'000))
+        return {};
+    struct SemGuard {
+        Imap::ConnectionPool *pool; bool active;
+        ~SemGuard() { if (active && pool) pool->releaseBgHydrate(); }
+    } semGuard{hydratePool, isBg};
+
+    Imap::MessageHydrator::Request r;
+    r.folderName = folder;
+    r.uid = uid;
+
+    QVariantList mappedCandidates;
+    if (m_store)
+        mappedCandidates = m_store->fetchCandidatesForMessageKey(email, folder, uid);
+
+    for (const auto &v : mappedCandidates) {
+        const auto m = v.toMap();
+        r.extraCandidates.push_back({ m.value("folder"_L1).toString(), m.value("uid"_L1).toString() });
+    }
+
+    const qint64 mapMs = hydrateTimer.elapsed();
+
+    // Retry loop: on failure for user-initiated hydrations, wait for
+    // a fresh OAuth token and try once more (up to 60 s total).
+    constexpr int kHydrateRetryDelayMs = 3000;
+    constexpr int kHydrateMaxTotalMs   = 60000;
+    const qint32 maxAttempts = userInitiated ? 3 : 1;
+
+    for (qint32 attempt = 0; attempt < maxAttempts; ++attempt) {
         if (m_destroying)
             return {};
+        if (attempt > 0 && hydrateTimer.elapsed() >= kHydrateMaxTotalMs)
+            break;
 
-        const bool isOAuth = account.value("authType"_L1).toString() == "oauth2"_L1
-                          || (!account.value("oauthClientId"_L1).toString().isEmpty()
-                           && !account.value("oauthTokenUrl"_L1).toString().isEmpty());
-        const bool isPassword = account.value("authType"_L1).toString() == "password"_L1;
-        if (!isOAuth && !isPassword) {
-            return {};
-        }
+        // Back off before retries so the token refresh has time to land.
+        if (attempt > 0)
+            QThread::msleep(kHydrateRetryDelayMs);
 
-        // Serialize all background hydrations to a single connection slot so
-        // the pool stays available for user actions, syncs, and IDLE.
-        // User-initiated hydrations skip this entirely.
-        auto *hydratePool = poolForEmail(emailNorm);
-        const bool isBg = !userInitiated;
-        if (isBg && hydratePool && !hydratePool->tryAcquireBgHydrate(60'000))
-            return {};
-        struct SemGuard {
-            Imap::ConnectionPool *pool; bool active;
-            ~SemGuard() { if (active && pool) pool->releaseBgHydrate(); }
-        } semGuard{hydratePool, isBg};
-
-        Imap::MessageHydrator::Request r;
-        r.folderName = folderNorm; r.uid = uidNorm;
-
-        QVariantList mappedCandidates;
-        if (m_store)
-            mappedCandidates = m_store->fetchCandidatesForMessageKey(emailNorm, folderNorm, uidNorm);
-
-        for (const auto &v : mappedCandidates) {
-            const auto m = v.toMap();
-            r.extraCandidates.push_back( { m.value("folder"_L1).toString(), m.value("uid"_L1).toString() } );
-        }
-
-        const qint64 mapMs = hydrateTimer.elapsed();
-
-        // Retry loop: on failure for user-initiated hydrations, wait for
-        // a fresh OAuth token and try once more (up to 60 s total).
-        constexpr int kHydrateRetryDelayMs = 3000;
-        constexpr int kHydrateMaxTotalMs   = 60000;
-        const qint32 maxAttempts = userInitiated ? 3 : 1;
-
-        for (qint32 attempt = 0; attempt < maxAttempts; ++attempt) {
-            if (m_destroying)
-                return QString{};
-            if (attempt > 0 && hydrateTimer.elapsed() >= kHydrateMaxTotalMs)
-                break;
-
-            // Back off before retries so the token refresh has time to land.
-            if (attempt > 0)
-                QThread::msleep(kHydrateRetryDelayMs);
-
-            auto *pool = poolForEmail(emailNorm);
-            std::shared_ptr<Imap::Connection> pooled;
-            bool usedDedicated = false;
-            if (userInitiated) {
-                pooled = pool->acquireHydrate(emailNorm);
-                if (pooled) {
-                    usedDedicated = true;
-                } else {
-                    qint8 poolAttempts = 0;
-                    pooled = pool->acquire("hydrate-user"_L1, emailNorm);
-                    while (!pooled && poolAttempts++ < 10)
-                        pooled = pool->acquire("hydrate-user-fallback"_L1, emailNorm);
-                }
+        auto *pool = poolForEmail(email);
+        std::shared_ptr<Imap::Connection> pooled;
+        bool usedDedicated = false;
+        if (userInitiated) {
+            pooled = pool->acquireHydrate(email);
+            if (pooled) {
+                usedDedicated = true;
             } else {
-                pooled = pool->acquire("bg-hydrate"_L1, emailNorm);
+                qint8 poolAttempts = 0;
+                pooled = pool->acquire("hydrate-user"_L1, email);
+                while (!pooled && poolAttempts++ < 10)
+                    pooled = pool->acquire("hydrate-user-fallback"_L1, email);
             }
-
-            const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
-
-            if (!pooled) {
-                if (attempt == maxAttempts - 1) {
-                    if (userInitiated)
-                        emit hydrateStatus(false, "Message body fetch failed: IMAP connection pool timeout.");
-                    qWarning().noquote() << "[perf-hydrate]"
-                                         << "uid=" << uidNorm
-                                         << "mapMs=" << mapMs
-                                         << "acquireMs=" << acquireMs
-                                         << "result=pool-timeout";
-                }
-                continue;
-            }
-
-            r.cxn = std::move(pooled);
-            const QString html = Imap::MessageHydrator::execute(r);
-            const qint64 totalMs = hydrateTimer.elapsed();
-            const qint64 executeMs = totalMs - mapMs - acquireMs;
-            qWarning().noquote() << "[perf-hydrate]"
-                                 << "uid=" << uidNorm
-                                 << "source=" << (userInitiated ? (usedDedicated ? "user-dedicated" : "user-pool") : "bg")
-                                 << "attempt=" << (attempt + 1)
-                                 << "mapMs=" << mapMs
-                                 << "acquireMs=" << acquireMs
-                                 << "executeMs=" << executeMs
-                                 << "totalMs=" << totalMs
-                                 << "htmlLen=" << html.size();
-
-            if (!html.isEmpty())
-                return html;
-
-            // Release the (possibly dead) connection before retrying.
-            r.cxn.reset();
+        } else {
+            pooled = pool->acquire("bg-hydrate"_L1, email);
         }
-        return QString{};
-    }));
+
+        const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
+
+        if (!pooled) {
+            if (attempt == maxAttempts - 1) {
+                if (userInitiated)
+                    emit hydrateStatus(false, "Message body fetch failed: IMAP connection pool timeout.");
+                qWarning().noquote() << "[perf-hydrate]"
+                                     << "uid=" << uid
+                                     << "mapMs=" << mapMs
+                                     << "acquireMs=" << acquireMs
+                                     << "result=pool-timeout";
+            }
+            continue;
+        }
+
+        r.cxn = std::move(pooled);
+        const QString html = Imap::MessageHydrator::execute(r);
+        const qint64 totalMs = hydrateTimer.elapsed();
+        const qint64 executeMs = totalMs - mapMs - acquireMs;
+        qWarning().noquote() << "[perf-hydrate]"
+                             << "uid=" << uid
+                             << "source=" << (userInitiated ? (usedDedicated ? "user-dedicated" : "user-pool") : "bg")
+                             << "attempt=" << (attempt + 1)
+                             << "mapMs=" << mapMs
+                             << "acquireMs=" << acquireMs
+                             << "executeMs=" << executeMs
+                             << "totalMs=" << totalMs
+                             << "htmlLen=" << html.size();
+
+        if (!html.isEmpty())
+            return html;
+
+        // Release the (possibly dead) connection before retrying.
+        r.cxn.reset();
+    }
+    return {};
 }
 
 void
