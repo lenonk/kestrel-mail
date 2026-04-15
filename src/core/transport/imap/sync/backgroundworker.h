@@ -69,6 +69,7 @@ private:
     QHash<QString, FolderStatus> fetchAllFolderStatuses() const;
 
     ConnectionPool *m_pool = nullptr;
+    int m_consecutiveFailures = 0;
     QHash<QString, FolderStatus> m_lastFolderStatus;
 };
 

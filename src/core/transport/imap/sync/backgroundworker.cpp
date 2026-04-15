@@ -14,8 +14,6 @@ namespace Imap {
 
 std::pair<bool, QString>
 BackgroundWorker::resolveAccount() {
-    static int consecutiveFailures = 0;
-
     QVariantList accounts;
     emit requestAccounts(&accounts);
 
@@ -23,7 +21,7 @@ BackgroundWorker::resolveAccount() {
     if (!accountOk) {
         SyncUtils::handleFailure([this](const bool ok, const QString &msg) { emit realtimeStatus(ok, msg); },
                                  m_lastRealtimeStatusMs, m_realtimeDegradedNotified,
-                                 consecutiveFailures, accountErr, 10, &m_running);
+                                 m_consecutiveFailures, accountErr, 10, &m_running);
         return {false, accountErr};
     }
 
@@ -41,7 +39,7 @@ BackgroundWorker::resolveAccount() {
     m_activeEmail = target.email;
     m_activeAccessToken = accessToken;
 
-    consecutiveFailures = 0;
+    m_consecutiveFailures = 0;
     return {true, {}};
 }
 

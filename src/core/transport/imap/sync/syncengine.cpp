@@ -986,10 +986,8 @@ executeIncremental(SyncContext &ctx) {
         if (!backfillCandidates.empty()) {
             // Build Gmail category hints for backfill UIDs so they get the correct
             // category folder edge (Social, Promotions, etc.) instead of bare INBOX.
-            if (!backfillCandidates.empty()) {
-                const auto [minBf, maxBf] = std::ranges::minmax(backfillCandidates);
-                buildCategoryHints(ctx, state, minBf, maxBf);
-            }
+            const auto [minBf, maxBf] = std::ranges::minmax(backfillCandidates);
+            buildCategoryHints(ctx, state, minBf, maxBf);
 
             const auto prepass = prepassMessageIds(ctx, backfillCandidates, state);
             if (prepass.edgesInserted > 0) {

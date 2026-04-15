@@ -146,6 +146,9 @@ private:
     QString m_idleTag;
     bool    m_selectedReadOnly = false;
 
+    // Shared implementation for select() and examine().
+    [[nodiscard]] std::expected<QString, QString> selectOrExamine(const QString &mailbox, bool readOnly);
+
     QString nextTag();
     void observeThrottleState(const QString &response);
 

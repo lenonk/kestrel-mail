@@ -20,31 +20,9 @@ ConnectionPool::initialize(const QString &email, const QString &host, const int 
                             const int operationalSlots, const int hydrateSlots) {
     if (m_initialized.exchange(true)) return;
 
-    m_expectedPoolSize = operationalSlots + hydrateSlots;
-
-    // Create hydration connections.
-    for (int i = 0; i < hydrateSlots; ++i) {
-        auto conn = std::make_unique<Connection>();
-        conn->connectAndAuth(host, port, email, credential, method);
-        Slot s;
-        s.email = email; s.host = host; s.port = port; s.method = method;
-        s.conn = std::move(conn); s.busy = false;
-        QMutexLocker lock(&m_hydrateMutex);
-        m_hydrateSlots.push_back(std::move(s));
-        m_hydrateWait.wakeOne();
-    }
-
-    // Create operational connections.
-    for (int i = 0; i < operationalSlots; ++i) {
-        auto conn = std::make_unique<Connection>();
-        conn->connectAndAuth(host, port, email, credential, method);
-        Slot s;
-        s.email = email; s.host = host; s.port = port; s.method = method;
-        s.conn = std::move(conn); s.busy = false;
-        QMutexLocker lock(&m_poolMutex);
-        m_poolSlots.push_back(std::move(s));
-        m_poolWait.wakeOne();
-    }
+    m_expectedPoolSize.store(operationalSlots + hydrateSlots);
+    addSlots(email, host, port, method, credential, true,  hydrateSlots);
+    addSlots(email, host, port, method, credential, false, operationalSlots);
 }
 
 void
@@ -60,28 +38,28 @@ ConnectionPool::addAccount(const QString &email, const QString &host, const int 
         }
     }
 
-    m_expectedPoolSize += operationalSlots + hydrateSlots;
+    m_expectedPoolSize.fetch_add(operationalSlots + hydrateSlots);
+    addSlots(email, host, port, method, credential, true,  hydrateSlots);
+    addSlots(email, host, port, method, credential, false, operationalSlots);
+}
 
-    for (int i = 0; i < hydrateSlots; ++i) {
+void
+ConnectionPool::addSlots(const QString &email, const QString &host, const int port,
+                          const AuthMethod method, const QString &credential,
+                          const bool isHydrate, const int count) {
+    auto &slotVec = isHydrate ? m_hydrateSlots : m_poolSlots;
+    QMutex *mtx = isHydrate ? &m_hydrateMutex : &m_poolMutex;
+    QWaitCondition *cond = isHydrate ? &m_hydrateWait : &m_poolWait;
+
+    for (int i = 0; i < count; ++i) {
         auto conn = std::make_unique<Connection>();
         conn->connectAndAuth(host, port, email, credential, method);
         Slot s;
         s.email = email; s.host = host; s.port = port; s.method = method;
         s.conn = std::move(conn); s.busy = false;
-        QMutexLocker lock(&m_hydrateMutex);
-        m_hydrateSlots.push_back(std::move(s));
-        m_hydrateWait.wakeOne();
-    }
-
-    for (int i = 0; i < operationalSlots; ++i) {
-        auto conn = std::make_unique<Connection>();
-        conn->connectAndAuth(host, port, email, credential, method);
-        Slot s;
-        s.email = email; s.host = host; s.port = port; s.method = method;
-        s.conn = std::move(conn); s.busy = false;
-        QMutexLocker lock(&m_poolMutex);
-        m_poolSlots.push_back(std::move(s));
-        m_poolWait.wakeOne();
+        QMutexLocker lock(mtx);
+        slotVec.push_back(std::move(s));
+        cond->wakeOne();
     }
 }
 
@@ -219,17 +197,17 @@ bool ConnectionPool::tryAcquireBgFolderSync(const int timeoutMs) { return m_bgFo
 void ConnectionPool::releaseBgFolderSync() { m_bgFolderSyncSem.release(); }
 
 qint32
-ConnectionPool::expectedConnections() const { return m_expectedPoolSize; }
+ConnectionPool::expectedConnections() const { return m_expectedPoolSize.load(); }
 
 qint32
 ConnectionPool::readyConnections() const {
     qint32 count = 0;
     {
-        QMutexLocker lock(&const_cast<ConnectionPool*>(this)->m_hydrateMutex);
+        QMutexLocker lock(&m_hydrateMutex);
         count += static_cast<qint32>(m_hydrateSlots.size());
     }
     {
-        QMutexLocker lock(&const_cast<ConnectionPool*>(this)->m_poolMutex);
+        QMutexLocker lock(&m_poolMutex);
         count += static_cast<qint32>(m_poolSlots.size());
     }
     return count;

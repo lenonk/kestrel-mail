@@ -50,6 +50,25 @@ namespace {
         return nam;
     }
 
+    // Normalize a full domain to its registrable base, handling ccTLDs like co.uk.
+    QString registrableDomain(const QString &domain) {
+        const QStringList parts = domain.split('.', Qt::SkipEmptyParts);
+        if (parts.size() <= 2)
+            return domain;
+
+        auto tail2 = parts.mid(parts.size() - 2).join('.');
+
+        static const QSet<QString> cc2 = {
+            "co.uk"_L1, "org.uk"_L1, "gov.uk"_L1, "ac.uk"_L1,
+            "com.au"_L1, "co.jp"_L1, "com.br"_L1, "com.mx"_L1
+        };
+
+        if (cc2.contains(tail2) && parts.size() >= 3)
+            return parts.mid(parts.size() - 3).join('.');
+
+        return tail2;
+    }
+
     ImageFetch fetchImageBytes(const QUrl &url, int timeoutMs = 800) {
         QNetworkRequest req(url);
         req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
@@ -136,22 +155,7 @@ senderDomainFromHeader(const QString &fromHeader) {
     if (domain.contains(".local"_L1) || domain.contains(".invalid"_L1))
         return {};
 
-    const QStringList parts = domain.split('.', Qt::SkipEmptyParts);
-    if (parts.size() <= 2)
-        return domain;
-
-    auto tail2 = parts.mid(parts.size() - 2).join('.');
-
-    static const QSet<QString> cc2 = {
-        "co.uk"_L1, "org.uk"_L1, "gov.uk"_L1, "ac.uk"_L1,
-        "com.au"_L1, "co.jp"_L1, "com.br"_L1, "com.mx"_L1
-    };
-
-    if (cc2.contains(tail2) && parts.size() >= 3) {
-        return parts.mid(parts.size() - 3).join('.');
-    }
-
-    return tail2;
+    return registrableDomain(domain);
 }
 
 QString
@@ -386,23 +390,7 @@ extractListIdDomain(const QString &headerSource) {
     if (domain.contains(".local"_L1) || domain.contains(".invalid"_L1))
         return {};
 
-    // Normalize to registrable-ish base domain for favicon lookup.
-    const auto parts = domain.split('.', Qt::SkipEmptyParts);
-    if (parts.size() <= 2)
-        return domain;
-
-    auto tail2 = parts.mid(parts.size() - 2).join('.');
-
-    static const QSet<QString> cc2 = {
-        "co.uk"_L1, "org.uk"_L1, "gov.uk"_L1, "ac.uk"_L1,
-        "com.au"_L1, "co.jp"_L1, "com.br"_L1, "com.mx"_L1
-    };
-
-    if (cc2.contains(tail2) && parts.size() >= 3) {
-        return parts.mid(parts.size() - 3).join('.');
-    }
-
-    return tail2;
+    return registrableDomain(domain);
 }
 
 QString

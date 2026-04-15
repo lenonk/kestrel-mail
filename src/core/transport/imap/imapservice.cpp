@@ -54,8 +54,9 @@ using Imap::AvatarResolver::writeAvatarFile;
 
 namespace {
 
-// Transitional shim: file-scope pointer to the (still-singleton) ImapService's pool.
-// Removed in Step 3 when BackgroundWorker receives the pool via injection.
+const QRegularExpression kCopyUidRe(
+    R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
+    QRegularExpression::CaseInsensitiveOption);
 
 bool offlineModeEnabledFromEnv() {
     const QByteArray raw = qgetenv("KESTREL_OFFLINE_MODE").trimmed().toLower();
@@ -2310,9 +2311,6 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
                           << "uid=" << uid << "from=" << folder
                           << "to=" << targetFolder << "resp=" << resp.simplified().left(120);
 
-        static const QRegularExpression kCopyUidRe(
-            R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
-            QRegularExpression::CaseInsensitiveOption);
         const QRegularExpressionMatch m = kCopyUidRe.match(resp);
         if (m.hasMatch() && messageId > 0) {
             const QString newUid = m.captured(1);
@@ -2452,9 +2450,6 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
 
         const QString resp = cxn->execute("UID COPY %1 \"%2\""_L1.arg(uid, resolvedTarget));
 
-        static const QRegularExpression kCopyUidRe(
-            R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
-            QRegularExpression::CaseInsensitiveOption);
         const QRegularExpressionMatch m = kCopyUidRe.match(resp);
 
         const bool ok = resp.contains("OK"_L1, Qt::CaseInsensitive);

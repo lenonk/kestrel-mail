@@ -79,11 +79,16 @@ public:
 private:
     static bool isBackgroundOwner(const QString &owner);
 
-    QMutex m_poolMutex;
+    /// Create `count` connections and push them into the hydrate or operational pool.
+    void addSlots(const QString &email, const QString &host, int port,
+                  AuthMethod method, const QString &credential,
+                  bool isHydrate, int count);
+
+    mutable QMutex m_poolMutex;
     QWaitCondition m_poolWait;
     std::vector<Slot> m_poolSlots;
 
-    QMutex m_hydrateMutex;
+    mutable QMutex m_hydrateMutex;
     QWaitCondition m_hydrateWait;
     std::vector<Slot> m_hydrateSlots;
 
@@ -93,7 +98,7 @@ private:
     TokenRefresher m_tokenRefresher;
     std::atomic_bool m_initialized{false};
     std::atomic_bool m_destroying{false};
-    qint32 m_expectedPoolSize = 0;
+    std::atomic<qint32> m_expectedPoolSize{0};
 };
 
 } // namespace Imap

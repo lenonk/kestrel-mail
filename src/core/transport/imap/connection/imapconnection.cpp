@@ -69,11 +69,6 @@ QByteArray buildLoginCommand(const QString &tag, const QString &email, const QSt
     return tag.toUtf8() + " LOGIN \"" + email.toUtf8() + "\" \"" + password.toUtf8() + "\"\r\n";
 }
 
-QByteArray buildSelectCommand(const QString &tag, const QString &mailbox) {
-    const QString quotedMailbox = "\"%1\""_L1.arg(mailbox);
-    return tag.toUtf8() + " SELECT " + quotedMailbox.toUtf8() + "\r\n";
-}
-
 QByteArray buildSimpleCommand(const QString &tag, const QString &command) {
     return tag.toUtf8() + " " + command.toUtf8() + "\r\n";
 }
@@ -493,40 +488,20 @@ Connection::list() {
 
 std::expected<QString, QString>
 Connection::select(const QString &mailbox) {
-    QString expectedTag = nextTag();
-    m_socket->write(buildSelectCommand(expectedTag, mailbox));
-    m_socket->flush();
-
-    QString resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
-    observeThrottleState(resp);
-    appendImapLog(m_logConnId, m_logOwner, m_email, "SELECT \"%1\""_L1.arg(mailbox), resp);
-
-    if (resp.isEmpty()) {
-        m_authenticated = false;
-        if (tryReconnect()) {
-            expectedTag = nextTag();
-            m_socket->write(buildSelectCommand(expectedTag, mailbox));
-            m_socket->flush();
-            resp = IO::readUntilTagged(*m_socket, expectedTag, IO::kFetchReadTimeoutMs);
-            observeThrottleState(resp);
-            appendImapLog(m_logConnId, m_logOwner, m_email, "SELECT \"%1\""_L1.arg(mailbox), resp);
-            if (resp.isEmpty())
-                m_authenticated = false;
-        }
-    }
-
-    if (!resp.contains(expectedTag + " OK"_L1, Qt::CaseInsensitive))
-        return std::unexpected(resp);
-
-    m_selectedFolder    = mailbox;
-    m_selectedReadOnly  = false;
-    return resp;
+    return selectOrExamine(mailbox, false);
 }
 
 std::expected<QString, QString>
 Connection::examine(const QString &mailbox) {
+    return selectOrExamine(mailbox, true);
+}
+
+std::expected<QString, QString>
+Connection::selectOrExamine(const QString &mailbox, const bool readOnly) {
+    const QString verb = readOnly ? "EXAMINE"_L1 : "SELECT"_L1;
+    const QString cmd  = "%1 \"%2\""_L1.arg(verb, mailbox);
+
     QString expectedTag = nextTag();
-    const QString cmd = "EXAMINE \"%1\""_L1.arg(mailbox);
     m_socket->write(buildSimpleCommand(expectedTag, cmd));
     m_socket->flush();
 
@@ -551,8 +526,8 @@ Connection::examine(const QString &mailbox) {
     if (!resp.contains(expectedTag + " OK"_L1, Qt::CaseInsensitive))
         return std::unexpected(resp);
 
-    m_selectedFolder    = mailbox;
-    m_selectedReadOnly  = true;
+    m_selectedFolder   = mailbox;
+    m_selectedReadOnly = readOnly;
     return resp;
 }
 
