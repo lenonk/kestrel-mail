@@ -82,6 +82,34 @@ QString stripGmailPrefix(const QString &folder) {
 
 
 
+ImapService::ImapService(const QVariantMap &accountConfig, DataStore *store, TokenVault *vault,
+                         QObject *parent)
+    : QObject(parent)
+    , m_store(store)
+    , m_vault(vault)
+    , m_accountConfig(accountConfig)
+    , m_email(accountConfig.value("email"_L1).toString().trimmed().toLower())
+    , m_host(accountConfig.value("imapHost"_L1).toString())
+    , m_port(accountConfig.value("imapPort"_L1).toInt())
+    , m_authMethod(accountConfig.value("authType"_L1).toString() == "password"_L1
+                       ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2)
+    , m_offlineMode(offlineModeEnabledFromEnv()) {
+    // Per-account constructor — pool created and initialized for this single account.
+    m_pool = std::make_unique<Imap::ConnectionPool>();
+    m_pool->setTokenRefresher([this](const QString &e) -> QString {
+        if (m_authMethod == Imap::AuthMethod::Login)
+            return m_vault ? m_vault->loadPassword(e) : QString{};
+        return refreshAccessToken(m_accountConfig, e);
+    });
+    if (!m_offlineMode) {
+        const QString credential = (m_authMethod == Imap::AuthMethod::Login && m_vault)
+            ? m_vault->loadPassword(m_email)
+            : QString{};
+        m_pool->initialize(m_email, m_host, m_port, m_authMethod, credential);
+    }
+    m_expectedPoolSize = m_pool->expectedConnections();
+}
+
 ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
     : QObject(parent)
     , m_accounts(accounts)
@@ -119,17 +147,19 @@ ImapService::~ImapService() { shutdown(); }
 
 void
 ImapService::initializeConnectionPool() {
+    // Per-account mode: pool already initialized in the constructor.
+    if (isPerAccountMode())
+        return;
+
     if (!m_pool)
         m_pool = std::make_unique<Imap::ConnectionPool>();
 
-
     m_pool->setTokenRefresher([this](const QString &email) -> QString {
-        if (!m_accounts) return {};
-        const auto accounts = m_accounts->accounts();
-        auto it = std::ranges::find_if(accounts, [&](const QVariant &a) {
+        const auto configs = accountConfigList();
+        auto it = std::ranges::find_if(configs, [&](const QVariant &a) {
             return a.toMap().value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0;
         });
-        if (it == accounts.end()) return {};
+        if (it == configs.end()) return {};
         const auto acc = it->toMap();
         if (acc.value("authType"_L1).toString() == "password"_L1)
             return m_vault ? m_vault->loadPassword(email) : QString{};
@@ -143,7 +173,7 @@ ImapService::initializeConnectionPool() {
 
     if (!m_accounts) return;
 
-    const auto accounts = resolveAccounts(m_accounts->accounts());
+    const auto accounts = resolveAccounts(accountConfigList());
     for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
         const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
         m_pool->addAccount(email, host, port, method, accessToken);
@@ -159,7 +189,36 @@ ImapService::expectedPoolConnections() const {
 
 qint32
 ImapService::poolConnectionsReady() const {
-    return m_pool ? m_pool->readyConnections() : 0;
+    qint32 total = m_pool ? m_pool->readyConnections() : 0;
+    for (auto *pool : m_accountPools)
+        total += pool->readyConnections();
+    return total;
+}
+
+void
+ImapService::registerAccountPool(const QString &email, Imap::ConnectionPool *pool) {
+    if (!pool) return;
+    m_accountPools.insert(email.trimmed().toLower(), pool);
+    m_expectedPoolSize += pool->expectedConnections();
+}
+
+void
+ImapService::unregisterAccountPool(const QString &email) {
+    const auto key = email.trimmed().toLower();
+    if (auto *pool = m_accountPools.value(key)) {
+        m_expectedPoolSize -= pool->expectedConnections();
+        m_accountPools.remove(key);
+    }
+}
+
+Imap::ConnectionPool*
+ImapService::poolForEmail(const QString &email) const {
+    if (isPerAccountMode())
+        return m_pool.get();
+    const auto key = email.trimmed().toLower();
+    if (auto *pool = m_accountPools.value(key))
+        return pool;
+    return m_pool.get();
 }
 
 void
@@ -234,9 +293,10 @@ ImapService::shutdown() {
         m_pendingAnnounce = false;
     }
 
-    if (m_pool) {
+    if (m_pool)
         m_pool->shutdown();
-    }
+    for (auto *pool : m_accountPools)
+        pool->shutdown();
 
     // Account-owned workers are shut down by AccountManager.
 
@@ -542,7 +602,7 @@ ImapService::prefetchAttachmentsInternal(const QString &accountEmail, const QStr
             }
         } taskGuard{this, taskKey};
 
-        auto cxn = m_pool->acquire(label, accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire(label, accountEmail);
         if (!cxn) {
             qWarning() << "[imap-pool] timed out acquiring operational connection for" << accountEmail;
             return;
@@ -740,7 +800,7 @@ ImapService::runAsync(std::function<SyncResult()> work, std::function<void(const
 
 QVariantList
 ImapService::workerGetAccounts() const {
-    return m_accounts ? m_accounts->accounts() : QVariantList{};
+    return accountConfigList();
 }
 
 QString
@@ -756,10 +816,10 @@ ImapService::workerEmitRealtimeStatus(const bool ok, const QString &message) {
         // suppressing the raw error toast in favour of the reauth prompt.
         if (!ok && (message.contains("no OAuth account"_L1, Qt::CaseInsensitive)
                  || message.contains("account settings incomplete"_L1, Qt::CaseInsensitive))) {
-            const auto accounts = m_accounts ? m_accounts->accounts() : QVariantList{};
-            const auto email = !accounts.isEmpty()
-                ? accounts.first().toMap().value("email"_L1).toString()
-                : QString{};
+            const auto email = isPerAccountMode() ? m_email
+                : (m_accounts && !m_accounts->accounts().isEmpty()
+                    ? m_accounts->accounts().first().toMap().value("email"_L1).toString()
+                    : QString{});
             if (!email.isEmpty()) {
                 emit accountNeedsReauth(email);
                 return;
@@ -1100,6 +1160,13 @@ ImapService::refreshAccessToken(const QVariantMap &account, const QString &email
     return result.accessToken;
 }
 
+QVariantList
+ImapService::accountConfigList() const {
+    if (isPerAccountMode())
+        return { m_accountConfig };
+    return m_accounts ? m_accounts->accounts() : QVariantList{};
+}
+
 QList<ImapService::AccountInfo>
 ImapService::resolveAccounts(const QVariantList &accounts) {
     QList<AccountInfo> result;
@@ -1146,7 +1213,7 @@ ImapService::fetchFolderHeaders(const QString &email,
                                 qint64 minUidExclusive,
                                 bool reconcileDeletes,
                                 qint32 fetchBudget) {
-    auto pooled = m_pool->acquire("fetch-folder-headers", email);
+    auto pooled = poolForEmail(email)->acquire("fetch-folder-headers", email);
     if (!pooled) {
         if (statusOut)
             *statusOut = "Operational IMAP pool timeout."_L1;
@@ -1375,16 +1442,12 @@ ImapService::refreshFolderList(bool announce) {
         return;
     }
 
-    if (!m_accounts || !m_store) {
+    const auto accounts = accountConfigList();
+    if (accounts.isEmpty() || !m_store) {
         if (announce)
-            emit syncFinished(false, "Sync dependencies not initialized.");
-        return;
-    }
-
-    const auto accounts = m_accounts->accounts();
-    if (accounts.isEmpty()) {
-        if (announce)
-            emit syncFinished(false, "No accounts configured yet.");
+            emit syncFinished(false, accounts.isEmpty()
+                ? "No accounts configured yet."_L1
+                : "Sync dependencies not initialized."_L1);
         return;
     }
 
@@ -1401,7 +1464,7 @@ ImapService::refreshFolderList(bool announce) {
                     return r;
                 }
 
-                auto pooled = m_pool->acquire("refresh-folder-list", email);
+                auto pooled = poolForEmail(email)->acquire("refresh-folder-list", email);
                 if (!pooled) continue;
 
                 QString status;
@@ -1431,10 +1494,10 @@ ImapService::refreshFolderList(bool announce) {
 
 void
 ImapService::refreshGoogleCalendars() {
-    if (m_destroying || !m_accounts)
+    if (m_destroying)
         return;
 
-    const auto accounts = m_accounts->accounts();
+    const auto accounts = accountConfigList();
     if (accounts.isEmpty()) {
         if (!m_googleCalendarList.isEmpty()) {
             m_googleCalendarList.clear();
@@ -1515,10 +1578,10 @@ void
 ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
                                      const QString &weekStartIso,
                                      const QString &weekEndIso) {
-    if (m_destroying || !m_accounts)
+    if (m_destroying)
         return;
 
-    const auto accounts = m_accounts->accounts();
+    const auto accounts = accountConfigList();
     if (accounts.isEmpty() || calendarIds.isEmpty()) {
         if (!m_googleWeekEvents.isEmpty()) {
             m_googleWeekEvents.clear();
@@ -1735,10 +1798,10 @@ ImapService::refreshGoogleWeekEvents(const QStringList &calendarIds,
 
 void
 ImapService::refreshGoogleContacts() {
-    if (m_destroying || !m_accounts)
+    if (m_destroying)
         return;
 
-    const auto accounts = m_accounts->accounts();
+    const auto accounts = accountConfigList();
     if (accounts.isEmpty())
         return;
 
@@ -1875,7 +1938,7 @@ ImapService::respondToCalendarInvite(const QString &calendarId,
     if (calendarId.isEmpty() || eventId.isEmpty() || response.isEmpty())
         return;
 
-    const auto accounts = m_accounts ? m_accounts->accounts() : QVariantList{};
+    const auto accounts = accountConfigList();
     runBackgroundTask([this, calendarId, eventId, response, accounts]() {
         const auto resolved = resolveAccounts(accounts);
         auto it = std::ranges::find_if(resolved, [](const AccountInfo &info) {
@@ -1979,7 +2042,7 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
     const auto folderNorm = folderName.trimmed();
     const auto uidNorm = uid.trimmed();
 
-    if (m_destroying || !m_accounts || !m_store || emailNorm.isEmpty() || uidNorm.isEmpty())
+    if (m_destroying || !m_store || emailNorm.isEmpty() || uidNorm.isEmpty())
         return;
 
     if (m_offlineMode) {
@@ -2002,11 +2065,11 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         return;
     }
 
-    const auto accountList = m_accounts->accounts();
-    auto acctIt = std::ranges::find_if(accountList, [&](const QVariant &a) {
+    const auto configs = accountConfigList();
+    auto acctIt = std::ranges::find_if(configs, [&](const QVariant &a) {
         return a.toMap().value("email"_L1).toString() == emailNorm;
     });
-    const QVariantMap account = (acctIt != accountList.end()) ? acctIt->toMap() : QVariantMap{};
+    const QVariantMap account = (acctIt != configs.end()) ? acctIt->toMap() : QVariantMap{};
 
     if (account.isEmpty()) {
         {
@@ -2122,13 +2185,14 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         // Serialize all background hydrations to a single connection slot so
         // the pool stays available for user actions, syncs, and IDLE.
         // User-initiated hydrations skip this entirely.
+        auto *hydratePool = poolForEmail(emailCopy);
         const bool isBg = !userInitiated;
-        if (isBg && m_pool && !m_pool->tryAcquireBgHydrate(60'000))
+        if (isBg && hydratePool && !hydratePool->tryAcquireBgHydrate(60'000))
             return {};
         struct SemGuard {
             Imap::ConnectionPool *pool; bool active;
             ~SemGuard() { if (active && pool) pool->releaseBgHydrate(); }
-        } semGuard{m_pool.get(), isBg};
+        } semGuard{hydratePool, isBg};
 
         Imap::MessageHydrator::Request r;
         r.folderName = folderNorm; r.uid = uidNorm;
@@ -2160,20 +2224,21 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
             if (attempt > 0)
                 QThread::msleep(kHydrateRetryDelayMs);
 
+            auto *pool = poolForEmail(emailCopy);
             std::shared_ptr<Imap::Connection> pooled;
             bool usedDedicated = false;
             if (userInitiated) {
-                pooled = m_pool->acquireHydrate(emailCopy);
+                pooled = pool->acquireHydrate(emailCopy);
                 if (pooled) {
                     usedDedicated = true;
                 } else {
                     qint8 poolAttempts = 0;
-                    pooled = m_pool->acquire("hydrate-user"_L1, emailCopy);
+                    pooled = pool->acquire("hydrate-user"_L1, emailCopy);
                     while (!pooled && poolAttempts++ < 10)
-                        pooled = m_pool->acquire("hydrate-user-fallback"_L1, emailCopy);
+                        pooled = pool->acquire("hydrate-user-fallback"_L1, emailCopy);
                 }
             } else {
-                pooled = m_pool->acquire("bg-hydrate"_L1, emailCopy);
+                pooled = pool->acquire("bg-hydrate"_L1, emailCopy);
             }
 
             const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
@@ -2247,7 +2312,7 @@ ImapService::moveMessage(const QString &accountEmail, const QString &folder,
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
-        auto cxn = m_pool->acquire("move-message", accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire("move-message", accountEmail);
         if (!cxn) return;
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2297,7 +2362,7 @@ ImapService::markMessageRead(const QString &accountEmail, const QString &folder,
     (void)QtConcurrent::run([this, accountEmail, folder, uid]() {
         if (m_destroying.load()) { return; }
 
-        auto cxn = m_pool->acquire("mark-read", accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire("mark-read", accountEmail);
         if (!cxn) { return; }
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2324,7 +2389,7 @@ ImapService::markMessageFlagged(const QString &accountEmail, const QString &fold
     (void)QtConcurrent::run([this, accountEmail, folder, uid, flags]() {
         if (m_destroying.load()) { return; }
 
-        auto cxn = m_pool->acquire("flag-message", accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire("flag-message", accountEmail);
         if (!cxn) { return; }
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2393,7 +2458,7 @@ ImapService::addMessageToFolder(const QString &accountEmail, const QString &fold
     const auto retval = QtConcurrent::run([this, accountEmail, folder, uid, resolvedTarget, messageId, unreadVal]() {
         if (m_destroying.load()) return;
 
-        auto cxn = m_pool->acquire("add-folder-membership", accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire("add-folder-membership", accountEmail);
         if (!cxn) return;
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2465,7 +2530,7 @@ ImapService::copyToLocalFolder(const QString &accountEmail, const QString &folde
 
         // 1. Hydrate body if missing.
         if (m_store && !m_store->hasUsableBodyForEdge(accountEmail, folder, uid)) {
-            auto cxn = m_pool->acquire("local-copy-hydrate", accountEmail);
+            auto cxn = poolForEmail(accountEmail)->acquire("local-copy-hydrate", accountEmail);
             if (cxn) {
                 Imap::MessageHydrator::Request req;
                 req.cxn        = cxn;
@@ -2486,7 +2551,7 @@ ImapService::copyToLocalFolder(const QString &accountEmail, const QString &folde
         const QVariantList attachments = m_store->attachmentsForMessage(accountEmail, folder, uid);
         if (attachments.isEmpty()) { return; }
 
-        auto cxn = m_pool->acquire("local-copy-attachments", accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire("local-copy-attachments", accountEmail);
         if (!cxn) { return; }
 
         const auto sourceFolder = resolveSourceFolder(folder);
@@ -2602,7 +2667,7 @@ ImapService::removeMessageFromFolder(const QString &accountEmail, const QString 
         if (m_destroying.load())
             return;
 
-        auto cxn = m_pool->acquire("remove-folder-membership", accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire("remove-folder-membership", accountEmail);
         if (!cxn)
             return;
 
@@ -2669,17 +2734,12 @@ ImapService::syncFolder(const QString &folderName, bool announce, const QString 
     }
 
 
-    if (!m_accounts || !m_store) {
+    const auto accounts = accountConfigList();
+    if (accounts.isEmpty() || !m_store) {
         if (announce)
-            emit syncFinished(false, "Sync dependencies not initialized.");
-        releaseSyncTarget();
-        return;
-    }
-
-    const auto accounts = m_accounts->accounts();
-    if (accounts.isEmpty()) {
-        if (announce)
-            emit syncFinished(false, "No accounts configured yet.");
+            emit syncFinished(false, accounts.isEmpty()
+                ? "No accounts configured yet."_L1
+                : "Sync dependencies not initialized."_L1);
         releaseSyncTarget();
         return;
     }
@@ -2687,13 +2747,14 @@ ImapService::syncFolder(const QString &folderName, bool announce, const QString 
     runAsync(
         [this, accounts, target, announce, accountEmail]() -> SyncResult {
             // Cap concurrent background syncs to keep pool connections available.
+            auto *syncPool = poolForEmail(accountEmail);
             const bool isBgSync = !announce;
-            if (isBgSync && m_pool && !m_pool->tryAcquireBgFolderSync(30'000))
+            if (isBgSync && syncPool && !syncPool->tryAcquireBgFolderSync(30'000))
                 return SyncResult{};
             struct FolderSyncGuard {
                 Imap::ConnectionPool *pool; bool active;
                 ~FolderSyncGuard() { if (active && pool) pool->releaseBgFolderSync(); }
-            } fsgGuard{m_pool.get(), isBgSync};
+            } fsgGuard{syncPool, isBgSync};
 
             SyncResult result;
             qint32 inboxInserted = 0;
@@ -2813,9 +2874,9 @@ ImapService::syncTargetsForAccount(const QString &email, const QString &host) co
 
 void
 ImapService::refreshGooglePeopleAvatars(const QString &accountEmail) {
-    if (m_destroying || !m_accounts || !m_store) return;
+    if (m_destroying || !m_store) return;
 
-    const auto accounts = m_accounts->accounts();
+    const auto accounts = accountConfigList();
     runBackgroundTask([this, accounts, accountEmail]() {
         const auto resolved = resolveAccounts(accounts);
         auto it = std::ranges::find_if(resolved, [&](const AccountInfo &info) {

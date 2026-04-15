@@ -31,6 +31,11 @@ class ImapService : public QObject
     Q_PROPERTY(QVariantList googleWeekEvents READ googleWeekEvents NOTIFY googleWeekEventsChanged)
     Q_PROPERTY(QVariantList googleContacts READ googleContacts NOTIFY googleContactsChanged)
 public:
+    // Per-account constructor — each account owns its own ImapService instance.
+    ImapService(const QVariantMap &accountConfig, DataStore *store, TokenVault *vault,
+                QObject *parent = nullptr);
+
+    // Legacy global constructor — still used during transition.
     explicit ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent = nullptr);
     ~ImapService() override;
 
@@ -58,6 +63,11 @@ public:
     // Wire an idle watcher / background worker owned by an account.
     void wireIdleWatcher(Imap::IdleWatcher *watcher, const QString &accountEmail);
     void wireBackgroundWorker(Imap::BackgroundWorker *worker, const QString &accountEmail);
+
+    // Per-account pool registry (global mode only).
+    void registerAccountPool(const QString &email, Imap::ConnectionPool *pool);
+    void unregisterAccountPool(const QString &email);
+
     qint32 expectedPoolConnections() const;
     qint32 poolConnectionsReady() const;
     Q_INVOKABLE void shutdown();
@@ -118,7 +128,15 @@ private:
     DataStore         *m_store      = nullptr;
     TokenVault        *m_vault      = nullptr;
 
+    // Per-account identity (set by the per-account constructor).
+    QVariantMap m_accountConfig;
+    QString m_email;
+    QString m_host;
+    int m_port = 993;
+    Imap::AuthMethod m_authMethod = Imap::AuthMethod::XOAuth2;
+
     std::unique_ptr<Imap::ConnectionPool> m_pool;
+    QHash<QString, Imap::ConnectionPool*> m_accountPools; // per-account pools (global mode)
 
     std::atomic_int   m_syncInProgress { 0 };
     std::atomic_bool  m_cancelRequested { false };
@@ -129,13 +147,8 @@ private:
     bool     m_pendingFullSync  = false;
     bool     m_pendingAnnounce  = true;
 
-    // Global idle/bg workers are no longer started. These pointers remain null.
-    // Per-account workers are owned by IAccount implementations.
+    // Global m_idleWatcher kept as null for syncFolderInternal UID hint optimization.
     Imap::IdleWatcher     *m_idleWatcher = nullptr;
-    QThread               *m_idleThread = nullptr;
-    Imap::BackgroundWorker *m_backgroundWorker = nullptr;
-    QThread               *m_backgroundThread = nullptr;
-    QTimer                *m_syncTimer = nullptr;
 
     QSet<QFutureWatcherBase*> m_activeWatchers;
     QMutex                    m_activeWatchersMutex;
@@ -171,6 +184,9 @@ private:
     struct SyncFolderOptions {
         bool announce = true;
     };
+    [[nodiscard]] bool isPerAccountMode() const { return !m_email.isEmpty(); }
+    [[nodiscard]] QVariantList accountConfigList() const;
+    [[nodiscard]] Imap::ConnectionPool* poolForEmail(const QString &email) const;
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
 
 public:
