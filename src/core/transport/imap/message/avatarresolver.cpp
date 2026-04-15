@@ -50,6 +50,45 @@ namespace {
         return nam;
     }
 
+    // Synchronous HTTP GET with configurable timeout and optional Bearer auth.
+    struct SyncHttpReply {
+        QByteArray payload;
+        QString    contentType;
+        int        httpStatus = 0;
+        bool       ok         = false;
+    };
+
+    SyncHttpReply
+    syncGet(const QUrl &url, int timeoutMs = 800, const QString &bearerToken = {}) {
+        QNetworkRequest req(url);
+        req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
+        if (!bearerToken.isEmpty())
+            req.setRawHeader("Authorization", "Bearer %1"_L1.arg(bearerToken).toUtf8());
+
+        QNetworkReply *reply = sharedNam().get(req);
+        QEventLoop loop;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        timeout.start(timeoutMs);
+        loop.exec();
+
+        SyncHttpReply result;
+        if (reply->isFinished()) {
+            result.httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (reply->error() == QNetworkReply::NoError) {
+                result.payload     = reply->readAll();
+                result.contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString().trimmed().toLower();
+                result.ok          = true;
+            }
+        }
+
+        if (!reply->isFinished()) reply->abort();
+        reply->deleteLater();
+        return result;
+    }
+
     // Normalize a full domain to its registrable base, handling ccTLDs like co.uk.
     QString registrableDomain(const QString &domain) {
         const QStringList parts = domain.split('.', Qt::SkipEmptyParts);
@@ -70,35 +109,20 @@ namespace {
     }
 
     ImageFetch fetchImageBytes(const QUrl &url, int timeoutMs = 800) {
-        QNetworkRequest req(url);
-        req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
-
-        QNetworkReply *reply = sharedNam().get(req);
-        QEventLoop loop;
-        QTimer timeout;
-        timeout.setSingleShot(true);
-        QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        timeout.start(timeoutMs);
-        loop.exec();
+        const auto http = syncGet(url, timeoutMs);
 
         ImageFetch result;
-        if (reply->isFinished() && reply->error() == QNetworkReply::NoError) {
-            const auto payload = reply->readAll();
-            const auto ct = reply->header(QNetworkRequest::ContentTypeHeader).toString().trimmed().toLower();
-            if (!payload.isEmpty() && payload.size() <= 512 * 1024 && ct.startsWith("image/"_L1)) {
-                QImage img;
-                if (img.loadFromData(payload)) {
-                    result.bytes  = payload;
-                    result.mime   = ct;
-                    result.width  = img.width();
-                    result.height = img.height();
-                }
+        if (http.ok && !http.payload.isEmpty()
+                && http.payload.size() <= 512 * 1024
+                && http.contentType.startsWith("image/"_L1)) {
+            QImage img;
+            if (img.loadFromData(http.payload)) {
+                result.bytes  = http.payload;
+                result.mime   = http.contentType;
+                result.width  = img.width();
+                result.height = img.height();
             }
         }
-
-        if (!reply->isFinished()) reply->abort();
-        reply->deleteLater();
         return result;
     }
 
@@ -240,26 +264,11 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
     q.addQueryItem("pageSize"_L1, "1"_L1);
     url.setQuery(q);
 
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", "Bearer %1"_L1.arg(accessToken).toUtf8());
-    req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
-
-    QNetworkReply *reply = sharedNam().get(req);
-    QEventLoop loop;
-    QTimer timeout;
-    timeout.setSingleShot(true);
-    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    timeout.start(350);
-    loop.exec();
+    const auto http = syncGet(url, 350, accessToken);
 
     QString found;
-    QString outcome = "none"_L1;
-    if (!reply->isFinished()) {
-        outcome = "timeout"_L1;
-    }
-    else if (reply->error() == QNetworkReply::NoError) {
-        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+    if (http.ok) {
+        const auto obj = QJsonDocument::fromJson(http.payload).object();
         const auto results = obj.value("results"_L1).toArray();
         if (!results.isEmpty()) {
             const auto person = results.at(0).toObject().value("person"_L1).toObject();
@@ -271,23 +280,15 @@ resolveGooglePeopleAvatarUrl(const QString &senderEmail, const QString &accessTo
                 const auto u = po.value("url"_L1).toString().trimmed();
                 if (u.startsWith("https://"_L1) || u.startsWith("http://"_L1)) {
                     found = u;
-                    outcome = "hit"_L1;
                     break;
                 }
             }
         }
     }
-    else {
-        const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        outcome = QStringLiteral("http-%1").arg(status > 0 ? status : -1);
-        if (status == 401 || status == 403) {
-            QMutexLocker lock(&mutex);
-            peopleAuthUnavailable = true;
-        }
+    else if (http.httpStatus == 401 || http.httpStatus == 403) {
+        QMutexLocker lock(&mutex);
+        peopleAuthUnavailable = true;
     }
-
-    if (!reply->isFinished()) reply->abort();
-    reply->deleteLater();
 
     {
         QMutexLocker lock(&mutex);
@@ -316,39 +317,22 @@ fetchAvatarBlob(const QString &url, const QString &bearerToken) {
         }
     }
 
-    QNetworkRequest req { QUrl(u) };
-    req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
-    if (!bearerToken.isEmpty())
-        req.setRawHeader("Authorization", "Bearer %1"_L1.arg(bearerToken).toUtf8());
-
-    QNetworkReply *reply = sharedNam().get(req);
-    QEventLoop loop;
-    QTimer timeout;
-    timeout.setSingleShot(true);
-    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    timeout.start(500);
-    loop.exec();
+    const auto http = syncGet(QUrl(u), 500, bearerToken);
 
     auto out = u;
-    if (reply->isFinished() && reply->error() == QNetworkReply::NoError) {
-        const auto payload = reply->readAll();
-        const auto contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString().trimmed().toLower();
-        if (!payload.isEmpty() && payload.size() <= 512 * 1024 && contentType.startsWith("image/"_L1)) {
-            AvatarBlobCacheEntry entry;
-            entry.bytes = payload;
-            entry.mime = contentType;
-            entry.fetchedAtUtc = now;
-            {
-                QMutexLocker lock(&mutex);
-                cache.insert(u, entry);
-            }
-            out = "data:%1;base64,%2"_L1.arg(contentType, QString::fromLatin1(payload.toBase64()));
+    if (http.ok && !http.payload.isEmpty()
+            && http.payload.size() <= 512 * 1024
+            && http.contentType.startsWith("image/"_L1)) {
+        AvatarBlobCacheEntry entry;
+        entry.bytes = http.payload;
+        entry.mime = http.contentType;
+        entry.fetchedAtUtc = now;
+        {
+            QMutexLocker lock(&mutex);
+            cache.insert(u, entry);
         }
+        out = "data:%1;base64,%2"_L1.arg(http.contentType, QString::fromLatin1(http.payload.toBase64()));
     }
-
-    if (!reply->isFinished()) reply->abort();
-    reply->deleteLater();
 
     return out;
 }
@@ -420,22 +404,12 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
             return cache.value(d);
     }
 
-    const QUrl url("https://dns.google/resolve?name=default._bimi.%1&type=TXT"_L1.arg(d));
-    QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::UserAgentHeader, "kestrel-mail/1.0"_L1);
-
-    QNetworkReply *reply = sharedNam().get(req);
-    QEventLoop loop;
-    QTimer timeout;
-    timeout.setSingleShot(true);
-    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    timeout.start(1200);
-    loop.exec();
+    const auto http = syncGet(
+        QUrl("https://dns.google/resolve?name=default._bimi.%1&type=TXT"_L1.arg(d)), 1200);
 
     QString found;
-    if (reply->isFinished() && reply->error() == QNetworkReply::NoError) {
-        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+    if (http.ok) {
+        const auto obj = QJsonDocument::fromJson(http.payload).object();
         for (const auto answers = obj.value("Answer"_L1).toArray(); const auto &av : answers) {
             const auto ao = av.toObject();
             if (const auto type = ao.value("type"_L1).toInt(0); type != 16)
@@ -447,9 +421,6 @@ resolveBimiLogoUrlViaDoh(const QString& domain) {
             }
         }
     }
-
-    if (!reply->isFinished()) reply->abort();
-    reply->deleteLater();
 
     {
         QMutexLocker lock(&mutex);
