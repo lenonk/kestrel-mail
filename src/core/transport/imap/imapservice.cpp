@@ -6,6 +6,7 @@
 #include "../../store/datastore.h"
 #include "../../utils.h"
 #include "connection/imapconnection.h"
+#include "connection/connectionpool.h"
 #include "sync/syncutils.h"
 #include "sync/syncengine.h"
 #include "message/messagehydrator.h"
@@ -53,48 +54,17 @@ using Imap::AvatarResolver::fetchAvatarBlob;
 using Imap::AvatarResolver::writeAvatarFile;
 
 namespace {
-struct PooledConnSlot {
-    std::unique_ptr<Imap::Connection> conn;
-    bool busy = false;
-    QString email;
-    QString host;
-    int port = 0;
-    QString owner;
-    qint64 leasedAtMs = 0;
-};
 
-QMutex g_poolMutex;
-QWaitCondition g_poolWait;
-std::vector<PooledConnSlot> g_poolSlots;
-std::atomic_bool g_poolInitialized{false};
-std::function<QString(const QString &email)> g_poolTokenRefresher;
-// 3 pool + 1 dedicated hydrate + 1 IDLE = 5 total, within Gmail's per-account limit.
-constexpr int kOperationalPoolMax = 3;
-
-// Only 1 background body-hydration at a time; user-initiated hydrations bypass this.
-QSemaphore g_bgHydrateSem{1};
-
-// Limit concurrent background folder syncs so they can't exhaust the connection pool.
-// User-initiated syncs (syncAll / syncFolder with announce=true) bypass this.
-QSemaphore g_bgFolderSyncSem{1};
-constexpr int kPoolAcquireTimeoutMs = 3500;
+// Transitional shim: file-scope pointer to the (still-singleton) ImapService's pool.
+// Used by the static getPooledConnection/getDedicatedHydrateConnection methods.
+// Removed in Step 3 when BackgroundWorker receives the pool via injection.
+Imap::ConnectionPool *g_poolShim = nullptr;
 
 bool offlineModeEnabledFromEnv() {
     const QByteArray raw = qgetenv("KESTREL_OFFLINE_MODE").trimmed().toLower();
     if (raw.isEmpty())
         return false;
     return raw == "1" || raw == "true" || raw == "yes" || raw == "on";
-}
-
-// Dedicated hydration slot — one per account, established before the pool.
-// Used exclusively for user-click-initiated hydration to guarantee availability.
-QMutex g_hydrateMutex;
-QWaitCondition g_hydrateWait;
-std::vector<PooledConnSlot> g_hydrateSlots;
-
-static bool isBackgroundOwner(const QString &owner) {
-    return owner.startsWith("bg-", Qt::CaseInsensitive)
-        || owner.startsWith("background", Qt::CaseInsensitive);
 }
 
 // Strip "[Gmail]/" or "[Google Mail]/" prefix and normalise "INBOX" → "Inbox".
@@ -112,129 +82,16 @@ QString stripGmailPrefix(const QString &folder) {
 }
 }
 
-std::shared_ptr<Imap::Connection> ImapService::getPooledConnection(const QString &email, const QString &owner) {
-    qint32 slotIndex = -1;
-    const auto deadline = QDateTime::currentMSecsSinceEpoch() + kPoolAcquireTimeoutMs;
-
-    QMutexLocker lock(&g_poolMutex);
-    while (true) {
-        qint32 freeForEmail = 0;
-        for (qsizetype i = 0; i < static_cast<qsizetype>(g_poolSlots.size()); ++i) {
-            if (!email.isEmpty() && g_poolSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
-                continue;
-            if (!g_poolSlots[i].busy)
-                ++freeForEmail;
-        }
-
-        const bool reserveForUser = isBackgroundOwner(owner) && freeForEmail <= 1;
-
-        if (!reserveForUser) {
-            for (qsizetype i = 0; i < static_cast<qsizetype>(g_poolSlots.size()); ++i) {
-                if (g_poolSlots[i].busy)
-                    continue;
-                if (!email.isEmpty() && g_poolSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
-                    continue;
-                g_poolSlots[i].busy = true;
-                g_poolSlots[i].owner = owner;
-                g_poolSlots[i].leasedAtMs = QDateTime::currentMSecsSinceEpoch();
-                slotIndex = i;
-                break;
-            }
-        }
-
-        if (slotIndex >= 0)
-            break;
-
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        const qint32 remaining = static_cast<qint32>(deadline - now);
-        if (remaining <= 0)
-            return {};
-        g_poolWait.wait(&g_poolMutex, remaining);
-    }
-
-    Imap::Connection *raw = g_poolSlots[slotIndex].conn.get();
-    raw->setLogOwner(owner);
-    const QString slotEmail = g_poolSlots[slotIndex].email;
-    const QString slotHost  = g_poolSlots[slotIndex].host;
-    const int     slotPort  = g_poolSlots[slotIndex].port;
-    lock.unlock();
-
-    if (!raw->isConnected()) {
-        std::function<QString(const QString &)> refresher;
-        {
-            QMutexLocker rl(&g_poolMutex);
-            refresher = g_poolTokenRefresher;
-        }
-        raw->setTokenRefresher(refresher);
-        const QString token = refresher ? refresher(slotEmail) : QString{};
-        if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token).success) {
-            QMutexLocker rl(&g_poolMutex);
-            g_poolSlots[slotIndex].busy = false;
-            g_poolWait.wakeOne();
-            return {};
-        }
-    }
-
-    return {raw, [slotIndex](Imap::Connection *) {
-        QMutexLocker rel(&g_poolMutex);
-        if (slotIndex >= 0 && slotIndex < static_cast<qint32>(g_poolSlots.size())) {
-            g_poolSlots[slotIndex].busy = false;
-            g_poolSlots[slotIndex].owner.clear();
-            g_poolSlots[slotIndex].leasedAtMs = 0;
-            g_poolWait.wakeOne();
-        }
-    }};
+std::shared_ptr<Imap::Connection>
+ImapService::getPooledConnection(const QString &email, const QString &owner) {
+    if (!g_poolShim) return {};
+    return g_poolShim->acquire(owner, email);
 }
 
 std::shared_ptr<Imap::Connection>
 ImapService::getDedicatedHydrateConnection(const QString &email) {
-    qint32 slotIndex = -1;
-    {
-        QMutexLocker lock(&g_hydrateMutex);
-        for (qsizetype i = 0; i < static_cast<qsizetype>(g_hydrateSlots.size()); ++i) {
-            if (g_hydrateSlots[i].email.compare(email, Qt::CaseInsensitive) == 0 && !g_hydrateSlots[i].busy) {
-                g_hydrateSlots[i].busy = true;
-                g_hydrateSlots[i].owner = "hydrate-dedicated"_L1;
-                g_hydrateSlots[i].leasedAtMs = QDateTime::currentMSecsSinceEpoch();
-                slotIndex = i;
-                break;
-            }
-        }
-    }
-    if (slotIndex < 0)
-        return {};
-
-    Imap::Connection *raw = g_hydrateSlots[slotIndex].conn.get();
-    raw->setLogOwner("hydrate-dedicated"_L1);
-    const QString slotEmail = g_hydrateSlots[slotIndex].email;
-    const QString slotHost  = g_hydrateSlots[slotIndex].host;
-    const int     slotPort  = g_hydrateSlots[slotIndex].port;
-
-    if (!raw->isConnected()) {
-        std::function<QString(const QString &)> refresher;
-        {
-            QMutexLocker rl(&g_poolMutex);
-            refresher = g_poolTokenRefresher;
-        }
-        raw->setTokenRefresher(refresher);
-        const QString token = refresher ? refresher(slotEmail) : QString{};
-        if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token).success) {
-            QMutexLocker lock(&g_hydrateMutex);
-            g_hydrateSlots[slotIndex].busy = false;
-            g_hydrateWait.wakeOne();
-            return {};
-        }
-    }
-
-    return {raw, [slotIndex](Imap::Connection *) {
-        QMutexLocker rel(&g_hydrateMutex);
-        if (slotIndex >= 0 && slotIndex < static_cast<qint32>(g_hydrateSlots.size())) {
-            g_hydrateSlots[slotIndex].busy = false;
-            g_hydrateSlots[slotIndex].owner.clear();
-            g_hydrateSlots[slotIndex].leasedAtMs = 0;
-            g_hydrateWait.wakeOne();
-        }
-    }};
+    if (!g_poolShim) return {};
+    return g_poolShim->acquireHydrate(email);
 }
 
 ImapService::ImapService(AccountRepository *accounts, DataStore *store, TokenVault *vault, QObject *parent)
@@ -274,135 +131,38 @@ ImapService::~ImapService() { shutdown(); }
 
 void
 ImapService::initializeConnectionPool() {
-    {
-        QMutexLocker lock(&g_poolMutex);
-        g_poolTokenRefresher = [this](const QString &email) -> QString {
-            if (!m_accounts) return {};
-            const auto accounts = m_accounts->accounts();
-            auto it = std::ranges::find_if(accounts, [&](const QVariant &a) {
-                return a.toMap().value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0;
-            });
-            if (it == accounts.end()) return {};
-            const auto acc = it->toMap();
-            if (acc.value("authType"_L1).toString() == "password"_L1)
-                return m_vault ? m_vault->loadPassword(email) : QString{};
-            return refreshAccessToken(acc, email);
-        };
-    }
+    if (!m_pool)
+        m_pool = std::make_unique<Imap::ConnectionPool>();
+
+    g_poolShim = m_pool.get();
+
+    m_pool->setTokenRefresher([this](const QString &email) -> QString {
+        if (!m_accounts) return {};
+        const auto accounts = m_accounts->accounts();
+        auto it = std::ranges::find_if(accounts, [&](const QVariant &a) {
+            return a.toMap().value("email"_L1).toString().compare(email, Qt::CaseInsensitive) == 0;
+        });
+        if (it == accounts.end()) return {};
+        const auto acc = it->toMap();
+        if (acc.value("authType"_L1).toString() == "password"_L1)
+            return m_vault ? m_vault->loadPassword(email) : QString{};
+        return refreshAccessToken(acc, email);
+    });
 
     if (m_offlineMode) {
         m_expectedPoolSize = 0;
         return;
     }
 
-    if (!g_poolInitialized.exchange(true)) {
+    if (!m_accounts) return;
 
-        if (!m_accounts) {
-            m_expectedPoolSize = 0;
-            g_poolInitialized.store(false);
-            return;
-        }
-        const auto accounts = resolveAccounts(m_accounts->accounts());
-        if (accounts.empty()) {
-            m_expectedPoolSize = 0;
-            g_poolInitialized.store(false);
-            return;
-        }
-        m_expectedPoolSize = static_cast<qint32>(accounts.size()) * (1 + kOperationalPoolMax);
-
-        // Establish dedicated hydration connections FIRST (one per account).
-        // These are reserved for user-click-initiated hydration to guarantee availability.
-        for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
-            const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
-            runBackgroundTask([this, host, email, port, accessToken, method]() {
-                if (m_destroying.load())
-                    return;
-
-                auto conn = std::make_unique<Imap::Connection>();
-                conn->connectAndAuth(host, port, email, accessToken, method);
-
-                PooledConnSlot s;
-                s.email = email; s.host = host; s.port = port;
-                s.conn = std::move(conn); s.busy = false;
-
-                QMutexLocker lock(&g_hydrateMutex);
-                g_hydrateSlots.push_back(std::move(s));
-                g_hydrateWait.wakeOne();
-            });
-        }
-
-        // Then establish the general-purpose operational pool.
-        for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
-            const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
-            for (qint32 i = 0; i < kOperationalPoolMax; ++i) {
-                runBackgroundTask([this, host, email, port, accessToken, method]() {
-                    if (m_destroying.load())
-                        return;
-
-                    auto conn = std::make_unique<Imap::Connection>();
-                    conn->connectAndAuth(host, port, email, accessToken, method);
-
-                    PooledConnSlot s;
-                    s.email = email; s.host = host; s.port = port;
-                    s.conn = std::move(conn); s.busy = false;
-
-                    QMutexLocker lock(&g_poolMutex);
-                    g_poolSlots.push_back(std::move(s));
-                    g_poolWait.wakeOne();
-                });
-            }
-        }
-    } else {
-        // Pool already initialized — add connections for any newly-added accounts.
-        if (!m_accounts) return;
-        const auto accounts = resolveAccounts(m_accounts->accounts());
-
-        QSet<QString> pooledEmails;
-        {
-            QMutexLocker lock(&g_poolMutex);
-            for (const auto &s : g_poolSlots)
-                pooledEmails.insert(s.email.toLower());
-        }
-        {
-            QMutexLocker lock(&g_hydrateMutex);
-            for (const auto &s : g_hydrateSlots)
-                pooledEmails.insert(s.email.toLower());
-        }
-
-        for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
-            if (pooledEmails.contains(email.toLower())) continue;
-
-            const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
-
-            // Hydration connection.
-            runBackgroundTask([this, host, email, port, accessToken, method]() {
-                if (m_destroying.load()) return;
-                auto conn = std::make_unique<Imap::Connection>();
-                conn->connectAndAuth(host, port, email, accessToken, method);
-                PooledConnSlot s;
-                s.email = email; s.host = host; s.port = port;
-                s.conn = std::move(conn); s.busy = false;
-                QMutexLocker lock(&g_hydrateMutex);
-                g_hydrateSlots.push_back(std::move(s));
-                g_hydrateWait.wakeOne();
-            });
-
-            // Operational pool connections.
-            for (qint32 i = 0; i < kOperationalPoolMax; ++i) {
-                runBackgroundTask([this, host, email, port, accessToken, method]() {
-                    if (m_destroying.load()) return;
-                    auto conn = std::make_unique<Imap::Connection>();
-                    conn->connectAndAuth(host, port, email, accessToken, method);
-                    PooledConnSlot s;
-                    s.email = email; s.host = host; s.port = port;
-                    s.conn = std::move(conn); s.busy = false;
-                    QMutexLocker lock(&g_poolMutex);
-                    g_poolSlots.push_back(std::move(s));
-                    g_poolWait.wakeOne();
-                });
-            }
-        }
+    const auto accounts = resolveAccounts(m_accounts->accounts());
+    for (const auto &[email, host, accessToken, port, acctAuthType] : accounts) {
+        const auto method = acctAuthType == "password"_L1 ? Imap::AuthMethod::Login : Imap::AuthMethod::XOAuth2;
+        m_pool->addAccount(email, host, port, method, accessToken);
     }
+
+    m_expectedPoolSize = m_pool->expectedConnections();
 }
 
 qint32
@@ -412,16 +172,7 @@ ImapService::expectedPoolConnections() const {
 
 qint32
 ImapService::poolConnectionsReady() const {
-    qint32 count = 0;
-    {
-        QMutexLocker lock(&g_hydrateMutex);
-        count += static_cast<qint32>(g_hydrateSlots.size());
-    }
-    {
-        QMutexLocker lock(&g_poolMutex);
-        count += static_cast<qint32>(g_poolSlots.size());
-    }
-    return count;
+    return m_pool ? m_pool->readyConnections() : 0;
 }
 
 void
@@ -496,9 +247,9 @@ ImapService::shutdown() {
         m_pendingAnnounce = false;
     }
 
-    {
-        QMutexLocker lock(&g_poolMutex);
-        g_poolTokenRefresher = nullptr;
+    if (m_pool) {
+        m_pool->shutdown();
+        g_poolShim = nullptr;
     }
 
     // Account-owned workers are shut down by AccountManager.
@@ -2386,12 +2137,12 @@ ImapService::hydrateMessageBodyInternal(const QString &accountEmail, const QStri
         // the pool stays available for user actions, syncs, and IDLE.
         // User-initiated hydrations skip this entirely.
         const bool isBg = !userInitiated;
-        if (isBg && !g_bgHydrateSem.tryAcquire(1, 60'000))
+        if (isBg && m_pool && !m_pool->tryAcquireBgHydrate(60'000))
             return {};
         struct SemGuard {
-            bool active;
-            ~SemGuard() { if (active) g_bgHydrateSem.release(); }
-        } semGuard{isBg};
+            Imap::ConnectionPool *pool; bool active;
+            ~SemGuard() { if (active && pool) pool->releaseBgHydrate(); }
+        } semGuard{m_pool.get(), isBg};
 
         Imap::MessageHydrator::Request r;
         r.folderName = folderNorm; r.uid = uidNorm;
@@ -2951,12 +2702,12 @@ ImapService::syncFolder(const QString &folderName, bool announce, const QString 
         [this, accounts, target, announce, accountEmail]() -> SyncResult {
             // Cap concurrent background syncs to keep pool connections available.
             const bool isBgSync = !announce;
-            if (isBgSync && !g_bgFolderSyncSem.tryAcquire(1, 30'000))
+            if (isBgSync && m_pool && !m_pool->tryAcquireBgFolderSync(30'000))
                 return SyncResult{};
             struct FolderSyncGuard {
-                bool active;
-                ~FolderSyncGuard() { if (active) g_bgFolderSyncSem.release(); }
-            } fsgGuard{isBgSync};
+                Imap::ConnectionPool *pool; bool active;
+                ~FolderSyncGuard() { if (active && pool) pool->releaseBgFolderSync(); }
+            } fsgGuard{m_pool.get(), isBgSync};
 
             SyncResult result;
             qint32 inboxInserted = 0;

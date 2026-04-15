@@ -11,7 +11,10 @@
 #include "sync/idlewatcher.h"
 #include "sync/backgroundworker.h"
 
-namespace Imap { class Connection; }
+namespace Imap {
+class Connection;
+}
+#include "connection/connectionpool.h"
 
 class AccountRepository;
 class DataStore;
@@ -34,6 +37,7 @@ public:
     // syncAll removed — accounts own their own syncAll via IAccount.
     static std::shared_ptr<Imap::Connection> getPooledConnection(const QString &email = {}, const QString &owner = {});
     static std::shared_ptr<Imap::Connection> getDedicatedHydrateConnection(const QString &email);
+    [[nodiscard]] Imap::ConnectionPool* pool() const { return m_pool.get(); }
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true, const QString &accountEmail = {});
     Q_INVOKABLE void refreshFolderList(bool announce = true);
     Q_INVOKABLE void hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid);
@@ -115,6 +119,8 @@ private:
     AccountRepository *m_accounts   = nullptr;
     DataStore         *m_store      = nullptr;
     TokenVault        *m_vault      = nullptr;
+
+    std::unique_ptr<Imap::ConnectionPool> m_pool;
 
     std::atomic_int   m_syncInProgress { 0 };
     std::atomic_bool  m_cancelRequested { false };
