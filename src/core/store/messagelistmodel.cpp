@@ -216,14 +216,7 @@ MessageListModel::setSelection(const QString &folderKey, const QStringList &sele
     m_folderKey = folderKey;
     m_selectedCategories = selectedCategories;
     m_selectedCategoryIndex = normalizedIndex;
-    m_windowStart = 0;
     m_loadedSourceRows.clear();
-    m_nextOffset = 0;
-
-    if (m_hasMore) {
-        m_hasMore = false;
-        emit pagingChanged();
-    }
 
     if (!m_searchQuery.isEmpty()) return; // search takes priority over folder selection
     refresh();
@@ -236,14 +229,7 @@ MessageListModel::setSearchQuery(const QString &query) {
     if (m_searchQuery == trimmed) { return; }
 
     m_searchQuery = trimmed;
-    m_windowStart = 0;
     m_loadedSourceRows.clear();
-    m_nextOffset = 0;
-
-    if (m_hasMore) {
-        m_hasMore = false;
-        emit pagingChanged();
-    }
 
     emit searchQueryChanged();
 
@@ -279,11 +265,6 @@ MessageListModel::setBucketExpanded(const QString &bucketKey, const bool expande
 
     if (!changed) return;
     refreshView();
-
-    // Collapsing a bucket shrinks the visible list. Load more messages from
-    // the DB to fill the gap so the user doesn't see an unexpectedly short list.
-    if (!expanded && m_hasMore)
-        loadMore();
 }
 
 void
@@ -311,203 +292,147 @@ MessageListModel::setExpansionState(const bool todayExpanded,
 
 void
 MessageListModel::refresh() {
-    if (m_isLoadingPage) {
-        m_pendingRefresh = true;
-        return;
-    }
-
-    m_isLoadingPage = true;
-    m_pendingRefresh = false;
+    const auto generation = ++m_refreshGeneration;
 
     DataStore *store = m_dataStore.data();
 
     if (!store) {
         m_loadedSourceRows = {};
-        m_nextOffset = 0;
+        if (m_loading) { m_loading = false; emit loadingChanged(); }
         refreshView();
-        m_isLoadingPage = false;
         return;
     }
 
-    const auto preserveLimit = qMax(m_pageSize, m_nextOffset);
+    // Reset for a fresh load and show the first batch immediately.
+    m_loadedSourceRows.clear();
+    m_batchOffset = 0;
+
+    loadNextBatch(generation);
+}
+
+void
+MessageListModel::loadNextBatch(const quint64 generation) {
+    static constexpr int kBatchSize = 5000;
+
+    DataStore *store = m_dataStore.data();
+    if (!store || generation != m_refreshGeneration) {
+        if (m_loading) { m_loading = false; emit loadingChanged(); }
+        return;
+    }
+
     const auto folderKey = m_folderKey;
     const auto selectedCategories = m_selectedCategories;
     const auto selectedCategoryIndex = m_selectedCategoryIndex;
+    const auto searchQuery = m_searchQuery;
+    const auto offset = m_batchOffset;
 
-    using Result = std::pair<QVariantList, bool>;
-
-    auto *watcher = new QFutureWatcher<Result>(this);
+    auto *watcher = new QFutureWatcher<QVariantList>(this);
     m_refreshWatcher = watcher;
 
-    connect(watcher, &QFutureWatcher<Result>::finished, this, [this, watcher]() {
+    connect(watcher, &QFutureWatcher<QVariantList>::finished, this, [this, watcher, generation]() {
         m_refreshWatcher = nullptr;
         watcher->deleteLater();
 
-        QElapsedTimer t; t.start();
-        const auto [rows, hasMore] = watcher->result();
-        m_loadedSourceRows = rows;
-        m_nextOffset = m_loadedSourceRows.size();
+        if (generation != m_refreshGeneration)
+            return;
 
-        const bool oldHasMore = m_hasMore;
-        m_hasMore = hasMore;
+        const auto batch = watcher->result();
 
-        if (oldHasMore != m_hasMore) { emit pagingChanged(); }
+        if (!batch.isEmpty()) {
+            m_loadedSourceRows.reserve(m_loadedSourceRows.size() + batch.size());
+            for (const auto &v : batch)
+                m_loadedSourceRows.push_back(v);
+            m_batchOffset = m_loadedSourceRows.size();
 
-        refreshView();
-        m_isLoadingPage = false;
+            // First batch: full rebuild. Subsequent batches: append only.
+            if (m_batchOffset <= kBatchSize)
+                refreshView();
+            else
+                appendRows(batch);
+        }
 
-        if (m_pendingRefresh) {
-            m_pendingRefresh = false;
-            refresh();
+        if (batch.size() < kBatchSize) {
+            // No more data — done loading.
+            if (m_loading) { m_loading = false; emit loadingChanged(); }
+        } else {
+            // More data available — show progress bar and fetch next batch.
+            if (!m_loading) { m_loading = true; emit loadingChanged(); }
+            loadNextBatch(generation);
         }
     });
 
-    const auto searchQuery = m_searchQuery;
     watcher->setFuture(QtConcurrent::run(
-        [store, folderKey, selectedCategories, selectedCategoryIndex, preserveLimit, searchQuery]() -> Result {
-            QElapsedTimer t; t.start();
+        [store, folderKey, selectedCategories, selectedCategoryIndex, searchQuery, offset]() -> QVariantList {
             bool hasMore = false;
-            QVariantList rows;
-
-            if (!searchQuery.isEmpty()) {
-                rows = store->searchMessages(searchQuery, preserveLimit, 0, &hasMore);
-            } else {
-                rows = store->messagesForSelection(
-                    folderKey, selectedCategories, selectedCategoryIndex, preserveLimit, 0, &hasMore);
-            }
-
-            return {std::move(rows), hasMore};
+            if (!searchQuery.isEmpty())
+                return store->searchMessages(searchQuery, kBatchSize, offset, &hasMore);
+            return store->messagesForSelection(
+                folderKey, selectedCategories, selectedCategoryIndex, kBatchSize, offset, &hasMore);
         }));
 }
 
 void
 MessageListModel::refreshView() {
     QVector<Row> built = buildRows(m_loadedSourceRows);
-
-    {
-        QMutexLocker locker(&m_rowsMutex);
-        m_allRows = std::move(built);
-    }
-
     emit totalRowCountChanged();
-
-    applyWindow();
+    applyRows(std::move(built));
 }
 
 void
-MessageListModel::applyWindow() {
-    QVector<Row> window;
+MessageListModel::appendRows(const QVariantList &batch) {
+    QVector<Row> delta = buildRows(batch);
+    if (delta.isEmpty()) return;
 
+    // Collect existing stable keys and bucket headers to deduplicate.
+    QSet<QString> existingKeys;
     {
         QMutexLocker locker(&m_rowsMutex);
-        if (m_windowStart < 0) { m_windowStart = 0; }
-
-        const auto effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
-        if (m_windowStart >= m_allRows.size()) {
-            m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize);
-        }
-
-        const int end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
-        for (int i = m_windowStart; i < end; ++i) {
-            window.push_back(m_allRows.at(i));
-        }
+        for (const auto &r : m_rows)
+            existingKeys.insert(r.stableKey);
     }
 
-    applyRows(std::move(window));
-}
-
-void
-MessageListModel::loadMore() {
-    if (!m_hasMore || m_isLoadingPage) { return; }
-
-    m_isLoadingPage = true;
-
-    DataStore *store = m_dataStore.data();
-    if (!store) {
-        m_isLoadingPage = false;
-        return;
+    auto pending = std::make_shared<QVector<Row>>();
+    for (auto &r : delta) {
+        if (existingKeys.contains(r.stableKey)) continue;
+        if (r.type == HeaderRow)
+            r.hasTopGap = true;
+        existingKeys.insert(r.stableKey);
+        pending->push_back(std::move(r));
     }
 
-    const auto folderKey = m_folderKey;
-    const auto selectedCategories = m_selectedCategories;
-    const auto selectedCategoryIndex = m_selectedCategoryIndex;
-    const auto pageSize = m_pageSize;
-    const auto nextOffset = m_nextOffset;
+    if (pending->isEmpty()) return;
 
-    using Result = std::pair<QVariantList, bool>;
+    // Drip-feed rows in small chunks so the UI stays responsive during scrolling.
+    auto offset = std::make_shared<int>(0);
+    auto generation = m_refreshGeneration;
+    auto drip = std::make_shared<std::function<void()>>();
+    *drip = [this, pending, offset, generation, drip]() {
+        static constexpr int kChunk = 200;
+        if (generation != m_refreshGeneration) return;
+        if (*offset >= pending->size()) return;
 
-    auto *watcher = new QFutureWatcher<Result>(this);
-    connect(watcher, &QFutureWatcher<Result>::finished, this, [this, watcher]() {
-        watcher->deleteLater();
+        const auto count = qMin(kChunk, static_cast<int>(pending->size()) - *offset);
 
-        const auto [nextRows, hasMore] = watcher->result();
+        QMutexLocker locker(&m_rowsMutex);
+        const auto first = m_rows.size();
+        const auto last = first + count - 1;
 
-        if (!nextRows.isEmpty()) {
-            m_loadedSourceRows.reserve(m_loadedSourceRows.size() + nextRows.size());
-            for (const auto &v : nextRows) {
-                m_loadedSourceRows.push_back(v);
-            }
-            m_nextOffset += nextRows.size();
-        }
+        beginInsertRows(QModelIndex(), first, last);
+        for (int i = 0; i < count; ++i)
+            m_rows.push_back(std::move((*pending)[*offset + i]));
+        endInsertRows();
+        locker.unlock();
 
-        const auto oldHasMore = m_hasMore;
-        m_hasMore = hasMore;
-        if (oldHasMore != m_hasMore) { emit pagingChanged(); }
-
-        QVector<Row> window;
-        if (!nextRows.isEmpty()) {
-            const auto deltaRows = buildRows(nextRows);
-            QMutexLocker locker(&m_rowsMutex);
-            QSet<QString> existingHeaders;
-            QSet<QString> existingMessages;
-
-            for (const auto &r : m_allRows) {
-                if (r.type == HeaderRow) { existingHeaders.insert(r.bucketKey); }
-                else { existingMessages.insert(r.stableKey); }
-            }
-
-            for (const auto &r : deltaRows) {
-                if (r.type == HeaderRow) {
-                    if (existingHeaders.contains(r.bucketKey)) { continue; }
-
-                    existingHeaders.insert(r.bucketKey);
-                    Row copy = r;
-                    copy.hasTopGap = !m_allRows.isEmpty();
-                    m_allRows.push_back(copy);
-                } else {
-                    if (existingMessages.contains(r.stableKey)) { continue; }
-
-                    existingMessages.insert(r.stableKey);
-                    m_allRows.push_back(r);
-                }
-            }
-        }
-
-        {
-            QMutexLocker locker(&m_rowsMutex);
-            if (m_windowStart < 0) { m_windowStart = 0; }
-
-            const auto effectiveWindowSize = (m_windowSize <= 0) ? m_allRows.size() : m_windowSize;
-            if (m_windowStart >= m_allRows.size()) { m_windowStart = qMax(0, m_allRows.size() - effectiveWindowSize); }
-
-            const auto end = qMin(m_allRows.size(), m_windowStart + effectiveWindowSize);
-            for (qsizetype i = m_windowStart; i < end; ++i) { window.push_back(m_allRows.at(i)); }
-        }
+        *offset += count;
 
         emit totalRowCountChanged();
-        applyRows(std::move(window));
+        emit visibleCountsChanged();
 
-        m_isLoadingPage = false;
-    });
+        if (*offset < pending->size())
+            QTimer::singleShot(0, this, [drip]() { (*drip)(); });
+    };
 
-    watcher->setFuture(QtConcurrent::run(
-        [store, folderKey, selectedCategories, selectedCategoryIndex, pageSize, nextOffset]() -> Result {
-            bool hasMore = false;
-            auto rows = store->messagesForSelection(
-                folderKey, selectedCategories, selectedCategoryIndex, pageSize, nextOffset, &hasMore);
-
-            return {std::move(rows), hasMore};
-        }));
+    (*drip)();
 }
 
 void
@@ -546,16 +471,6 @@ MessageListModel::onMessageMarkedRead(const QString &accountEmail, const QString
 
             break;
         }
-
-        // Also patch m_allRows so the window doesn't restore the stale value on the next scroll.
-        for (auto &row : m_allRows) {
-            if (row.type == MessageRow
-                    && row.message.value("accountEmail"_L1).toString() == accountEmail
-                    && row.message.value("uid"_L1).toString() == uid) {
-                row.message.insert("unread"_L1, 0);
-                break;
-            }
-        }
     }
 
     if (changedIndex >= 0) {
@@ -583,70 +498,11 @@ MessageListModel::onMessageFlaggedChanged(const QString &accountEmail, const QSt
 
             break;
         }
-
-        for (Row &row : m_allRows) {
-            if (row.type == MessageRow
-                    && row.message.value("accountEmail"_L1).toString() == accountEmail
-                    && row.message.value("uid"_L1).toString() == uid) {
-                row.message.insert("flagged"_L1, newFlagged);
-                break;
-            }
-        }
     }
 
     if (changedIndex >= 0) {
         emit dataChanged(index(changedIndex), index(changedIndex), {FlaggedRole});
     }
-}
-
-void
-MessageListModel::setWindowSize(const int size) {
-    // 0 means unlimited/full list. Positive values are bounded to sane minimum.
-    const auto normalized = (size <= 0) ? 0 : qMax(40, size);
-
-    if (m_windowSize == normalized) { return; }
-
-    m_windowSize = normalized;
-
-    emit windowSizeChanged();
-    applyWindow();
-}
-
-void
-MessageListModel::shiftWindowDown() {
-    {
-        QMutexLocker locker(&m_rowsMutex);
-        if (m_allRows.isEmpty()) { return; }
-        if (m_windowSize <= 0) { return; } // unlimited mode
-
-        const auto step = qMax(10, m_windowSize / 2);
-        const auto maxStart = qMax(0, m_allRows.size() - m_windowSize);
-        const auto next = qMin(maxStart, m_windowStart + step);
-
-        if (next == m_windowStart) { return; }
-
-        m_windowStart = next;
-    }
-
-    applyWindow();
-}
-
-void
-MessageListModel::shiftWindowUp() {
-    {
-        QMutexLocker locker(&m_rowsMutex);
-        if (m_allRows.isEmpty()) { return; }
-        if (m_windowSize <= 0) { return; } // unlimited mode
-
-        const auto step = qMax(10, m_windowSize / 2);
-        const auto next = qMax(0, m_windowStart - step);
-
-        if (next == m_windowStart) { return; }
-
-        m_windowStart = next;
-    }
-
-    applyWindow();
 }
 
 QVector<MessageListModel::Row>
@@ -735,7 +591,7 @@ MessageListModel::buildRows(const QVariantList &rows) const {
 int
 MessageListModel::totalRowCount() const {
     QMutexLocker locker(&m_rowsMutex);
-    return m_allRows.size();
+    return m_rows.size();
 }
 
 int

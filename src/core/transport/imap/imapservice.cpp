@@ -135,7 +135,8 @@ ImapService::ImapService(const QVariantMap &accountConfig, DataStore *store, Tok
         const QString credential = (m_authMethod == Imap::AuthMethod::Login && m_vault)
             ? m_vault->loadPassword(m_email)
             : QString{};
-        m_pool->initialize(m_email, m_host, m_port, m_authMethod, credential);
+        m_pool->initialize(m_email, m_host, m_port, m_authMethod, credential,
+                           /*operationalSlots=*/2, /*hydrateSlots=*/1);
     }
     m_expectedPoolSize = m_pool->expectedConnections();
 

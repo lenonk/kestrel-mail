@@ -17,12 +17,10 @@ class MessageListModel : public QAbstractListModel
     Q_OBJECT
     Q_PROPERTY(DataStore* dataStore READ dataStore WRITE setDataStore NOTIFY dataStoreChanged)
 public:
-    Q_PROPERTY(int windowSize READ windowSize WRITE setWindowSize NOTIFY windowSizeChanged)
     Q_PROPERTY(int totalRowCount READ totalRowCount NOTIFY totalRowCountChanged)
     Q_PROPERTY(int visibleRowCount READ visibleRowCount NOTIFY visibleCountsChanged)
     Q_PROPERTY(int visibleMessageCount READ visibleMessageCount NOTIFY visibleCountsChanged)
-    Q_PROPERTY(bool hasMore READ hasMore NOTIFY pagingChanged)
-    Q_PROPERTY(int pageSize READ pageSize CONSTANT)
+    Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(QString searchQuery READ searchQuery NOTIFY searchQueryChanged)
     Q_PROPERTY(bool isSearchActive READ isSearchActive NOTIFY searchQueryChanged)
 
@@ -80,27 +78,20 @@ public:
                                        bool twoWeeksAgoExpanded,
                                        bool olderExpanded);
     Q_INVOKABLE void refresh();
-    Q_INVOKABLE void loadMore();
-    Q_INVOKABLE void shiftWindowDown();
-    Q_INVOKABLE void shiftWindowUp();
     Q_INVOKABLE QVariantMap rowAt(int index) const;
 
-    int windowSize() const { return m_windowSize; }
-    Q_INVOKABLE void setWindowSize(int size);
     int totalRowCount() const;
     int visibleRowCount() const;
     int visibleMessageCount() const;
-    bool hasMore() const { return m_hasMore; }
-    int pageSize() const { return m_pageSize; }
+    bool loading() const { return m_loading; }
     QString searchQuery() const { return m_searchQuery; }
     bool isSearchActive() const { return !m_searchQuery.isEmpty(); }
 
 signals:
     void dataStoreChanged();
-    void windowSizeChanged();
     void totalRowCountChanged();
     void visibleCountsChanged();
-    void pagingChanged();
+    void loadingChanged();
     void searchQueryChanged();
 
 private:
@@ -117,7 +108,6 @@ private:
     QPointer<DataStore> m_dataStore;
     mutable QRecursiveMutex m_rowsMutex;
     QVector<Row> m_rows;
-    QVector<Row> m_allRows;
     QString m_folderKey;
     QString m_searchQuery;
     QStringList m_selectedCategories;
@@ -129,22 +119,19 @@ private:
     bool m_olderExpanded = true;
     QHash<QString, bool> m_weekdayExpanded;
     QTimer *m_reloadDebounceTimer = nullptr;
-    int m_windowStart = 0;
-    // 0 means "unlimited" (show full list at once).
-    int m_windowSize = 0;
     QVariantList m_loadedSourceRows;
-    int m_nextOffset = 0;
-    const int m_pageSize = 50;
-    bool m_hasMore = false;
-    bool m_isLoadingPage = false;
-    bool m_pendingRefresh = false;
-    QFutureWatcher<std::pair<QVariantList, bool>> *m_refreshWatcher = nullptr;
+    quint64 m_refreshGeneration = 0;
+    bool m_loading = false;
+    int m_batchOffset = 0;
+    QFutureWatcher<QVariantList> *m_refreshWatcher = nullptr;
+
+    void loadNextBatch(quint64 generation);
 
     void scheduleRefresh();
     void onMessageMarkedRead(const QString &accountEmail, const QString &uid);
     void onMessageFlaggedChanged(const QString &accountEmail, const QString &uid, bool flagged);
     void refreshView();
-    void applyWindow();
+    void appendRows(const QVariantList &batch);
     QVector<Row> buildRows(const QVariantList &rows) const;
     void applyRows(QVector<Row> &&nextRows);
     static bool rowEquals(const Row &a, const Row &b);

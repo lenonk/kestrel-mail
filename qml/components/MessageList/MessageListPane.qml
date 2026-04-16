@@ -3,6 +3,8 @@ import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
+import "../Common" as Common
+
 Rectangle {
     id: root
 
@@ -21,13 +23,18 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: (root.appRoot && root.appRoot.selectedFolderCategories && root.appRoot.selectedFolderCategories.length > 0)
-                     && !(root.appRoot.messageListModelObj && root.appRoot.messageListModelObj.isSearchActive)
+            Layout.preferredHeight: 36
+            Layout.maximumHeight: 36
+            visible: !(root.appRoot.messageListModelObj && root.appRoot.messageListModelObj.isSearchActive)
             spacing: Kirigami.Units.smallSpacing
 
+            readonly property bool hasCategoryTabs: root.appRoot && root.appRoot.selectedFolderCategories
+                                                    && root.appRoot.selectedFolderCategories.length > 0
+
+            // Gmail inbox: category tabs
             Repeater {
                 id: gMailCategoryRepeater
-                model: (root.appRoot && root.appRoot.selectedFolderCategories) ? root.appRoot.selectedFolderCategories : []
+                model: parent.hasCategoryTabs ? root.appRoot.selectedFolderCategories : []
                 delegate: MessageCategoryButton {
                     appRoot: root.appRoot
                     systemPalette: root.systemPalette
@@ -39,7 +46,40 @@ Rectangle {
                 }
             }
 
+            // Non-category folders: folder name + stats
+            RowLayout {
+                visible: !parent.hasCategoryTabs
+                spacing: Kirigami.Units.smallSpacing
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+
+                readonly property var entry: root.appRoot ? root.appRoot.selectedFolderEntry : null
+                readonly property string folderName: entry ? (entry.name || "") : ""
+                readonly property var stats: root.appRoot ? root.appRoot.folderStatsByKey(
+                    root.appRoot.selectedFolderKey, entry ? (entry.rawName || "") : "") : null
+
+                QQC2.Label {
+                    text: parent.folderName
+                    font.bold: true
+                    font.pointSize: Kirigami.Theme.defaultFont.pointSize + 1
+                }
+
+                QQC2.Label {
+                    visible: parent.stats !== null && parent.stats.total > 0
+                    text: "(%1 / %2)".arg(parent.stats ? parent.stats.total : 0)
+                                     .arg(parent.stats ? parent.stats.unread : 0)
+                    font.pointSize: Kirigami.Theme.defaultFont.pointSize + 1
+                    color: Kirigami.Theme.positiveTextColor
+                    opacity: 0.7
+                }
+            }
+
             Item { Layout.fillWidth: true }
+        }
+
+        Common.BarberPoleProgressBar {
+            Layout.fillWidth: true
+            visible: root.appRoot.messageListModelObj && root.appRoot.messageListModelObj.loading
+            stripeColor: root.systemPalette.highlight
         }
 
         ListView {
@@ -49,6 +89,8 @@ Rectangle {
             model: root.appRoot.messageListModelObj ? root.appRoot.messageListModelObj : []
             clip: true
             spacing: 0
+            reuseItems: true
+            cacheBuffer: 2000
 
             property real preservedContentY: 0
             property bool restorePending: false
@@ -60,7 +102,6 @@ Rectangle {
             property string lastFolderKey: (root.appRoot && root.appRoot.selectedFolderKey)
                                            ? root.appRoot.selectedFolderKey.toString()
                                            : ""
-            property bool loadMoreQueued: false
 
             function queueRestoreScroll() {
                 if (!restorePending)
@@ -268,19 +309,6 @@ Rectangle {
                 }
             }
 
-            onContentYChanged: {
-                if (!root.appRoot.messageListModelObj) return
-                const bottomGap = contentHeight - (contentY + height)
-                // Fetch more rows from DB when approaching the end of all loaded data.
-                if (bottomGap < 1800 && !groupedMessageList.loadMoreQueued) {
-                    groupedMessageList.loadMoreQueued = true
-                    Qt.callLater(function() {
-                        groupedMessageList.loadMoreQueued = false
-                        if (root.appRoot.messageListModelObj)
-                            root.appRoot.messageListModelObj.loadMore()
-                    })
-                }
-            }
 
             delegate: Item {
                 id: rootDelegate

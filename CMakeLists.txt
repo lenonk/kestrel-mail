@@ -159,6 +159,7 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
         qml/components/Common/KestrelColors.qml
         qml/components/Common/ArrowPopup.qml
         qml/components/Common/AvatarBadge.qml
+        qml/components/Common/BarberPoleProgressBar.qml
         qml/components/Common/PaneDivider.qml
         qml/components/Common/PopupMenu.qml
         qml/components/Common/StyledButton.qml
