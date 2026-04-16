@@ -1822,8 +1822,7 @@ ImapService::moveMessages(const QString &accountEmail, const QString &folder,
         if (movingToTrash)
             m_store->removeAccountUidsEverywhere(accountEmail, uids, /*skipOrphanCleanup=*/true);
         else
-            for (const auto &uid : uids)
-                m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
+            m_store->deleteFolderEdges(accountEmail, folder, uids);
     }
 
     if (m_offlineMode) {
@@ -1846,7 +1845,7 @@ ImapService::moveMessages(const QString &accountEmail, const QString &folder,
         const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uidSet, targetFolder));
 
         qInfo().noquote() << "[move-messages]"
-                          << "uids=" << uidSet << "from=" << folder
+                          << "uids=" << uidSet.left(200) << "from=" << folder
                           << "to=" << targetFolder << "resp=" << resp.simplified().left(200);
 
         const auto uidMapping = parseBatchCopyUid(resp);
@@ -1876,10 +1875,8 @@ ImapService::expungeMessages(const QString &accountEmail, const QString &folder,
     if (m_destroying || accountEmail.isEmpty() || uids.isEmpty())
         return;
 
-    if (m_store) {
-        for (const auto &uid : uids)
-            m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
-    }
+    if (m_store)
+        m_store->deleteFolderEdges(accountEmail, folder, uids);
 
     if (m_offlineMode) {
         emit realtimeStatus(true, "Offline mode: skipped batch IMAP expunge."_L1);
@@ -1902,10 +1899,62 @@ ImapService::expungeMessages(const QString &accountEmail, const QString &folder,
         const QString expungeResp = cxn->execute("UID EXPUNGE %1"_L1.arg(uidSet));
 
         qInfo().noquote() << "[expunge-messages]"
-                          << "uids=" << uidSet << "folder=" << folder
+                          << "uids=" << uidSet.left(200) << "folder=" << folder
                           << "store=" << storeResp.simplified().left(120)
                           << "expunge=" << expungeResp.simplified().left(120);
     });
+}
+
+void
+ImapService::deleteMessageKeys(const QStringList &messageKeys) {
+    if (m_destroying || messageKeys.isEmpty()) return;
+
+    // Determine trash folder for this account.
+    const auto host = m_accountConfig.value("imapHost"_L1).toString().toLower();
+    const bool isGmail = host.contains("gmail"_L1) || host.contains("googlemail"_L1);
+    const QString trashFolder = isGmail ? "[Gmail]/Trash"_L1 : "Trash"_L1;
+
+    auto isTrash = [](const QString &folder) {
+        const auto f = folder.toLower();
+        return f == "trash"_L1 || f == "[gmail]/trash"_L1
+            || f == "[google mail]/trash"_L1 || f.endsWith("/trash"_L1);
+    };
+
+    // Parse keys and group by account+folder.
+    // Key format: "msg:accountEmail|folder|uid"
+    struct Group { QString accountEmail; QString folder; QStringList uids; };
+    QHash<QString, Group> expungeGroups;
+    QHash<QString, Group> moveGroups;
+
+    for (const auto &key : messageKeys) {
+        if (!key.startsWith("msg:"_L1)) continue;
+        const auto rest = QStringView{key}.mid(4);
+        const auto sep1 = rest.indexOf('|');
+        if (sep1 < 0) continue;
+        const auto sep2 = rest.indexOf('|', sep1 + 1);
+        if (sep2 < 0) continue;
+
+        const auto accountEmail = rest.left(sep1).toString();
+        const auto folder = rest.mid(sep1 + 1, sep2 - sep1 - 1).toString();
+        const auto uid = rest.mid(sep2 + 1).toString();
+
+        const auto gk = accountEmail + "|"_L1 + folder;
+        if (isTrash(folder)) {
+            auto &g = expungeGroups[gk];
+            if (g.accountEmail.isEmpty()) { g.accountEmail = accountEmail; g.folder = folder; }
+            g.uids.push_back(uid);
+        } else {
+            const auto mk = gk + "|"_L1 + trashFolder;
+            auto &g = moveGroups[mk];
+            if (g.accountEmail.isEmpty()) { g.accountEmail = accountEmail; g.folder = folder; }
+            g.uids.push_back(uid);
+        }
+    }
+
+    for (const auto &g : expungeGroups)
+        expungeMessages(g.accountEmail, g.folder, g.uids);
+    for (const auto &g : moveGroups)
+        moveMessages(g.accountEmail, g.folder, g.uids, trashFolder);
 }
 
 void

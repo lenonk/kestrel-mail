@@ -44,6 +44,7 @@ public:
                                   const QStringList &uids, const QString &targetFolder);
     Q_INVOKABLE void expungeMessages(const QString &accountEmail, const QString &folder,
                                      const QStringList &uids);
+    Q_INVOKABLE void deleteMessageKeys(const QStringList &messageKeys);
     Q_INVOKABLE void markMessageRead(const QString &accountEmail, const QString &folder,
                                      const QString &uid);
     Q_INVOKABLE void markMessageFlagged(const QString &accountEmail, const QString &folder,

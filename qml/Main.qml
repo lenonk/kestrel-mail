@@ -94,6 +94,19 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    Shortcut {
+        sequence: "Ctrl+A"
+        onActivated: {
+            var mdl = root.messageListModelObj
+            if (!mdl) return
+            var keys = mdl.allMessageKeys()
+            var all = {}
+            for (var i = 0; i < keys.length; ++i)
+                all[keys[i]] = true
+            root.selectedMessageKeys = all
+        }
+    }
+
     // ── State properties ──
 
     property string syncStatus: ""
@@ -777,10 +790,18 @@ Kirigami.ApplicationWindow {
         return ""
     }
 
-    function _advanceSelectionPastDeleted(keys) {
+    function _advanceSelectionPastDeleted(keySet) {
         var currentKey = root.selectedMessageKey
-        if (!currentKey.length || keys.indexOf(currentKey) < 0) return
+        if (!currentKey.length || !keySet[currentKey]) return
+
+        // If deleting more messages than could reasonably leave a survivor,
+        // just clear the selection instead of scanning the model.
+        var keyCount = Object.keys(keySet).length
         var mdl = root.messageListModelObj
+        if (mdl && keyCount >= mdl.visibleMessageCount) {
+            root.selectedMessageKey = ""
+            return
+        }
         var nextKey = ""
         if (mdl) {
             var n = mdl.visibleRowCount
@@ -791,13 +812,13 @@ Kirigami.ApplicationWindow {
             }
             for (var i2 = currentIdx + 1; i2 < n && !nextKey; ++i2) {
                 var r2 = mdl.rowAt(i2)
-                if (r2 && !r2.isHeader && r2.messageKey && keys.indexOf(r2.messageKey.toString()) < 0)
+                if (r2 && !r2.isHeader && r2.messageKey && !keySet[r2.messageKey.toString()])
                     nextKey = r2.messageKey.toString()
             }
             if (!nextKey) {
                 for (var i3 = currentIdx - 1; i3 >= 0 && !nextKey; --i3) {
                     var r3 = mdl.rowAt(i3)
-                    if (r3 && !r3.isHeader && r3.messageKey && keys.indexOf(r3.messageKey.toString()) < 0)
+                    if (r3 && !r3.isHeader && r3.messageKey && !keySet[r3.messageKey.toString()])
                         nextKey = r3.messageKey.toString()
                 }
             }
@@ -808,55 +829,22 @@ Kirigami.ApplicationWindow {
     function deleteSelectedMessages() {
         if (!imapServiceObj) return
 
-        // Collect keys — multi-select or single selected message.
-        var keys = Object.keys(root.selectedMessageKeys)
+        var keySet = root.selectedMessageKeys
+        var keys = Object.keys(keySet)
         if (keys.length === 0 && root.selectedMessageData) {
-            var d = root.selectedMessageData
             keys = [root.selectedMessageKey]
+            keySet = {}
+            keySet[keys[0]] = true
         }
         if (keys.length === 0) return
 
-        // Mark pending and advance selection.
-        var pendingNow = Object.assign({}, root.pendingDeleteKeys)
-        for (var ki = 0; ki < keys.length; ki++) pendingNow[keys[ki]] = true
-        root.pendingDeleteKeys = pendingNow
-        _advanceSelectionPastDeleted(keys)
-
-        // Group messages by account+folder, separating trash (expunge) from non-trash (move).
-        var expungeGroups = {}
-        var moveGroups = {}
-
-        for (var ki2 = 0; ki2 < keys.length; ki2++) {
-            var p = DisplayUtils.parseMessageKey(keys[ki2])
-            if (!p) continue
-
-            var gk = p.accountEmail + "|" + p.folder
-            if (MailActions.isFolderTrash(p.folder)) {
-                if (!expungeGroups[gk])
-                    expungeGroups[gk] = { accountEmail: p.accountEmail, folder: p.folder, uids: [] }
-                expungeGroups[gk].uids.push(p.uid)
-            } else {
-                var host = _lookupHostForAccount(p.accountEmail)
-                var trashFolder = MailActions.trashFolderForHost(host)
-                var mk = gk + "|" + trashFolder
-                if (!moveGroups[mk])
-                    moveGroups[mk] = { accountEmail: p.accountEmail, folder: p.folder, uids: [], target: trashFolder }
-                moveGroups[mk].uids.push(p.uid)
-            }
-        }
-
-        // Dispatch batch operations.
-        var g
-        for (g in expungeGroups) {
-            var eg = expungeGroups[g]
-            imapServiceObj.expungeMessages(eg.accountEmail, eg.folder, eg.uids)
-        }
-        for (g in moveGroups) {
-            var mg = moveGroups[g]
-            imapServiceObj.moveMessages(mg.accountEmail, mg.folder, mg.uids, mg.target)
-        }
-
+        _advanceSelectionPastDeleted(keySet)
         root.selectedMessageKeys = ({})
+
+        // Remove from the model immediately, then dispatch IMAP operations.
+        if (root.messageListModelObj)
+            root.messageListModelObj.removeKeys(keys)
+        imapServiceObj.deleteMessageKeys(keys)
     }
 
     // ── Bucket expansion ──

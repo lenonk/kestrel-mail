@@ -45,6 +45,7 @@ public:
                               const QStringList &flaggedUids);
     QVariantMap folderMapRowForEdge(const QString &accountEmail, const QString &folder, const QString &uid) const;
     void deleteSingleFolderEdge(const QString &accountEmail, const QString &folder, const QString &uid);
+    void deleteFolderEdges(const QString &accountEmail, const QString &folder, const QStringList &uids);
     void deleteFolderEdgesForMessage(const QString &accountEmail, const QString &folder, qint64 messageId);
     QString folderUidForMessageId(const QString &accountEmail, const QString &folder, qint64 messageId) const;
     void insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread, const QString &source = QStringLiteral("imap-label"));

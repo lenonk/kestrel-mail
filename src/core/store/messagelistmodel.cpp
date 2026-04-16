@@ -218,6 +218,17 @@ MessageListModel::setSelection(const QString &folderKey, const QStringList &sele
     m_selectedCategoryIndex = normalizedIndex;
     m_loadedSourceRows.clear();
 
+    // Clear the visible model immediately so the old folder's messages
+    // don't linger while the new folder loads.
+    {
+        QMutexLocker locker(&m_rowsMutex);
+        if (!m_rows.isEmpty()) {
+            beginResetModel();
+            m_rows.clear();
+            endResetModel();
+        }
+    }
+
     if (!m_searchQuery.isEmpty()) return; // search takes priority over folder selection
     refresh();
 }
@@ -303,7 +314,6 @@ MessageListModel::refresh() {
         return;
     }
 
-    // Reset for a fresh load and show the first batch immediately.
     m_loadedSourceRows.clear();
     m_batchOffset = 0;
 
@@ -376,6 +386,51 @@ MessageListModel::refreshView() {
     QVector<Row> built = buildRows(m_loadedSourceRows);
     emit totalRowCountChanged();
     applyRows(std::move(built));
+}
+
+void
+MessageListModel::removeKeys(const QStringList &keys) {
+    if (keys.isEmpty()) return;
+
+    QSet<QString> keySet(keys.begin(), keys.end());
+
+    QMutexLocker locker(&m_rowsMutex);
+
+    // Find contiguous runs of matching message rows to remove, back to front.
+    int i = m_rows.size() - 1;
+    while (i >= 0) {
+        if (m_rows[i].type != MessageRow || !keySet.contains(m_rows[i].stableKey)) {
+            --i;
+            continue;
+        }
+        int last = i;
+        while (i > 0 && m_rows[i - 1].type == MessageRow && keySet.contains(m_rows[i - 1].stableKey))
+            --i;
+        int first = i;
+
+        beginRemoveRows(QModelIndex(), first, last);
+        m_rows.remove(first, last - first + 1);
+        endRemoveRows();
+
+        --i;
+    }
+
+    // Also strip from m_loadedSourceRows so a subsequent refresh doesn't resurrect them.
+    for (auto it = m_loadedSourceRows.begin(); it != m_loadedSourceRows.end(); ) {
+        const auto map = it->toMap();
+        const auto account = map.value("accountEmail"_L1).toString();
+        const auto folder = map.value("folder"_L1).toString();
+        const auto uid = map.value("uid"_L1).toString();
+        const auto stableKey = "msg:%1|%2|%3"_L1.arg(account, folder, uid);
+        if (keySet.contains(stableKey))
+            it = m_loadedSourceRows.erase(it);
+        else
+            ++it;
+    }
+
+    locker.unlock();
+    emit totalRowCountChanged();
+    emit visibleCountsChanged();
 }
 
 void
@@ -610,6 +665,18 @@ MessageListModel::visibleMessageCount() const {
     }
 
     return count;
+}
+
+QStringList
+MessageListModel::allMessageKeys() const {
+    QMutexLocker locker(&m_rowsMutex);
+    QStringList keys;
+    keys.reserve(m_rows.size());
+    for (const auto &r : m_rows) {
+        if (r.type == MessageRow && !r.stableKey.isEmpty())
+            keys.push_back(r.stableKey);
+    }
+    return keys;
 }
 
 QVariantMap

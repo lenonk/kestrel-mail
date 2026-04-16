@@ -765,6 +765,7 @@ void DataStore::reconcileFlaggedUids(const QString &accountEmail, const QString 
 QVariantMap DataStore::folderMapRowForEdge(const QString &accountEmail, const QString &folder, const QString &uid) const { return m_messages->folderMapRowForEdge(accountEmail, folder, uid); }
 
 void DataStore::deleteSingleFolderEdge(const QString &accountEmail, const QString &folder, const QString &uid) { m_messages->deleteSingleFolderEdge(accountEmail, folder, uid); }
+void DataStore::deleteFolderEdges(const QString &accountEmail, const QString &folder, const QStringList &uids) { m_messages->deleteFolderEdges(accountEmail, folder, uids); }
 void DataStore::deleteFolderEdgesForMessage(const QString &accountEmail, const QString &folder, qint64 messageId) { m_messages->deleteFolderEdgesForMessage(accountEmail, folder, messageId); }
 QString DataStore::folderUidForMessageId(const QString &accountEmail, const QString &folder, qint64 messageId) const { return m_messages->folderUidForMessageId(accountEmail, folder, messageId); }
 void DataStore::insertFolderEdge(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread, const QString &source) { m_messages->insertFolderEdge(accountEmail, messageId, folder, uid, unread, source); }

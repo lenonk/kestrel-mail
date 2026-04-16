@@ -78,6 +78,8 @@ public:
                                        bool twoWeeksAgoExpanded,
                                        bool olderExpanded);
     Q_INVOKABLE void refresh();
+    Q_INVOKABLE void removeKeys(const QStringList &keys);
+    Q_INVOKABLE QStringList allMessageKeys() const;
     Q_INVOKABLE QVariantMap rowAt(int index) const;
 
     int totalRowCount() const;

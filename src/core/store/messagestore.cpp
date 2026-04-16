@@ -1825,6 +1825,58 @@ MessageStore::deleteSingleFolderEdge(const QString &accountEmail,
     }
 }
 
+void
+MessageStore::deleteFolderEdges(const QString &accountEmail, const QString &folder,
+                                const QStringList &uids) const {
+    if (uids.isEmpty()) return;
+    auto database = m_db();
+    if (!database.isValid() || !database.isOpen()) return;
+
+    // Delete the specified UIDs and any thread siblings in the same folder.
+    // The message list deduplicates by thread_id, so a visible message key
+    // represents one UID per thread. Other UIDs in the same thread+folder
+    // are hidden but still have edges that must be cleaned up.
+    const auto ph = buildPlaceholders(uids.size());
+    const auto inClause = ph.join(","_L1);
+
+    QSqlQuery q(database);
+    q.prepare(R"(
+        DELETE FROM message_folder_map
+        WHERE account_email=:acc AND folder=:folder
+          AND message_id IN (
+              SELECT DISTINCT m.id FROM messages m
+              JOIN message_folder_map mfm ON mfm.message_id=m.id
+              WHERE mfm.account_email=:acc2 AND mfm.folder=:folder2
+                AND mfm.uid IN (%1)
+              UNION
+              SELECT DISTINCT m2.id FROM messages m2
+              WHERE m2.account_email=:acc3
+                AND length(trim(COALESCE(m2.thread_id,''))) > 0
+                AND m2.thread_id IN (
+                    SELECT m3.thread_id FROM messages m3
+                    JOIN message_folder_map mfm3 ON mfm3.message_id=m3.id
+                    WHERE mfm3.account_email=:acc4 AND mfm3.folder=:folder3
+                      AND mfm3.uid IN (%1)
+                      AND length(trim(COALESCE(m3.thread_id,''))) > 0
+                )
+          )
+    )"_L1.arg(inClause));
+    q.bindValue(":acc"_L1, accountEmail);
+    q.bindValue(":acc2"_L1, accountEmail);
+    q.bindValue(":acc3"_L1, accountEmail);
+    q.bindValue(":acc4"_L1, accountEmail);
+    q.bindValue(":folder"_L1, folder);
+    q.bindValue(":folder2"_L1, folder);
+    q.bindValue(":folder3"_L1, folder);
+    bindPlaceholders(q, uids);
+    q.exec();
+
+    const auto removed = q.numRowsAffected();
+    const auto removedOrphans = removeOrphanMessages(database);
+    if (removed > 0 || removedOrphans > 0)
+        m_callbacks.scheduleDataChanged();
+}
+
 QString
 MessageStore::folderUidForMessageId(const QString &accountEmail, const QString &folder, const qint64 messageId) const {
     if (messageId <= 0) { return {}; }
