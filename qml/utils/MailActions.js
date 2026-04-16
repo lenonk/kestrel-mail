@@ -7,6 +7,12 @@ function trashFolderForHost(imapHost) {
     return "Trash"
 }
 
+function isFolderTrash(folderName) {
+    var n = (folderName || "").toLowerCase()
+    return n === "trash" || n === "[gmail]/trash"
+        || n === "[google mail]/trash" || n.endsWith("/trash")
+}
+
 function calendarWeekBoundsIso() {
     var now = new Date()
     var start = new Date(now)

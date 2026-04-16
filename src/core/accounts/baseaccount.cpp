@@ -28,12 +28,10 @@ BaseAccount::BaseAccount(const QVariantMap &config, DataStore *store,
         });
     }
     if (m_imap) {
-        connect(m_imap, &ImapService::accountSyncActivity, this, [this](const QString &acct, bool active) {
-            if (acct.compare(m_email, Qt::CaseInsensitive) != 0) return;
+        connect(m_imap, &ImapService::syncActivityChanged, this, [this](bool active) {
             updateSyncState(active);
         });
         connect(m_imap, &ImapService::syncFinished, this, [this](bool ok, const QString &msg) {
-            if (m_syncing) { m_syncing = false; emit syncingChanged(); }
             emit syncFinished(ok, msg);
         });
         connect(m_imap, &ImapService::accountNeedsReauth, this, [this](const QString &acct) {
@@ -71,6 +69,9 @@ BaseAccount::avatarSource() const {
 
 QString
 BaseAccount::providerIcon() const { return "mail-message"_L1; }
+
+QString
+BaseAccount::providerId() const { return m_config.value("providerId"_L1).toString().toLower(); }
 
 // -- Folders & Tags -----------------------------------------------------------
 

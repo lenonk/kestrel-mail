@@ -30,6 +30,7 @@ class IAccount : public QObject
     Q_PROPERTY(QString accountName READ accountName NOTIFY accountNameChanged)
     Q_PROPERTY(QString avatarSource READ avatarSource NOTIFY avatarSourceChanged)
     Q_PROPERTY(QString providerIcon READ providerIcon CONSTANT)
+    Q_PROPERTY(QString providerId READ providerId CONSTANT)
 
     // ── Folders & Tags ────────────────────────────────────────────
     Q_PROPERTY(QVariantList folderList READ folderList NOTIFY foldersChanged)
@@ -51,6 +52,7 @@ public:
     [[nodiscard]] virtual QString accountName() const = 0;
     [[nodiscard]] virtual QString avatarSource() const = 0;
     [[nodiscard]] virtual QString providerIcon() const = 0;
+    [[nodiscard]] virtual QString providerId() const = 0;
 
     // ── Folders & Tags ────────────────────────────────────────────
     [[nodiscard]] virtual QVariantList folderList() const = 0;

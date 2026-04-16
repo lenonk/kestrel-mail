@@ -38,6 +38,7 @@ public:
     [[nodiscard]] QString accountName() const override;
     [[nodiscard]] QString avatarSource() const override;
     [[nodiscard]] QString providerIcon() const override;
+    [[nodiscard]] QString providerId() const override;
 
     // -- Folders & Tags -------------------------------------------------------
     [[nodiscard]] QVariantList folderList() const override;

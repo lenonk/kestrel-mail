@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QHash>
+#include <QMutex>
 #include <QSslSocket>
 #include <QVariantList>
 
@@ -127,7 +129,8 @@ public:
         return !m_host.isEmpty() && m_host.contains("gmail"_L1, Qt::CaseInsensitive);
     }
 
-    static void setThrottleObserver(ThrottleObserver observer);
+    static void addThrottleObserver(void *key, ThrottleObserver observer);
+    static void removeThrottleObserver(void *key);
     void setLogOwner(const QString &owner) { m_logOwner = owner; }
 
 private:
@@ -152,7 +155,8 @@ private:
     QString nextTag();
     void observeThrottleState(const QString &response);
 
-    static ThrottleObserver s_throttleObserver;
+    static QMutex s_throttleObserverMutex;
+    static QHash<void*, ThrottleObserver> s_throttleObservers;
     bool m_throttled = false;
     qint64 m_logConnId = -1;
     QString m_logOwner;

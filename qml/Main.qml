@@ -98,10 +98,8 @@ Kirigami.ApplicationWindow {
 
     property string syncStatus: ""
     property bool syncStatusIsError: false
-    property bool refreshInProgress: false
     property string _lastToastMessage: ""
     property double _lastToastAtMs: 0
-    property bool accountRefreshing: false
     property bool accountConnected: true
     property bool accountThrottled: false
     property string accountThrottleMessage: ""
@@ -388,7 +386,9 @@ Kirigami.ApplicationWindow {
 
     function moreAccountFolderItemsForEmail(email) {
         var folders = root.dataStoreObj ? root.dataStoreObj.folders : []
-        return FolderUtils.moreAccountFolderItems(folders, root.accountFolderItemsForEmail(email), root.isMoreFolderExpanded, i18n, email)
+        var acct = root.accountForEmail(email)
+        var gmail = acct ? acct.providerId === "gmail" : false
+        return FolderUtils.moreAccountFolderItems(folders, root.accountFolderItemsForEmail(email), root.isMoreFolderExpanded, i18n, email, gmail)
     }
 
     // Legacy wrappers for code that doesn't pass an email yet.
@@ -698,28 +698,36 @@ Kirigami.ApplicationWindow {
 
     function trashFolderForHost(imapHost) { return MailActions.trashFolderForHost(imapHost) }
 
-    function moveMessageToFolder(accountEmail, folder, uid, targetFolder) {
-        if (!imapServiceObj) return
-        var fk = root.selectedFolderKey
-        if (root.dataStoreObj)
-            Qt.callLater(function() { if (root.dataStoreObj) root.dataStoreObj.clearNewMessageCounts(fk) })
-        if (root.selectedMessageKey === "msg:" + accountEmail + "|" + folder + "|" + uid)
-            root.selectedMessageKey = ""
-        var next = Object.assign({}, root.selectedMessageKeys)
-        delete next["msg:" + accountEmail + "|" + folder + "|" + uid]
-        root.selectedMessageKeys = next
-        imapServiceObj.moveMessage(accountEmail, folder, uid, targetFolder)
-    }
 
     function moveSelectedMessagesToFolder(targetRawFolder) {
         if (!imapServiceObj || !targetRawFolder.length) { return }
         var keys = Object.keys(root.messageDragKeys)
+
+        // Group UIDs by account+folder for batch IMAP commands.
+        var groups = {}
         for (var i = 0; i < keys.length; i++) {
             var p = DisplayUtils.parseMessageKey(keys[i])
-            if (!p) { continue }
-            if (p.folder.toLowerCase() === targetRawFolder.toLowerCase()) { continue }
-            moveMessageToFolder(p.accountEmail, p.folder, p.uid, targetRawFolder)
+            if (!p) continue
+            if (p.folder.toLowerCase() === targetRawFolder.toLowerCase()) continue
+
+            // Clear selection state for this message.
+            if (root.selectedMessageKey === keys[i])
+                root.selectedMessageKey = ""
+            var next = Object.assign({}, root.selectedMessageKeys)
+            delete next[keys[i]]
+            root.selectedMessageKeys = next
+
+            var gk = p.accountEmail + "|" + p.folder
+            if (!groups[gk])
+                groups[gk] = { accountEmail: p.accountEmail, folder: p.folder, uids: [] }
+            groups[gk].uids.push(p.uid)
         }
+
+        for (var gk2 in groups) {
+            var g = groups[gk2]
+            imapServiceObj.moveMessages(g.accountEmail, g.folder, g.uids, targetRawFolder)
+        }
+
         root.selectedMessageKeys = ({})
         // Don't call cancelMessageDrag here — the caller (_finishDrag) handles cleanup
         // so Drag.drop() can return the correct action.
@@ -759,93 +767,96 @@ Kirigami.ApplicationWindow {
         imapServiceObj.markMessageFlagged(accountEmail, folder, uid, !currentlyFlagged)
     }
 
+    function _lookupHostForAccount(accountEmail) {
+        var accs = root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
+        for (var i = 0; i < accs.length; i++) {
+            var acc = typeof accs[i].toMap === "function" ? accs[i].toMap() : accs[i]
+            if ((acc.email || acc["email"] || "") === accountEmail)
+                return acc.imapHost || acc["imapHost"] || ""
+        }
+        return ""
+    }
+
+    function _advanceSelectionPastDeleted(keys) {
+        var currentKey = root.selectedMessageKey
+        if (!currentKey.length || keys.indexOf(currentKey) < 0) return
+        var mdl = root.messageListModelObj
+        var nextKey = ""
+        if (mdl) {
+            var n = mdl.visibleRowCount
+            var currentIdx = -1
+            for (var i = 0; i < n; ++i) {
+                var r = mdl.rowAt(i)
+                if (r && r.messageKey === currentKey) { currentIdx = i; break }
+            }
+            for (var i2 = currentIdx + 1; i2 < n && !nextKey; ++i2) {
+                var r2 = mdl.rowAt(i2)
+                if (r2 && !r2.isHeader && r2.messageKey && keys.indexOf(r2.messageKey.toString()) < 0)
+                    nextKey = r2.messageKey.toString()
+            }
+            if (!nextKey) {
+                for (var i3 = currentIdx - 1; i3 >= 0 && !nextKey; --i3) {
+                    var r3 = mdl.rowAt(i3)
+                    if (r3 && !r3.isHeader && r3.messageKey && keys.indexOf(r3.messageKey.toString()) < 0)
+                        nextKey = r3.messageKey.toString()
+                }
+            }
+        }
+        root.selectedMessageKey = nextKey
+    }
+
     function deleteSelectedMessages() {
         if (!imapServiceObj) return
-        var keys = Object.keys(root.selectedMessageKeys)
-        if (keys.length > 0) {
-            var pendingNow = Object.assign({}, root.pendingDeleteKeys)
-            for (var ki = 0; ki < keys.length; ki++) pendingNow[keys[ki]] = true
-            root.pendingDeleteKeys = pendingNow
 
-            var currentKey = root.selectedMessageKey
-            if (currentKey.length > 0 && keys.indexOf(currentKey) >= 0) {
-                var mdl = root.messageListModelObj
-                var nextKey = ""
-                if (mdl) {
-                    var n = mdl.visibleRowCount
-                    var currentIdx = -1
-                    for (var i = 0; i < n; ++i) {
-                        var r = mdl.rowAt(i)
-                        if (r && r.messageKey === currentKey) { currentIdx = i; break }
-                    }
-                    for (var i2 = currentIdx + 1; i2 < n && !nextKey; ++i2) {
-                        var r2 = mdl.rowAt(i2)
-                        if (r2 && !r2.isHeader && r2.messageKey && keys.indexOf(r2.messageKey.toString()) < 0)
-                            nextKey = r2.messageKey.toString()
-                    }
-                    if (!nextKey) {
-                        for (var i3 = currentIdx - 1; i3 >= 0 && !nextKey; --i3) {
-                            var r3 = mdl.rowAt(i3)
-                            if (r3 && !r3.isHeader && r3.messageKey && keys.indexOf(r3.messageKey.toString()) < 0)
-                                nextKey = r3.messageKey.toString()
-                        }
-                    }
-                }
-                root.selectedMessageKey = nextKey
-            }
-            var accs = root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
-            for (var ki2 = 0; ki2 < keys.length; ki2++) {
-                var p = DisplayUtils.parseMessageKey(keys[ki2])
-                if (!p) continue
-                var host = ""
-                for (var ai = 0; ai < accs.length; ai++) {
-                    var acc = typeof accs[ai].toMap === "function" ? accs[ai].toMap() : accs[ai]
-                    if ((acc.email || acc["email"] || "") === p.accountEmail) {
-                        host = acc.imapHost || acc["imapHost"] || ""
-                        break
-                    }
-                }
-                moveMessageToFolder(p.accountEmail, p.folder, p.uid, MailActions.trashFolderForHost(host))
-            }
-            root.selectedMessageKeys = ({})
-        } else if (root.selectedMessageData) {
+        // Collect keys — multi-select or single selected message.
+        var keys = Object.keys(root.selectedMessageKeys)
+        if (keys.length === 0 && root.selectedMessageData) {
             var d = root.selectedMessageData
-            var accs2 = root.accountRepositoryObj ? root.accountRepositoryObj.accounts : []
-            var host2 = ""
-            for (var ai2 = 0; ai2 < accs2.length; ai2++) {
-                var acc2 = typeof accs2[ai2].toMap === "function" ? accs2[ai2].toMap() : accs2[ai2]
-                if ((acc2.email || acc2["email"] || "") === d.accountEmail) {
-                    host2 = acc2.imapHost || acc2["imapHost"] || ""
-                    break
-                }
-            }
-            var deletedKey = root.selectedMessageKey
-            var pendingNow2 = Object.assign({}, root.pendingDeleteKeys)
-            pendingNow2[deletedKey] = true
-            root.pendingDeleteKeys = pendingNow2
-            var mdl2 = root.messageListModelObj
-            if (mdl2) {
-                var n2 = mdl2.visibleRowCount
-                var currentIdx2 = -1
-                for (var j = 0; j < n2; ++j) {
-                    var r4 = mdl2.rowAt(j)
-                    if (r4 && r4.messageKey === deletedKey) { currentIdx2 = j; break }
-                }
-                var nextKey2 = ""
-                for (var j2 = currentIdx2 + 1; j2 < n2 && !nextKey2; ++j2) {
-                    var r5 = mdl2.rowAt(j2)
-                    if (r5 && !r5.isHeader && r5.messageKey) nextKey2 = r5.messageKey.toString()
-                }
-                if (!nextKey2) {
-                    for (var j3 = currentIdx2 - 1; j3 >= 0 && !nextKey2; --j3) {
-                        var r6 = mdl2.rowAt(j3)
-                        if (r6 && !r6.isHeader && r6.messageKey) nextKey2 = r6.messageKey.toString()
-                    }
-                }
-                root.selectedMessageKey = nextKey2
-            }
-            moveMessageToFolder(d.accountEmail, d.folder, d.uid, MailActions.trashFolderForHost(host2))
+            keys = [root.selectedMessageKey]
         }
+        if (keys.length === 0) return
+
+        // Mark pending and advance selection.
+        var pendingNow = Object.assign({}, root.pendingDeleteKeys)
+        for (var ki = 0; ki < keys.length; ki++) pendingNow[keys[ki]] = true
+        root.pendingDeleteKeys = pendingNow
+        _advanceSelectionPastDeleted(keys)
+
+        // Group messages by account+folder, separating trash (expunge) from non-trash (move).
+        var expungeGroups = {}
+        var moveGroups = {}
+
+        for (var ki2 = 0; ki2 < keys.length; ki2++) {
+            var p = DisplayUtils.parseMessageKey(keys[ki2])
+            if (!p) continue
+
+            var gk = p.accountEmail + "|" + p.folder
+            if (MailActions.isFolderTrash(p.folder)) {
+                if (!expungeGroups[gk])
+                    expungeGroups[gk] = { accountEmail: p.accountEmail, folder: p.folder, uids: [] }
+                expungeGroups[gk].uids.push(p.uid)
+            } else {
+                var host = _lookupHostForAccount(p.accountEmail)
+                var trashFolder = MailActions.trashFolderForHost(host)
+                var mk = gk + "|" + trashFolder
+                if (!moveGroups[mk])
+                    moveGroups[mk] = { accountEmail: p.accountEmail, folder: p.folder, uids: [], target: trashFolder }
+                moveGroups[mk].uids.push(p.uid)
+            }
+        }
+
+        // Dispatch batch operations.
+        var g
+        for (g in expungeGroups) {
+            var eg = expungeGroups[g]
+            imapServiceObj.expungeMessages(eg.accountEmail, eg.folder, eg.uids)
+        }
+        for (g in moveGroups) {
+            var mg = moveGroups[g]
+            imapServiceObj.moveMessages(mg.accountEmail, mg.folder, mg.uids, mg.target)
+        }
+
+        root.selectedMessageKeys = ({})
     }
 
     // ── Bucket expansion ──
@@ -896,7 +907,6 @@ Kirigami.ApplicationWindow {
         if (!root.imapServiceObj || root.bootstrapFolderSyncRequested) return
         if (root.allAccountsHaveFolders()) return
         root.bootstrapFolderSyncRequested = true
-        root.accountRefreshing = true
         root.refreshAllFolderLists()
     }
 
@@ -1059,8 +1069,6 @@ Kirigami.ApplicationWindow {
     Connections {
         target: root.imapServiceObj
         function onSyncFinished(ok, message) {
-            root.refreshInProgress = false
-            root.accountRefreshing = false
             if (ok)
                 root.accountConnected = true
             if (message && message.length > 0)
@@ -1108,11 +1116,6 @@ Kirigami.ApplicationWindow {
                 { label: i18n("Re-authenticate"), callback: function() { root.reauthenticateAccount(accountEmail) } })
         }
 
-        function onSyncActivityChanged(active) {
-            root.accountRefreshing = !!active
-            root.refreshInProgress = !!active
-        }
-
     }
 
     Connections {
@@ -1148,11 +1151,8 @@ Kirigami.ApplicationWindow {
             root.syncMessageListModelSelection()
             if (root.bootstrapFolderSyncRequested && root.hasFetchedFolders()) {
                 root.bootstrapFolderSyncRequested = false
-                if (root.imapServiceObj) {
-                    root.accountRefreshing = true
-                    root.refreshInProgress = true
+                if (root.imapServiceObj)
                     root.syncAllAccounts()
-                }
             }
         }
         function onInboxChanged() {
@@ -1194,10 +1194,6 @@ Kirigami.ApplicationWindow {
             root.bootstrapFolderSyncRequested = false
             root.bootstrapSyncIfNeeded()
 
-            if (root.imapServiceObj) {
-                root.refreshInProgress = true
-                root.accountRefreshing = true
-            }
 
             if (hadFolders) {
                 root.syncSelectedFolder(true, true)

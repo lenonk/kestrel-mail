@@ -40,8 +40,10 @@ public:
     Q_INVOKABLE void syncFolder(const QString &folderName, bool announce = true, const QString &accountEmail = {});
     Q_INVOKABLE void refreshFolderList(bool announce = true);
     Q_INVOKABLE void hydrateMessageBody(const QString &accountEmail, const QString &folderName, const QString &uid);
-    Q_INVOKABLE void moveMessage(const QString &accountEmail, const QString &folder,
-                                 const QString &uid, const QString &targetFolder);
+    Q_INVOKABLE void moveMessages(const QString &accountEmail, const QString &folder,
+                                  const QStringList &uids, const QString &targetFolder);
+    Q_INVOKABLE void expungeMessages(const QString &accountEmail, const QString &folder,
+                                     const QStringList &uids);
     Q_INVOKABLE void markMessageRead(const QString &accountEmail, const QString &folder,
                                      const QString &uid);
     Q_INVOKABLE void markMessageFlagged(const QString &accountEmail, const QString &folder,
@@ -163,6 +165,7 @@ private:
         bool announce = true;
     };
     [[nodiscard]] bool isPerAccountMode() const { return !m_email.isEmpty(); }
+    void installThrottleObserver();
     [[nodiscard]] Imap::ConnectionPool* poolForEmail(const QString &email) const;
     QList<AccountInfo> resolveAccounts(const QVariantList &accounts);
 

@@ -116,16 +116,21 @@ function accountFolderItems(folders, inboxCategoryTabs, i18nFn, accountEmail) {
     var preferredUse = ["inbox", "sent", "trash", "drafts", "junk", "all"]
     var ordered = []
     var used = {}
+    var usedSpecialUse = {}
     for (var p = 0; p < preferredUse.length; ++p) {
         var itm = bySpecialUse[preferredUse[p]]
         if (itm && !used[itm.rawName.toLowerCase()]) {
             ordered.push(itm)
             used[itm.rawName.toLowerCase()] = true
+            usedSpecialUse[preferredUse[p]] = true
         }
     }
     var remaining = Object.keys(byNorm).sort()
     for (var r = 0; r < remaining.length; ++r) {
-        if (!used[remaining[r]]) ordered.push(byNorm[remaining[r]])
+        if (used[remaining[r]]) continue
+        var rem = byNorm[remaining[r]]
+        if (rem.specialUse && usedSpecialUse[rem.specialUse]) continue
+        ordered.push(rem)
     }
 
     // Attach Gmail category tabs to the inbox entry.
@@ -151,7 +156,7 @@ function accountFolderItems(folders, inboxCategoryTabs, i18nFn, accountEmail) {
 // Build the "More" subfolder items (hierarchical, non-primary, non-tag).
 // primaryItems: result of accountFolderItems()
 // isMoreFolderExpandedFn: function(path) -> bool
-function moreAccountFolderItems(folders, primaryItems, isMoreFolderExpandedFn, i18nFn, accountEmail) {
+function moreAccountFolderItems(folders, primaryItems, isMoreFolderExpandedFn, i18nFn, accountEmail, isGmail) {
     if (!folders || folders.length === 0) return []
 
     var filterEmail = (accountEmail || "").toLowerCase()
@@ -172,10 +177,18 @@ function moreAccountFolderItems(folders, primaryItems, isMoreFolderExpandedFn, i
         var rawName = normalizedRemoteFolderName((f.name || "").toString())
         if (!rawName.length) continue
         if (isCategoryFolder(rawName)) continue
-        if (rawName.indexOf("/") < 0) continue
 
         var norm = rawName.toLowerCase()
         if (primaryKeys[norm]) continue
+
+        // On Gmail, flat non-special folders are labels shown in the Tags
+        // section. Skip them here to avoid duplicates.
+        if (isGmail && rawName.indexOf("/") < 0
+                && !(f.specialUse || "").toString().length
+                && !isNoSelectFolder(f.flags)
+                && norm !== "inbox") {
+            continue
+        }
 
         var parts = rawName.split("/")
         var level = Math.max(0, parts.length - 1)

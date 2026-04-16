@@ -23,6 +23,13 @@ AccountManager::AccountManager(AccountRepository *repo, DataStore *store,
 QList<IAccount*>
 AccountManager::accounts() const { return m_accounts; }
 
+bool
+AccountManager::anySyncing() const {
+    for (auto *a : m_accounts)
+        if (a->syncing()) return true;
+    return false;
+}
+
 QList<QObject*>
 AccountManager::accountsAsObjects() const {
     QList<QObject*> out;
@@ -77,6 +84,7 @@ AccountManager::rebuildFromRepository() {
 
         if (auto *acct = createAccount(config)) {
             m_accounts.push_back(acct);
+            connect(acct, &IAccount::syncingChanged, this, &AccountManager::anySyncingChanged);
             acct->initialize();
         }
     }

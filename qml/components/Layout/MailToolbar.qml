@@ -50,12 +50,8 @@ Rectangle {
             MailActionButton {
                 iconName: "view-refresh"
                 text: i18n("Refresh")
-                spinning: toolbar.appRoot.refreshInProgress
-                onTriggered: {
-                    toolbar.appRoot.refreshInProgress = true
-                    toolbar.appRoot.accountRefreshing = true
-                    toolbar.appRoot.syncAllAccounts()
-                }
+                spinning: typeof accountManager !== "undefined" && accountManager.anySyncing
+                onTriggered: toolbar.appRoot.syncAllAccounts()
             }
         }
 

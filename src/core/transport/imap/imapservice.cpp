@@ -48,6 +48,46 @@ const QRegularExpression kCopyUidRe(
     R"(\[COPYUID\s+\d+\s+\S+\s+(\d+)\])"_L1,
     QRegularExpression::CaseInsensitiveOption);
 
+const QRegularExpression kCopyUidBatchRe(
+    R"(\[COPYUID\s+\d+\s+(\S+)\s+(\S+)\])"_L1,
+    QRegularExpression::CaseInsensitiveOption);
+
+QStringList expandUidSet(const QString &set) {
+    QStringList result;
+    const auto parts = set.split(","_L1, Qt::SkipEmptyParts);
+    for (const auto &part : parts) {
+        const auto colonIdx = part.indexOf(':');
+        if (colonIdx >= 0) {
+            bool okLo = false, okHi = false;
+            const qint64 lo = part.left(colonIdx).toLongLong(&okLo);
+            const qint64 hi = part.mid(colonIdx + 1).toLongLong(&okHi);
+            if (okLo && okHi) {
+                const qint64 step = (lo <= hi) ? 1 : -1;
+                for (qint64 v = lo; v != hi + step; v += step)
+                    result.push_back(QString::number(v));
+            } else {
+                result.push_back(part);
+            }
+        } else {
+            result.push_back(part);
+        }
+    }
+    return result;
+}
+
+// Parse batch COPYUID response, returning {oldUid -> newUid} mapping.
+QHash<QString, QString> parseBatchCopyUid(const QString &response) {
+    QHash<QString, QString> mapping;
+    const auto m = kCopyUidBatchRe.match(response);
+    if (!m.hasMatch()) return mapping;
+    const auto srcUids = expandUidSet(m.captured(1));
+    const auto dstUids = expandUidSet(m.captured(2));
+    const auto count = qMin(srcUids.size(), dstUids.size());
+    for (qsizetype i = 0; i < count; ++i)
+        mapping.insert(srcUids[i], dstUids[i]);
+    return mapping;
+}
+
 bool offlineModeEnabledFromEnv() {
     const QByteArray raw = qgetenv("KESTREL_OFFLINE_MODE").trimmed().toLower();
     if (raw.isEmpty())
@@ -98,6 +138,8 @@ ImapService::ImapService(const QVariantMap &accountConfig, DataStore *store, Tok
         m_pool->initialize(m_email, m_host, m_port, m_authMethod, credential);
     }
     m_expectedPoolSize = m_pool->expectedConnections();
+
+    installThrottleObserver();
 }
 
 ImapService::ImapService(DataStore *store, TokenVault *vault, QObject *parent)
@@ -107,7 +149,17 @@ ImapService::ImapService(DataStore *store, TokenVault *vault, QObject *parent)
     , m_offlineMode(offlineModeEnabledFromEnv()) {
     if (m_offlineMode)
         qInfo() << "[offline-mode] KESTREL_OFFLINE_MODE enabled; IMAP network operations are disabled.";
-    Imap::Connection::setThrottleObserver([this](const QString &accountEmail, bool throttled, const QString &response) {
+    installThrottleObserver();
+}
+
+ImapService::~ImapService() {
+    Imap::Connection::removeThrottleObserver(this);
+    shutdown();
+}
+
+void
+ImapService::installThrottleObserver() {
+    Imap::Connection::addThrottleObserver(this, [this](const QString &accountEmail, bool throttled, const QString &response) {
         const QString msg = "Account throttled by server: %1"_L1
                                 .arg(response.simplified().left(240));
         QMetaObject::invokeMethod(this, [this, accountEmail, throttled, msg]() {
@@ -121,7 +173,6 @@ ImapService::ImapService(DataStore *store, TokenVault *vault, QObject *parent)
             if (throttled) {
                 if (!prev)
                     qInfo().noquote() << "[throttle]" << "account=" << accountEmail << "state=THROTTLED";
-                // Drop queued background folder sync work while throttled.
                 m_pendingFolderSync.clear();
                 emit accountThrottled(accountEmail, msg);
             } else {
@@ -132,8 +183,6 @@ ImapService::ImapService(DataStore *store, TokenVault *vault, QObject *parent)
         }, Qt::QueuedConnection);
     });
 }
-
-ImapService::~ImapService() { shutdown(); }
 
 void
 ImapService::initializeConnectionPool() {
@@ -1742,68 +1791,119 @@ ImapService::executeHydration(const QVariantMap &account, const QString &email,
 }
 
 void
-ImapService::moveMessage(const QString &accountEmail, const QString &folder,
-                          const QString &uid, const QString &targetFolder) {
-    if (m_destroying || accountEmail.isEmpty() || uid.isEmpty() || targetFolder.isEmpty())
+ImapService::moveMessages(const QString &accountEmail, const QString &folder,
+                           const QStringList &uids, const QString &targetFolder) {
+    if (m_destroying || accountEmail.isEmpty() || uids.isEmpty() || targetFolder.isEmpty())
         return;
 
-    qint64 messageId = -1;
-    qint32 unreadVal = 0;
-    if (m_store) {
-        const QVariantMap edge = m_store->folderMapRowForEdge(accountEmail, folder, uid);
-        messageId = edge.value("messageId"_L1, -1LL).toLongLong();
-        unreadVal = edge.value("unread"_L1, 0).toInt();
+    if (resolveSourceFolder(folder).compare(targetFolder, Qt::CaseInsensitive) == 0)
+        return;
 
+    // Collect DB state per UID for post-move edge insertion.
+    struct EdgeInfo { qint64 messageId = -1; qint32 unread = 0; };
+    QHash<QString, EdgeInfo> edgeInfo;
+
+    if (m_store) {
         const QString tgt = targetFolder.trimmed().toLower();
         const bool movingToTrash = tgt == "trash"_L1
                                 || tgt == "[gmail]/trash"_L1
                                 || tgt == "[google mail]/trash"_L1
                                 || tgt.endsWith("/trash"_L1);
+
+        for (const auto &uid : uids) {
+            const QVariantMap edge = m_store->folderMapRowForEdge(accountEmail, folder, uid);
+            edgeInfo.insert(uid, {
+                edge.value("messageId"_L1, -1LL).toLongLong(),
+                edge.value("unread"_L1, 0).toInt()
+            });
+        }
+
         if (movingToTrash)
-            m_store->removeAccountUidsEverywhere(accountEmail, {uid}, /*skipOrphanCleanup=*/true);
+            m_store->removeAccountUidsEverywhere(accountEmail, uids, /*skipOrphanCleanup=*/true);
         else
-            m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
+            for (const auto &uid : uids)
+                m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
     }
 
     if (m_offlineMode) {
-        emit realtimeStatus(true, "Offline mode: skipped IMAP move for %1."_L1.arg(uid));
+        emit realtimeStatus(true, "Offline mode: skipped batch IMAP move."_L1);
         return;
     }
 
-    (void)QtConcurrent::run([this, accountEmail, folder, uid, targetFolder, messageId, unreadVal]() {
+    (void)QtConcurrent::run([this, accountEmail, folder, uids, targetFolder, edgeInfo]() {
         if (m_destroying.load()) return;
 
-        auto cxn = poolForEmail(accountEmail)->acquire("move-message", accountEmail);
+        auto cxn = poolForEmail(accountEmail)->acquire("move-messages", accountEmail);
         if (!cxn) return;
 
         const auto sourceFolder = resolveSourceFolder(folder);
-
         if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
             if (!cxn->select(sourceFolder)) return;
         }
 
-        const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uid, targetFolder));
+        const QString uidSet = uids.join(","_L1);
+        const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uidSet, targetFolder));
 
-        qInfo().noquote() << "[move-message]"
-                          << "uid=" << uid << "from=" << folder
-                          << "to=" << targetFolder << "resp=" << resp.simplified().left(120);
+        qInfo().noquote() << "[move-messages]"
+                          << "uids=" << uidSet << "from=" << folder
+                          << "to=" << targetFolder << "resp=" << resp.simplified().left(200);
 
-        const QRegularExpressionMatch m = kCopyUidRe.match(resp);
-        if (m.hasMatch() && messageId > 0) {
-            const QString newUid = m.captured(1);
-            QMetaObject::invokeMethod(this,
-                [this, accountEmail, targetFolder, newUid, messageId, unreadVal]() {
-                    if (!m_destroying.load() && m_store)
-                        m_store->insertFolderEdge(accountEmail, messageId,
-                                                  targetFolder, newUid, unreadVal);
-                }, Qt::QueuedConnection);
-        } else if (messageId > 0) {
-            QMetaObject::invokeMethod(this,
-                [this, accountEmail, messageId]() {
-                    if (!m_destroying.load() && m_store)
-                        m_store->removeAllEdgesForMessageId(accountEmail, messageId);
-                }, Qt::QueuedConnection);
+        const auto uidMapping = parseBatchCopyUid(resp);
+        QMetaObject::invokeMethod(this,
+            [this, accountEmail, targetFolder, edgeInfo, uidMapping]() {
+                if (m_destroying.load() || !m_store) return;
+                if (!uidMapping.isEmpty()) {
+                    for (auto it = uidMapping.cbegin(); it != uidMapping.cend(); ++it) {
+                        const auto ei = edgeInfo.value(it.key());
+                        if (ei.messageId > 0)
+                            m_store->insertFolderEdge(accountEmail, ei.messageId,
+                                                      targetFolder, it.value(), ei.unread);
+                    }
+                } else {
+                    for (auto it = edgeInfo.cbegin(); it != edgeInfo.cend(); ++it) {
+                        if (it.value().messageId > 0)
+                            m_store->removeAllEdgesForMessageId(accountEmail, it.value().messageId);
+                    }
+                }
+            }, Qt::QueuedConnection);
+    });
+}
+
+void
+ImapService::expungeMessages(const QString &accountEmail, const QString &folder,
+                              const QStringList &uids) {
+    if (m_destroying || accountEmail.isEmpty() || uids.isEmpty())
+        return;
+
+    if (m_store) {
+        for (const auto &uid : uids)
+            m_store->deleteSingleFolderEdge(accountEmail, folder, uid);
+    }
+
+    if (m_offlineMode) {
+        emit realtimeStatus(true, "Offline mode: skipped batch IMAP expunge."_L1);
+        return;
+    }
+
+    (void)QtConcurrent::run([this, accountEmail, folder, uids]() {
+        if (m_destroying.load()) return;
+
+        auto cxn = poolForEmail(accountEmail)->acquire("expunge-messages", accountEmail);
+        if (!cxn) return;
+
+        const auto sourceFolder = resolveSourceFolder(folder);
+        if (cxn->isSelectedReadOnly() || cxn->selectedFolder().compare(sourceFolder, Qt::CaseInsensitive) != 0) {
+            if (!cxn->select(sourceFolder)) return;
         }
+
+        const QString uidSet = uids.join(","_L1);
+        const QString storeResp = cxn->execute("UID STORE %1 +FLAGS (\\Deleted)"_L1.arg(uidSet));
+        const QString expungeResp = cxn->execute("UID EXPUNGE %1"_L1.arg(uidSet));
+
+        qInfo().noquote() << "[expunge-messages]"
+                          << "uids=" << uidSet << "folder=" << folder
+                          << "store=" << storeResp.simplified().left(120)
+                          << "expunge=" << expungeResp.simplified().left(120);
     });
 }
 

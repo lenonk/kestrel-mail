@@ -20,6 +20,7 @@ class AccountManager : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QList<QObject*> accounts READ accountsAsObjects NOTIFY accountsChanged)
+    Q_PROPERTY(bool anySyncing READ anySyncing NOTIFY anySyncingChanged)
 
 public:
     explicit AccountManager(AccountRepository *repo, DataStore *store,
@@ -28,12 +29,14 @@ public:
 
     [[nodiscard]] QList<IAccount*> accounts() const;
     [[nodiscard]] QList<QObject*> accountsAsObjects() const;
+    [[nodiscard]] bool anySyncing() const;
     Q_INVOKABLE QObject* accountByEmail(const QString &email) const;
 
     void rebuildFromRepository();
 
 signals:
     void accountsChanged();
+    void anySyncingChanged();
 
 private:
     IAccount* createAccount(const QVariantMap &config);

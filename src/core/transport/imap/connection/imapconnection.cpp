@@ -12,7 +12,8 @@
 using namespace Qt::Literals::StringLiterals;
 
 namespace Imap {
-Connection::ThrottleObserver Connection::s_throttleObserver = {};
+QMutex Connection::s_throttleObserverMutex;
+QHash<void*, Connection::ThrottleObserver> Connection::s_throttleObservers;
 
 namespace {
 
@@ -302,8 +303,15 @@ Connection::connectAndAuth(const QString &host, const qint32 port,
 }
 
 void
-Connection::setThrottleObserver(Connection::ThrottleObserver observer) {
-    s_throttleObserver = std::move(observer);
+Connection::addThrottleObserver(void *key, Connection::ThrottleObserver observer) {
+    QMutexLocker lock(&s_throttleObserverMutex);
+    s_throttleObservers.insert(key, std::move(observer));
+}
+
+void
+Connection::removeThrottleObserver(void *key) {
+    QMutexLocker lock(&s_throttleObserverMutex);
+    s_throttleObservers.remove(key);
 }
 
 void
@@ -313,8 +321,9 @@ Connection::observeThrottleState(const QString &response) {
         return;
 
     m_throttled = seenThrottled;
-    if (s_throttleObserver)
-        s_throttleObserver(m_email, m_throttled, response);
+    QMutexLocker lock(&s_throttleObserverMutex);
+    for (auto it = s_throttleObservers.cbegin(); it != s_throttleObservers.cend(); ++it)
+        it.value()(m_email, m_throttled, response);
 }
 
 QString
