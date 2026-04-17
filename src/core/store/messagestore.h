@@ -60,6 +60,7 @@ public:
                            const QStringList &uids) const;
     void deleteFolderEdgesForMessage(const QString &accountEmail, const QString &folder,
                                      qint64 messageId) const;
+    void upsertLabel(const QString &accountEmail, qint64 messageId, const QString &label) const;
     QString folderUidForMessageId(const QString &accountEmail, const QString &folder,
                                   qint64 messageId) const;
     void insertFolderEdge(const QString &accountEmail, qint64 messageId,

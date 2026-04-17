@@ -1300,6 +1300,22 @@ ImapService::fetchFolderHeaders(const QString &email,
         if (m_store) m_store->insertFolderEdge(acctEmail, msgId, folder, uid, unread);
     };
 
+    ctx.onCategoryRetry = [this](const QString &acctEmail, const QString &folder,
+                                  const QHash<qint32, QSet<QString>> &hints) {
+        if (!m_store) return;
+        for (auto it = hints.cbegin(); it != hints.cend(); ++it) {
+            const QString uid = QString::number(it.key());
+            const auto edge = m_store->folderMapRowForEdge(acctEmail, folder, uid);
+            const auto messageId = edge.value("messageId"_L1, -1LL).toLongLong();
+            if (messageId <= 0) continue;
+            const auto unread = edge.value("unread"_L1, 0).toInt();
+            for (const auto &catFolder : it.value()) {
+                m_store->insertFolderEdge(acctEmail, messageId, catFolder, uid, unread);
+                m_store->upsertLabel(acctEmail, messageId, catFolder);
+            }
+        }
+    };
+
     // CONDSTORE: load the modseq we recorded at the end of the previous sync for this
     // folder.  SyncEngine compares it with the fresh EXAMINE HIGHESTMODSEQ to decide
     // whether any server-side changes occurred since our last sync.
@@ -1841,19 +1857,30 @@ ImapService::moveMessages(const QString &accountEmail, const QString &folder,
             if (!cxn->select(sourceFolder)) return;
         }
 
-        const QString uidSet = uids.join(","_L1);
-        const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uidSet, targetFolder));
+        // Chunk UIDs to avoid exceeding server command length limits.
+        static constexpr int kImapBatch = 500;
+        QHash<QString, QString> allMappings;
+        for (int off = 0; off < uids.size(); off += kImapBatch) {
+            if (m_destroying.load()) return;
+            const auto chunk = uids.mid(off, kImapBatch);
+            const QString uidSet = chunk.join(","_L1);
+            const QString resp = cxn->execute("UID MOVE %1 \"%2\""_L1.arg(uidSet, targetFolder));
 
-        qInfo().noquote() << "[move-messages]"
-                          << "uids=" << uidSet.left(200) << "from=" << folder
-                          << "to=" << targetFolder << "resp=" << resp.simplified().left(200);
+            qInfo().noquote() << "[move-messages]"
+                              << "chunk" << (off / kImapBatch + 1)
+                              << "uids=" << chunk.size() << "from=" << folder
+                              << "to=" << targetFolder;
 
-        const auto uidMapping = parseBatchCopyUid(resp);
+            const auto mapping = parseBatchCopyUid(resp);
+            for (auto it = mapping.cbegin(); it != mapping.cend(); ++it)
+                allMappings.insert(it.key(), it.value());
+        }
+
         QMetaObject::invokeMethod(this,
-            [this, accountEmail, targetFolder, edgeInfo, uidMapping]() {
+            [this, accountEmail, targetFolder, edgeInfo, allMappings]() {
                 if (m_destroying.load() || !m_store) return;
-                if (!uidMapping.isEmpty()) {
-                    for (auto it = uidMapping.cbegin(); it != uidMapping.cend(); ++it) {
+                if (!allMappings.isEmpty()) {
+                    for (auto it = allMappings.cbegin(); it != allMappings.cend(); ++it) {
                         const auto ei = edgeInfo.value(it.key());
                         if (ei.messageId > 0)
                             m_store->insertFolderEdge(accountEmail, ei.messageId,
@@ -1894,14 +1921,19 @@ ImapService::expungeMessages(const QString &accountEmail, const QString &folder,
             if (!cxn->select(sourceFolder)) return;
         }
 
-        const QString uidSet = uids.join(","_L1);
-        const QString storeResp = cxn->execute("UID STORE %1 +FLAGS (\\Deleted)"_L1.arg(uidSet));
-        const QString expungeResp = cxn->execute("UID EXPUNGE %1"_L1.arg(uidSet));
+        // Chunk UIDs to avoid exceeding server command length limits.
+        static constexpr int kImapBatch = 500;
+        for (int off = 0; off < uids.size(); off += kImapBatch) {
+            if (m_destroying.load()) return;
+            const auto chunk = uids.mid(off, kImapBatch);
+            const QString uidSet = chunk.join(","_L1);
+            cxn->execute("UID STORE %1 +FLAGS (\\Deleted)"_L1.arg(uidSet));
+            cxn->execute("UID EXPUNGE %1"_L1.arg(uidSet));
 
-        qInfo().noquote() << "[expunge-messages]"
-                          << "uids=" << uidSet.left(200) << "folder=" << folder
-                          << "store=" << storeResp.simplified().left(120)
-                          << "expunge=" << expungeResp.simplified().left(120);
+            qInfo().noquote() << "[expunge-messages]"
+                              << "chunk" << (off / kImapBatch + 1)
+                              << "uids=" << chunk.size() << "folder=" << folder;
+        }
     });
 }
 
@@ -1909,20 +1941,26 @@ void
 ImapService::deleteMessageKeys(const QStringList &messageKeys) {
     if (m_destroying || messageKeys.isEmpty()) return;
 
-    // Determine trash folder for this account.
-    const auto host = m_accountConfig.value("imapHost"_L1).toString().toLower();
-    const bool isGmail = host.contains("gmail"_L1) || host.contains("googlemail"_L1);
-    const QString trashFolder = isGmail ? "[Gmail]/Trash"_L1 : "Trash"_L1;
-
     auto isTrash = [](const QString &folder) {
         const auto f = folder.toLower();
         return f == "trash"_L1 || f == "[gmail]/trash"_L1
             || f == "[google mail]/trash"_L1 || f.endsWith("/trash"_L1);
     };
 
+    auto trashForAccount = [this](const QString &accountEmail) -> QString {
+        QReadLocker lock(&m_accountRegistryLock);
+        const auto config = m_accountConfigs.value(accountEmail.trimmed().toLower());
+        if (config.isEmpty() && !m_accountConfig.isEmpty())
+            return m_accountConfig.value("imapHost"_L1).toString().toLower().contains("gmail"_L1)
+                ? "[Gmail]/Trash"_L1 : "Trash"_L1;
+        const auto host = config.value("imapHost"_L1).toString().toLower();
+        return (host.contains("gmail"_L1) || host.contains("googlemail"_L1))
+            ? "[Gmail]/Trash"_L1 : "Trash"_L1;
+    };
+
     // Parse keys and group by account+folder.
     // Key format: "msg:accountEmail|folder|uid"
-    struct Group { QString accountEmail; QString folder; QStringList uids; };
+    struct Group { QString accountEmail; QString folder; QString trashFolder; QStringList uids; };
     QHash<QString, Group> expungeGroups;
     QHash<QString, Group> moveGroups;
 
@@ -1944,9 +1982,10 @@ ImapService::deleteMessageKeys(const QStringList &messageKeys) {
             if (g.accountEmail.isEmpty()) { g.accountEmail = accountEmail; g.folder = folder; }
             g.uids.push_back(uid);
         } else {
-            const auto mk = gk + "|"_L1 + trashFolder;
+            const auto trash = trashForAccount(accountEmail);
+            const auto mk = gk + "|"_L1 + trash;
             auto &g = moveGroups[mk];
-            if (g.accountEmail.isEmpty()) { g.accountEmail = accountEmail; g.folder = folder; }
+            if (g.accountEmail.isEmpty()) { g.accountEmail = accountEmail; g.folder = folder; g.trashFolder = trash; }
             g.uids.push_back(uid);
         }
     }
@@ -1954,7 +1993,7 @@ ImapService::deleteMessageKeys(const QStringList &messageKeys) {
     for (const auto &g : expungeGroups)
         expungeMessages(g.accountEmail, g.folder, g.uids);
     for (const auto &g : moveGroups)
-        moveMessages(g.accountEmail, g.folder, g.uids, trashFolder);
+        moveMessages(g.accountEmail, g.folder, g.uids, g.trashFolder);
 }
 
 void

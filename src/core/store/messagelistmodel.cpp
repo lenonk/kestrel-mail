@@ -361,8 +361,13 @@ MessageListModel::loadNextBatch(const quint64 generation) {
                 appendRows(batch);
         }
 
+        qInfo() << "[model-load] batch=" << batch.size()
+                << "totalSource=" << m_loadedSourceRows.size()
+                << "modelRows=" << m_rows.size();
+
         if (batch.size() < kBatchSize) {
             // No more data — done loading.
+            qInfo() << "[model-load] DONE. finalModelRows=" << m_rows.size();
             if (m_loading) { m_loading = false; emit loadingChanged(); }
         } else {
             // More data available — show progress bar and fetch next batch.
@@ -446,48 +451,29 @@ MessageListModel::appendRows(const QVariantList &batch) {
             existingKeys.insert(r.stableKey);
     }
 
-    auto pending = std::make_shared<QVector<Row>>();
+    QVector<Row> toAppend;
     for (auto &r : delta) {
         if (existingKeys.contains(r.stableKey)) continue;
         if (r.type == HeaderRow)
             r.hasTopGap = true;
         existingKeys.insert(r.stableKey);
-        pending->push_back(std::move(r));
+        toAppend.push_back(std::move(r));
     }
 
-    if (pending->isEmpty()) return;
+    if (toAppend.isEmpty()) return;
 
-    // Drip-feed rows in small chunks so the UI stays responsive during scrolling.
-    auto offset = std::make_shared<int>(0);
-    auto generation = m_refreshGeneration;
-    auto drip = std::make_shared<std::function<void()>>();
-    *drip = [this, pending, offset, generation, drip]() {
-        static constexpr int kChunk = 200;
-        if (generation != m_refreshGeneration) return;
-        if (*offset >= pending->size()) return;
+    QMutexLocker locker(&m_rowsMutex);
+    const auto first = m_rows.size();
+    const auto last = first + toAppend.size() - 1;
 
-        const auto count = qMin(kChunk, static_cast<int>(pending->size()) - *offset);
+    beginInsertRows(QModelIndex(), first, last);
+    for (auto &r : toAppend)
+        m_rows.push_back(std::move(r));
+    endInsertRows();
+    locker.unlock();
 
-        QMutexLocker locker(&m_rowsMutex);
-        const auto first = m_rows.size();
-        const auto last = first + count - 1;
-
-        beginInsertRows(QModelIndex(), first, last);
-        for (int i = 0; i < count; ++i)
-            m_rows.push_back(std::move((*pending)[*offset + i]));
-        endInsertRows();
-        locker.unlock();
-
-        *offset += count;
-
-        emit totalRowCountChanged();
-        emit visibleCountsChanged();
-
-        if (*offset < pending->size())
-            QTimer::singleShot(0, this, [drip]() { (*drip)(); });
-    };
-
-    (*drip)();
+    emit totalRowCountChanged();
+    emit visibleCountsChanged();
 }
 
 void
@@ -670,12 +656,35 @@ MessageListModel::visibleMessageCount() const {
 QStringList
 MessageListModel::allMessageKeys() const {
     QMutexLocker locker(&m_rowsMutex);
+    QSet<QString> seen;
     QStringList keys;
-    keys.reserve(m_rows.size());
+    keys.reserve(m_rows.size() + m_loadedSourceRows.size());
+
+    // Keys already in the visible model.
     for (const auto &r : m_rows) {
-        if (r.type == MessageRow && !r.stableKey.isEmpty())
+        if (r.type == MessageRow && !r.stableKey.isEmpty()) {
             keys.push_back(r.stableKey);
+            seen.insert(r.stableKey);
+        }
     }
+
+    qInfo() << "[allMessageKeys] m_rows keys=" << keys.size() << "m_loadedSourceRows=" << m_loadedSourceRows.size();
+
+    // Keys from loaded source rows not yet drip-fed into the model.
+    for (const auto &v : m_loadedSourceRows) {
+        const auto map = v.toMap();
+        const auto account = map.value("accountEmail"_L1).toString();
+        const auto folder = map.value("folder"_L1).toString();
+        const auto uid = map.value("uid"_L1).toString();
+        if (account.isEmpty() || uid.isEmpty()) continue;
+        const auto key = "msg:%1|%2|%3"_L1.arg(account, folder, uid);
+        if (!seen.contains(key)) {
+            keys.push_back(key);
+            seen.insert(key);
+        }
+    }
+
+    qInfo() << "[allMessageKeys] total keys=" << keys.size();
     return keys;
 }
 

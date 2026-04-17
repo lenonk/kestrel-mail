@@ -1,8 +1,8 @@
 [Global]
-IconName=mail-unread
+IconName=kestrel-mail
 DesktopEntry=kestrel-mail
-Comment=Kestrel Mail Notifications
-Name=Kestrel Mail
+Comment=Kestrel Notifications
+Name=Kestrel
 
 [Event/newMail]
 Name=New Mail

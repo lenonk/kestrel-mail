@@ -1877,6 +1877,13 @@ MessageStore::deleteFolderEdges(const QString &accountEmail, const QString &fold
         m_callbacks.scheduleDataChanged();
 }
 
+void
+MessageStore::upsertLabel(const QString &accountEmail, const qint64 messageId, const QString &label) const {
+    auto database = m_db();
+    if (!database.isValid() || !database.isOpen()) return;
+    persistLabelAndTag(database, accountEmail, static_cast<qint32>(messageId), label, "category-retry"_L1);
+}
+
 QString
 MessageStore::folderUidForMessageId(const QString &accountEmail, const QString &folder, const qint64 messageId) const {
     if (messageId <= 0) { return {}; }

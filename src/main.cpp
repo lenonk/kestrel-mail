@@ -11,6 +11,9 @@
 #include <QWindow>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QTimer>
+
+#include "core/accounts/iaccount.h"
 #include <KLocalizedContext>
 #include <KLocalizedString>
 #include <QNetworkAccessManager>
@@ -174,7 +177,7 @@ int main(int argc, char *argv[])
 
     // Desktop notification for new mail.
     QObject::connect(&dataStore, &DataStore::newMailReceived, &app,
-        [&dataStore, &imapService](const QVariantMap &info) {
+        [&dataStore, &imapService, &accountManager](const QVariantMap &info) {
             const QString senderRaw = info.value("senderRaw"_L1).toString();
             const QString subject   = info.value("subject"_L1).toString();
             const QString snippet   = info.value("snippet"_L1).toString();
@@ -199,6 +202,10 @@ int main(int argc, char *argv[])
             QString body = subject;
             if (!snippet.isEmpty())
                 body += "\n"_L1 + snippet;
+            QString acctName = account;
+            if (auto *acct = qobject_cast<IAccount*>(accountManager.accountByEmail(account)))
+                acctName = acct->accountName();
+            body += "\nvia "_L1 + acctName;
             n->setText(body);
 
             // Load sender avatar or generate initials fallback.
@@ -242,15 +249,22 @@ int main(int argc, char *argv[])
     // Individual folder syncs during the initial bulk import should not
     // trigger desktop notifications — that's too spammy.
     {
-        auto *initialSyncDone = new bool(false);
-        QObject::connect(&imapService, &ImapService::syncFinished, &dataStore,
-            [&dataStore, initialSyncDone](bool ok, const QString &msg) {
-                if (*initialSyncDone) return;
-                // syncAll's final message contains "All folders synced" — that's our cue.
-                if (ok && msg.contains("All folders synced"_L1)) {
-                    *initialSyncDone = true;
+        // Enable desktop notifications after every account has completed
+        // at least one sync cycle.  This prevents a flood of notifications
+        // for pre-existing messages during the initial bulk sync.
+        // Desktop notifications are on by default. Disable them when a new
+        // account is added (to suppress the flood from initial bulk sync),
+        // then re-enable once the sync settles.
+        dataStore.setDesktopNotifyEnabled(true);
+
+        QObject::connect(&accountManager, &AccountManager::accountsChanged, &dataStore,
+            [&dataStore]() {
+                dataStore.setDesktopNotifyEnabled(false);
+            });
+        QObject::connect(&accountManager, &AccountManager::anySyncingChanged, &dataStore,
+            [&dataStore, &accountManager]() {
+                if (!accountManager.anySyncing())
                     dataStore.setDesktopNotifyEnabled(true);
-                }
             });
     }
 

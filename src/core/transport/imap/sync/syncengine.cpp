@@ -765,7 +765,7 @@ struct PrepassResult {
 };
 
 PrepassResult
-prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, const IngestState &state)
+prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, IngestState &state)
 {
     PrepassResult result;
     if (uids.empty() || !ctx.lookupByMessageIdHeaders || !ctx.insertFolderEdge) {
@@ -856,6 +856,8 @@ prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, const Inges
             // appears in the right tab (Primary/Promotions/Social/etc.).
             if (ctx.isGmailInbox()) {
                 const auto categoryFolders = state.categoryHints.value(uid);
+                if (categoryFolders.isEmpty())
+                    ++state.categoryMissCount;
                 for (const QString &catFolder : categoryFolders) {
                     if (!catFolder.isEmpty())
                         ctx.insertFolderEdge(ctx.cxn->email(), existingRow,
@@ -913,6 +915,9 @@ executeIncremental(SyncContext &ctx) {
     }
     std::ranges::sort(incUids);
 
+    // Save the full UID range before dedup prepass filters some out.
+    const auto allNewUids = incUids;
+
     // Cross-folder dedup pre-pass for new UIDs.
     qint32 throttleBackoffMs = 0;
     using SyncUtils::kSyncBatchSize;
@@ -949,6 +954,28 @@ executeIncremental(SyncContext &ctx) {
 
         fetchUidBatch(ctx, std::vector(incBatch.begin(), incBatch.begin() + incN),
                       "inbox-inc"_L1, state, throttleBackoffMs);
+    }
+
+    // Gmail category labels may not be assigned by the time the first UID SEARCH
+    // runs (race with server-side classification). If any new messages are missing
+    // a category, wait briefly and retry the category hint search.
+    qInfo() << "[category-debug] isGmailInbox=" << ctx.isGmailInbox()
+            << "categoryMissCount=" << state.categoryMissCount
+            << "incUids=" << incUids.size()
+            << "fetchedCount=" << state.fetchedCount;
+    if (ctx.isGmailInbox() && state.categoryMissCount > 0 && !allNewUids.empty()) {
+        QThread::msleep(2000);
+        IngestState retryState;
+        const auto minRetry = allNewUids.front();
+        const auto maxRetry = allNewUids.back();
+        buildCategoryHints(ctx, retryState, minRetry, maxRetry);
+
+        if (!retryState.categoryHints.isEmpty() && ctx.onCategoryRetry) {
+            const auto email = ctx.cxn->email();
+            ctx.onCategoryRetry(email, ctx.folderName, retryState.categoryHints);
+            qInfo().noquote() << "[category-retry] patched" << retryState.categoryHints.size()
+                              << "messages with deferred category labels";
+        }
     }
 
     // Backfill messages within budget that aren't cached locally.

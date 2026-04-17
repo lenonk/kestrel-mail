@@ -57,6 +57,11 @@ struct SyncContext {
     // Insert a folder edge for an already-known message (cross-folder dedup shortcut).
     std::function<void(const QString &accountEmail, qint64 messageId, const QString &folder, const QString &uid, int unread)> insertFolderEdge;
 
+    // Deferred category label retry: called with {IMAP UID → set of category folder names}
+    // when incremental sync detects messages missing category labels after a short delay.
+    std::function<void(const QString &accountEmail, const QString &folder,
+                       const QHash<qint32, QSet<QString>> &categoryHints)> onCategoryRetry;
+
     [[nodiscard]] bool isGmail() const {
         return cxn && cxn->host().contains(QStringLiteral("gmail"), Qt::CaseInsensitive);
     }
