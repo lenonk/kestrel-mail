@@ -70,7 +70,6 @@ Kestrel has active end-to-end mail, calendar, and local storage plumbing in plac
 - OAuth2 (PKCE)
 - QtWebEngine (message rendering)
 - Botan 3 (cryptography)
-- Boost
 
 ## Dependencies
 
@@ -91,14 +90,13 @@ Kestrel has active end-to-end mail, calendar, and local storage plumbing in plac
 - KF6 KirigamiPlatform
 
 ### Libraries
-- Boost
 - Botan 3 (`botan-3` via pkg-config)
 - libsecret-1 (optional, for GNOME keyring token storage)
 
 ### Arch Linux / CachyOS
 
 ```bash
-sudo pacman -S cmake extra-cmake-modules clang boost \
+sudo pacman -S cmake extra-cmake-modules clang \
     qt6-base qt6-declarative qt6-webengine qt6-webchannel \
     kirigami ki18n kcoreaddons kwallet knotifications \
     botan libsecret
@@ -107,7 +105,7 @@ sudo pacman -S cmake extra-cmake-modules clang boost \
 ### Fedora / openSUSE
 
 ```bash
-sudo dnf install cmake extra-cmake-modules clang boost-devel \
+sudo dnf install cmake extra-cmake-modules clang \
     qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtwebengine-devel \
     qt6-qtwebchannel-devel \
     kf6-kirigami-devel kf6-ki18n-devel kf6-kcoreaddons-devel \
@@ -118,7 +116,7 @@ sudo dnf install cmake extra-cmake-modules clang boost-devel \
 ### Ubuntu / Debian (24.04+)
 
 ```bash
-sudo apt install cmake extra-cmake-modules clang libboost-dev \
+sudo apt install cmake extra-cmake-modules clang \
     qt6-base-dev qt6-declarative-dev qt6-webengine-dev \
     qt6-webchannel-dev \
     libkf6kirigami-dev libkf6i18n-dev libkf6coreaddons-dev \

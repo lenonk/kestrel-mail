@@ -48,7 +48,6 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick Sql Network Concurrent W
 find_package(KF6 REQUIRED COMPONENTS CoreAddons I18n Notifications Wallet)
 find_package(KF6Kirigami REQUIRED)
 find_package(KF6KirigamiPlatform REQUIRED)
-find_package(Boost CONFIG REQUIRED)
 find_package(PkgConfig)
 if(PKG_CONFIG_FOUND)
     pkg_check_modules(LIBSECRET libsecret-1)
