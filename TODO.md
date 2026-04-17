@@ -11,6 +11,11 @@ Consolidated action list for Kestrel (migrated from scattered notes/memory/docs)
 - [ ] Make Favorites section an option the user can turn off.
 - [ ] Calendar month view: fetch next/previous month's events on the fly when navigating.
 
+## Architecture
+
+- [ ] Local AI Agent API: HTTP API for external AI agents to read, search, label, move, and compose email. Enables personal AI assistants to interact with the mailbox programmatically.
+- [ ] Account configuration dialog: tabbed settings UI with per-provider layouts (Gmail vs Generic IMAP), IMAP/SMTP tabs, diagnostics.
+
 ## Sync / Parity / Correctness
 
 - [ ] Revisit snippet extraction/cleanup pipeline:
