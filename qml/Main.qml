@@ -13,6 +13,7 @@ import "components/Search" as Search
 import "components/MessageList" as MessageList
 import "components/MessageContent" as MessageContent
 import "components/Compose" as Compose
+import "components/AccountConfig" as AccountConfig
 import "components/Calendar" as Calendar
 import "components/Contacts" as Contacts
 import "utils/ColorUtilities.js" as ColorUtils
@@ -639,6 +640,7 @@ Kirigami.ApplicationWindow {
     }
 
     function openAccountWizard() { accountWizard.open() }
+    function openAccountConfig() { accountConfigDialog.open() }
 
     function openForwardCompose(subject, body, bodyText, attachments, initialDarkMode) {
         composeDialog.openCompose("", subject || "", body || "", attachments || [], !!initialDarkMode, bodyText || "")
@@ -1002,6 +1004,13 @@ Kirigami.ApplicationWindow {
         onToastRequested: (message, isError) => root.showInlineStatus(message, isError)
     }
 
+    AccountConfig.AccountConfigDialog {
+        id: accountConfigDialog
+        accountRepositoryObj: root.accountRepositoryObj
+        accountSetupObj: root.accountSetupObj
+        accountManagerObj: (typeof accountManager !== "undefined") ? accountManager : null
+    }
+
     Compose.Compose {
         id: composeDialog
         accountRepositoryObj: root.accountRepositoryObj
@@ -1183,7 +1192,7 @@ Kirigami.ApplicationWindow {
             root.bootstrapSyncIfNeeded()
 
 
-            if (hadFolders) {
+            if (root.hasFetchedFolders()) {
                 root.syncSelectedFolder(true, true)
             }
             if (root.googleApiServiceObj && root.googleApiServiceObj.refreshGoogleCalendars) {

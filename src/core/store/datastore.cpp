@@ -901,14 +901,8 @@ bool DataStore::deleteAccount(const QString &email) {
 
     const auto norm = email.trimmed().toLower();
 
-    // Cascade: remove all data associated with this account.
+    // Remove the account entry, folders, and sync status synchronously (small tables).
     for (const auto &sql : {
-        "DELETE FROM message_folder_map WHERE lower(account_email) = :email"_L1,
-        "DELETE FROM message_labels WHERE lower(account_email) = :email"_L1,
-        "DELETE FROM message_tag_map WHERE lower(account_email) = :email"_L1,
-        "DELETE FROM message_participants WHERE lower(account_email) = :email"_L1,
-        "DELETE FROM message_attachments WHERE lower(account_email) = :email"_L1,
-        "DELETE FROM messages WHERE lower(account_email) = :email"_L1,
         "DELETE FROM folders WHERE lower(account_email) = :email"_L1,
         "DELETE FROM folder_sync_status WHERE lower(account_email) = :email"_L1,
         "DELETE FROM account_pgp_keys WHERE lower(account_email) = :email"_L1,
@@ -919,6 +913,28 @@ bool DataStore::deleteAccount(const QString &email) {
         q.bindValue(":email"_L1, norm);
         q.exec();
     }
+
+    // Bulk message data cleanup runs in the background to avoid blocking the UI.
+    (void)QtConcurrent::run([this, norm]() {
+        auto database = db();
+        if (!database.isValid() || !database.isOpen()) return;
+
+        for (const auto &sql : {
+            "DELETE FROM message_folder_map WHERE lower(account_email) = :email"_L1,
+            "DELETE FROM message_labels WHERE lower(account_email) = :email"_L1,
+            "DELETE FROM message_tag_map WHERE lower(account_email) = :email"_L1,
+            "DELETE FROM message_participants WHERE lower(account_email) = :email"_L1,
+            "DELETE FROM message_attachments WHERE lower(account_email) = :email"_L1,
+            "DELETE FROM messages WHERE lower(account_email) = :email"_L1,
+        }) {
+            QSqlQuery q(database);
+            q.prepare(sql);
+            q.bindValue(":email"_L1, norm);
+            q.exec();
+        }
+
+        qInfo() << "[delete-account] background cleanup complete for" << norm;
+    });
 
     return true;
 }

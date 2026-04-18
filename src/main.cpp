@@ -255,7 +255,8 @@ int main(int argc, char *argv[])
         // Desktop notifications are on by default. Disable them when a new
         // account is added (to suppress the flood from initial bulk sync),
         // then re-enable once the sync settles.
-        dataStore.setDesktopNotifyEnabled(true);
+        // Start disabled — enable after the first sync cycle completes.
+        dataStore.setDesktopNotifyEnabled(false);
 
         QObject::connect(&accountManager, &AccountManager::accountsChanged, &dataStore,
             [&dataStore]() {

@@ -109,7 +109,7 @@ Rectangle {
         QQC2.MenuItem { text: i18n("Add Account..."); onTriggered: titleBar.appRoot.openAccountWizard() }
         QQC2.MenuSeparator {}
         QQC2.MenuItem { text: i18n("Settings") }
-        QQC2.MenuItem { text: i18n("Accounts") }
+        QQC2.MenuItem { text: i18n("Accounts"); onTriggered: titleBar.appRoot.openAccountConfig() }
         QQC2.MenuSeparator {}
         QQC2.MenuItem { text: i18n("Exit"); onTriggered: Qt.quit() }
     }

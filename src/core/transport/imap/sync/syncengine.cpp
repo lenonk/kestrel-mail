@@ -888,6 +888,12 @@ executeIncremental(SyncContext &ctx) {
     IngestState state;
     KestrelTimer folderSearchTimer;
 
+    qInfo() << "[inc-sync] folder=" << ctx.folderName
+            << "host=" << (ctx.cxn ? ctx.cxn->host() : "null"_L1)
+            << "isGmail=" << ctx.isGmail()
+            << "isInbox=" << ctx.isInbox()
+            << "isGmailInbox=" << ctx.isGmailInbox();
+
     // Search for new UIDs above minUidExclusive.
     // CONDSTORE: if modseq is unchanged no new messages can exist, skip the search entirely.
     QStringList newUids;
@@ -899,8 +905,13 @@ executeIncremental(SyncContext &ctx) {
         // For Gmail INBOX: build per-category hints via X-GM-RAW searches as a reliable
         // fallback for when X-GM-LABELS in the FETCH response doesn't include the category
         // (common race condition with newly delivered messages).
-        if (!newUids.isEmpty())
+        if (!newUids.isEmpty()) {
             buildCategoryHints(ctx, state, ctx.minUidExclusive + 1, INT_MAX);
+            qInfo() << "[category-hints] newUids=" << newUids.size()
+                    << "hintsCount=" << state.categoryHints.size();
+            for (auto it = state.categoryHints.cbegin(); it != state.categoryHints.cend(); ++it)
+                qInfo() << "[category-hints]  uid=" << it.key() << "folders=" << it.value();
+        }
     }
 
     // Filter to UIDs strictly greater than minUidExclusive, then sort and convert

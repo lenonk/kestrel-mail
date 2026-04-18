@@ -134,6 +134,9 @@ void
 BaseAccount::initialize() {
     startIdleWatcher();
     startBackgroundWorker();
+
+    // Sync inbox on startup to pick up messages that arrived while offline.
+    QTimer::singleShot(0, this, [this]() { syncFolder("INBOX"_L1); });
 }
 
 void

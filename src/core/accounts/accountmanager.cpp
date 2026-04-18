@@ -1,5 +1,7 @@
 #include "accountmanager.h"
 
+#include <QTimer>
+
 #include "accountrepository.h"
 #include "gmailaccount.h"
 #include "imapaccount.h"
@@ -63,9 +65,11 @@ AccountManager::rebuildFromRepository() {
         if (!configEmails.contains((*it)->email().toLower())) {
             if (m_imap)
                 m_imap->unregisterAccount((*it)->email());
-            (*it)->shutdown();
-            (*it)->deleteLater();
+            auto *acct = *it;
             it = m_accounts.erase(it);
+            acct->shutdown();
+            // Defer deletion to let pending signals/events drain.
+            QTimer::singleShot(1000, acct, &QObject::deleteLater);
         } else {
             ++it;
         }

@@ -128,6 +128,13 @@ qt_add_resources(kestrel-mail kestrel_mail_qml
     PREFIX "/"
     FILES
         qml/Main.qml
+        qml/components/AccountConfig/AccountConfigDialog.qml
+        qml/components/AccountConfig/AccountConfigSidebar.qml
+        qml/components/AccountConfig/AccountConfigGeneral.qml
+        qml/components/AccountConfig/AccountConfigImap.qml
+        qml/components/AccountConfig/AccountConfigSmtp.qml
+        qml/components/AccountConfig/AccountConfigGoogleCalendar.qml
+        qml/components/AccountConfig/AccountConfigDiagnostics.qml
         qml/components/AccountWizard/AccountWizardDialog.qml
         qml/components/AccountWizard/AccountWizardStep1.qml
         qml/components/AccountWizard/AccountWizardStep2.qml
