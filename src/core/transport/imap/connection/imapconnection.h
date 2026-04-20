@@ -74,6 +74,10 @@ public:
     [[nodiscard]] QString accessToken()      const { return m_accessToken; }
     [[nodiscard]] QString selectedFolder()   const { return m_selectedFolder; }
 
+    // Fast liveness check — sends NOOP with a short timeout.
+    // Returns true if the connection responded. False means it's dead and needs reconnect.
+    [[nodiscard]] bool ping();
+
     // Re-authenticate using credentials saved from the last connectAndAuth() call.
     // Returns true on success. Does nothing and returns false if no credentials are stored.
     bool tryReconnect(const QString &freshToken = {});

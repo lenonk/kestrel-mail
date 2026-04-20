@@ -118,17 +118,36 @@ QString HtmlProcessor::buildDarkModeInjection() const
         "[style*='background-color:#eeeeee'],[style*='background-color: #eeeeee'],"
         "[style*='background-color:#EEEEEE'],[style*='background-color: #EEEEEE'],"
         "[style*='background-color:#e8e8e8'],[style*='background-color: #e8e8e8'],"
-        "[style*='background-color:#E8E8E8'],[style*='background-color: #E8E8E8']");
+        "[style*='background-color:#E8E8E8'],[style*='background-color: #E8E8E8'],"
+        "[style*='background-color:rgb(255'],[style*='background-color: rgb(255'],"
+        "[style*='background-color:rgb(249'],[style*='background-color: rgb(249'],"
+        "[style*='background-color:rgb(250'],[style*='background-color: rgb(250'],"
+        "[style*='background-color:rgb(248'],[style*='background-color: rgb(248'],"
+        "[style*='background-color:rgb(245'],[style*='background-color: rgb(245'],"
+        "[style*='background-color:rgb(240'],[style*='background-color: rgb(240'],"
+        "[style*='background:white'],[style*='background: white'],"
+        "[style*='background:#fff'],[style*='background: #fff'],"
+        "[style*='background:#FFF'],[style*='background: #FFF'],"
+        "[style*='background:#ffffff'],[style*='background: #ffffff'],"
+        "[style*='background:#FFFFFF'],[style*='background: #FFFFFF']");
 
     const QString style =
         "<style data-dark-mode='baseline'>"
-        "html, body { background-color:" + m_darkBg + " !important; color:" + m_lightText + " !important; }"
+        "html, body { background:" + m_darkBg + " !important; color:" + m_lightText + " !important; }"
         "* { color:" + m_lightText + " !important; }"
+        "a { color: #5b9bd5 !important; }"
         "td[style*='border'], div[style*='border'], table[style*='border'] { border-color:" + m_borderColor + " !important; }"
         "hr { border-color:" + m_borderColor + " !important; }"
         "img, svg, canvas, video, picture, iframe { filter:none !important; mix-blend-mode:normal !important; opacity:1 !important; }"
         + QLatin1StringView(kBgColorSelectors) + "{ background-color:" + m_darkBg + " !important; }"
         + QLatin1StringView(kInlineStyleSelectors) + "{ background-color:" + m_darkBg + " !important; }"
+        // Catch any element with inline background set to a light color (hex starting with #E-F or named white).
+        // The background shorthand isn't caught by background-color selectors.
+        "[style*='background: #F'],[style*='background: #f'],[style*='background: #E'],[style*='background: #e'],"
+        "[style*='background:#F'],[style*='background:#f'],[style*='background:#E'],[style*='background:#e'],"
+        "[style*='background: #D'],[style*='background: #d'],[style*='background:#D'],[style*='background:#d'],"
+        "[style*='background: #C'],[style*='background: #c'],[style*='background:#C'],[style*='background:#c']"
+        "{ background:" + m_darkBg + " !important; }"
         + "</style>"_L1;
 
     const QString colorVars =
@@ -148,9 +167,12 @@ function isSaturated(rgb){return Math.max(rgb[0],rgb[1],rgb[2])-Math.min(rgb[0],
 function isImageShell(el){if(!el.querySelector||!el.querySelector('img,svg,canvas,video,picture'))return false;return(el.textContent||'').replace(/\s+/g,'').length===0;}
 function isTextLink(el){return !el.querySelector('div,table,p,h1,h2,h3,h4,h5,h6,section,article,header,footer');}
 function effectiveBg(el,doc){var cur=el;while(cur){var b=doc.defaultView.getComputedStyle(cur).backgroundColor;if(!isTransparent(b))return b;cur=cur.parentElement;}return DARK_BG;}
-function processEl(el,doc,origMap){if(MEDIA[el.tagName])return;var cs=doc.defaultView.getComputedStyle(el);if(!cs)return;var bg=cs.backgroundColor,fg=cs.color,hasBgImg=(cs.backgroundImage&&cs.backgroundImage!=='none')||el.hasAttribute('background');if(!isTransparent(bg)&&!hasBgImg){var rgb=parseRGB(bg);if(rgb&&lum(rgb[0],rgb[1],rgb[2])>0.7&&!isSaturated(rgb)){if(isImageShell(el)){el.style.setProperty('background-color','transparent','important');}else{var tgt=lum(rgb[0],rgb[1],rgb[2])>0.97?DARK_BG:SURFACE_BG;el.style.setProperty('background','none','important');el.style.setProperty('background-color',tgt,'important');}}}var fgR=parseRGB(fg);if(fgR){var fgL=lum(fgR[0],fgR[1],fgR[2]);if(fgL<0.35){var eff=effectiveBg(el,doc);var effR=parseRGB(eff)||[30,30,30];var effL=lum(effR[0],effR[1],effR[2]);var lo=Math.min(fgL,effL),hi=Math.max(fgL,effL);if((hi+0.05)/(lo+0.05)<3){var target=LIGHT_TEXT;if(el.tagName==='A'){target=isTextLink(el)?'#7ab4f5':LIGHT_TEXT;}else if(Math.max(fgR[0],fgR[1],fgR[2])-Math.min(fgR[0],fgR[1],fgR[2])>150){target='#7ab4f5';}el.style.setProperty('color',target,'important');}}else if(fgL>0.5){var ownBg2=cs.backgroundColor;if(isTransparent(ownBg2)||isLight(ownBg2)){var eff2=effectiveBg(el,doc);if(isLight(eff2)){var origColor=(origMap&&origMap.get(el))||el.style.color||'rgb(0,0,0)';el.style.setProperty('color',origColor,'important');}}}}var bc=cs.borderColor;if(bc&&isLight(bc))el.style.setProperty('border-color',BORDER_COLOR,'important');}
+function hexToRGB(h){if(!h)return null;h=h.replace('#','').trim();if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];var n=parseInt(h,16);return isNaN(n)?null:[(n>>16)&255,(n>>8)&255,n&255];}
+function getBgRGB(el,cs){var rgb=parseRGB(cs.backgroundColor);if(rgb)return rgb;var raw=(el.getAttribute('style')||'');var hm=raw.match(/background\s*:\s*#([0-9a-fA-F]{3,8})/);if(hm)return hexToRGB(hm[1]);var bgAttr=el.getAttribute('bgcolor');if(bgAttr)return hexToRGB(bgAttr);return null;}
+function processEl(el,doc,origMap){if(MEDIA[el.tagName])return;var cs=doc.defaultView.getComputedStyle(el);if(!cs)return;var fg=cs.color,hasBgImg=(cs.backgroundImage&&cs.backgroundImage!=='none')||el.hasAttribute('background');var rgb=getBgRGB(el,cs);if(rgb&&!hasBgImg&&lum(rgb[0],rgb[1],rgb[2])>0.7&&!isSaturated(rgb)){if(isImageShell(el)){el.style.setProperty('background','transparent','important');}else{var tgt=lum(rgb[0],rgb[1],rgb[2])>0.97?DARK_BG:SURFACE_BG;el.style.setProperty('background',tgt,'important');}}var fgR=parseRGB(fg);if(fgR){var fgL=lum(fgR[0],fgR[1],fgR[2]);if(fgL<0.35){var eff=effectiveBg(el,doc);var effR=parseRGB(eff)||[30,30,30];var effL=lum(effR[0],effR[1],effR[2]);var lo=Math.min(fgL,effL),hi=Math.max(fgL,effL);if((hi+0.05)/(lo+0.05)<3){var target=LIGHT_TEXT;if(el.tagName==='A'){target=isTextLink(el)?'#7ab4f5':LIGHT_TEXT;}else if(Math.max(fgR[0],fgR[1],fgR[2])-Math.min(fgR[0],fgR[1],fgR[2])>150){target='#7ab4f5';}el.style.setProperty('color',target,'important');}}else if(fgL>0.5){var ownBg2=cs.backgroundColor;if(isTransparent(ownBg2)||isLight(ownBg2)){var eff2=effectiveBg(el,doc);if(isLight(eff2)){var origColor=(origMap&&origMap.get(el))||el.style.color||'rgb(0,0,0)';el.style.setProperty('color',origColor,'important');}}}}var bc=cs.borderColor;if(bc&&isLight(bc))el.style.setProperty('border-color',BORDER_COLOR,'important');}
 function run(){var d=document;if(!d||!d.body)return;var all=d.querySelectorAll('*');var origMap=null;var myStyle=d.querySelector('style[data-dark-mode]');if(myStyle){origMap=new WeakMap();myStyle.disabled=true;for(var j=0;j<all.length;j++){try{origMap.set(all[j],d.defaultView.getComputedStyle(all[j]).color);}catch(e){}}myStyle.disabled=false;}for(var i=0;i<all.length;i++){try{processEl(all[i],d,origMap);}catch(e){console.log('kestrel-dark-error',e);}}}
-if(document.readyState==='complete'||document.readyState==='interactive')run();else document.addEventListener('DOMContentLoaded',run,{once:true});window.addEventListener('load',run,{once:true});setTimeout(run,0);
+function debugDark(){var b=document.body;if(!b)return;var cs=window.getComputedStyle(b);console.log('KESTREL-DARK body.bg='+cs.backgroundColor+' body.style='+b.getAttribute('style')+' body.bgImg='+cs.backgroundImage);var tds=document.querySelectorAll('td[id],td[style*=background]');for(var i=0;i<Math.min(tds.length,3);i++){var tcs=window.getComputedStyle(tds[i]);console.log('KESTREL-DARK td['+i+'].bg='+tcs.backgroundColor+' style='+tds[i].getAttribute('style').substring(0,80));}}
+if(document.readyState==='complete'||document.readyState==='interactive'){run();debugDark();}else document.addEventListener('DOMContentLoaded',function(){run();debugDark();},{once:true});window.addEventListener('load',function(){run();debugDark();},{once:true});setTimeout(function(){run();debugDark();},500);
 )js");
 
     const QString script = "<script>(function(){"_L1 + colorVars + jsBody + "})();</script>"_L1;
@@ -463,12 +485,16 @@ HtmlProcessor::prepareThread(const QString &html, const bool darkMode) const {
         "details.kq>summary::before{content:'\\B7\\B7\\B7'}"
         "</style>");
 
-    static const QLatin1StringView baselineHead(
-        "<meta name='color-scheme' content='light only'>"
-        "<style data-kestrel-bg='baseline'>"
-        "html,body{background-color:white;margin:8px 12px 0 12px;}"
-        "</style>");
+    const auto baselineHead = darkMode
+        ? "<meta name='color-scheme' content='dark'>"
+          "<style data-kestrel-bg='baseline'>"
+          "html,body{margin:8px 12px 0 12px;}"
+          "</style>"_L1
+        : "<meta name='color-scheme' content='light only'>"
+          "<style data-kestrel-bg='baseline'>"
+          "html,body{background-color:white;margin:8px 12px 0 12px;}"
+          "</style>"_L1;
 
-    const auto headInsert = QLatin1StringView(baselineHead) + QLatin1StringView(kScrollbarCss) + QLatin1StringView(quoteCss);
+    const auto headInsert = baselineHead + QLatin1StringView(kScrollbarCss) + QLatin1StringView(quoteCss);
     return injectHeadAndDarkMode(html, headInsert, true, darkMode);
 }

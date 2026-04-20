@@ -707,7 +707,6 @@ Item {
                                         Layout.fillWidth: true
                                         color: KestrelColors.linkBlue
                                         elide: Text.ElideRight
-                                        font.bold: true
                                         font.pixelSize: 13
                                         text: root._threadSenderName(threadCard.modelData)
 
@@ -765,7 +764,6 @@ Item {
                                                 readonly property bool isAddress: modelData.type === "address"
                                                 text: isAddress ? modelData.label : modelData.text
                                                 color: isAddress ? KestrelColors.linkBlue : Kirigami.Theme.textColor
-                                                font.bold: isAddress
                                                 font.pixelSize: 12
                                                 opacity: isAddress ? 0.95 : 0.8
 

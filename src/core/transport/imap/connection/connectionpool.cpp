@@ -111,6 +111,12 @@ ConnectionPool::acquire(const QString &owner, const QString &email, const int ti
     const auto    slotMethod = m_poolSlots[slotIndex].method;
     lock.unlock();
 
+    // Fast liveness check: if the socket reports connected but the server
+    // has silently dropped the connection, ping detects it in 3s instead of
+    // waiting 12s for the next command to time out.
+    if (raw->isConnected() && !raw->ping())
+        raw->disconnect();
+
     if (!raw->isConnected()) {
         TokenRefresher refresher;
         {

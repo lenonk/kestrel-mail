@@ -620,6 +620,16 @@ Connection::isConnected() const {
 }
 
 bool
+Connection::ping() {
+    if (!isConnected()) return false;
+    const auto tag = nextTag();
+    m_socket->write(buildSimpleCommand(tag, "NOOP"_L1));
+    m_socket->flush();
+    const auto resp = IO::readUntilTagged(*m_socket, tag, 3000);
+    return resp.contains("OK"_L1, Qt::CaseInsensitive);
+}
+
+bool
 Connection::tryReconnect(const QString &freshToken) {
     const QString token = freshToken.isEmpty() ? m_accessToken : freshToken;
     if (m_host.isEmpty() || m_email.isEmpty() || token.isEmpty())
