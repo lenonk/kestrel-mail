@@ -574,8 +574,8 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
     h.remove("_bimiLogoUrl"_L1);
     h.remove("_noAddressHeaders"_L1);
 
-    // Gmail category routing diagnostics.
-    const QString inferredCategoryFolder = ctx.isInbox()
+    // Gmail category routing from X-GM-LABELS.
+    const QString inferredCategoryFolder = ctx.isGmailInbox()
             ? extractGmailCategoryFolder(fetchResp)
             : QString();
 
@@ -593,7 +593,7 @@ ingestMessage(const QString &fetchResp, const QString &uid, const QString &debug
             ++state.missingAddressHeadersCount;
         }
 
-        if (inferredCategoryFolder.isEmpty()) {
+        if (ctx.isInbox() && inferredCategoryFolder.isEmpty()) {
             qWarning().noquote() << "[imap-category-miss]"
                                  << "uid=" << uid
                                  << "gmMsgId=" << gmMsgId
@@ -859,9 +859,16 @@ prepassMessageIds(SyncContext &ctx, const std::vector<qint32> &uids, IngestState
                 if (categoryFolders.isEmpty())
                     ++state.categoryMissCount;
                 for (const QString &catFolder : categoryFolders) {
-                    if (!catFolder.isEmpty())
+                    if (!catFolder.isEmpty()) {
                         ctx.insertFolderEdge(ctx.cxn->email(), existingRow,
                                              catFolder, QString::number(uid), unread);
+                        // Also persist the category label so the category view query finds it.
+                        if (ctx.onCategoryRetry) {
+                            QHash<qint32, QSet<QString>> singleHint;
+                            singleHint.insert(uid, {catFolder});
+                            ctx.onCategoryRetry(ctx.cxn->email(), folder, singleHint);
+                        }
+                    }
                 }
             }
 

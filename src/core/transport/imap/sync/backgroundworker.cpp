@@ -172,8 +172,9 @@ BackgroundWorker::start() {
             const bool isContainerRoot = name.compare("[Gmail]"_L1, Qt::CaseInsensitive) == 0
                                       || name.compare("[Google Mail]"_L1, Qt::CaseInsensitive) == 0;
             const bool isParentContainer = parentContainers.contains(lowerName);
+            const bool isInbox = lowerName == "inbox"_L1;
 
-            if (name.isEmpty() || isNoSelect || isCategory || isContainerRoot || isParentContainer)
+            if (name.isEmpty() || isNoSelect || isCategory || isContainerRoot || isParentContainer || isInbox)
                 continue;
             folders.push_back(name);
         }

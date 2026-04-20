@@ -5,6 +5,7 @@
 
 #include "../utils.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QHash>
@@ -1965,25 +1966,34 @@ MessageStore::insertFolderEdge(const QString &accountEmail, const qint64 message
         if (m_callbacks.desktopNotifyEnabled()
             && unread
             && folder.compare("INBOX"_L1, Qt::CaseInsensitive) == 0) {
-            // Only notify for Primary or uncategorized inbox messages.
-            bool shouldNotify = true;
-            QSqlQuery qCat(database);
-            qCat.prepare("SELECT label FROM message_labels WHERE account_email=:acc AND message_id=:mid AND lower(label) LIKE '%/categories/%'"_L1);
-            qCat.bindValue(":acc"_L1, accountEmail);
-            qCat.bindValue(":mid"_L1, messageId);
-            if (qCat.exec()) {
-                while (qCat.next()) {
-                    if (!qCat.value(0).toString().toLower().contains("/categories/primary"_L1)) {
-                        shouldNotify = false;
-                        break;
+            // Defer notification check so category labels have time to be
+            // persisted (they're written after the INBOX edge during ingestion).
+            const auto dbGetter = m_db;
+            const auto callbacks = m_callbacks;
+            const auto mid = messageId;
+            const auto acct = accountEmail;
+            const auto fld = folder;
+            const auto uidCopy = uid;
+            QMetaObject::invokeMethod(qApp, [dbGetter, callbacks, mid, acct, fld, uidCopy]() {
+                auto database = dbGetter();
+                if (!database.isValid() || !database.isOpen()) return;
+                if (!callbacks.desktopNotifyEnabled()) return;
+
+                // Check if message has a non-Primary category label.
+                QSqlQuery qCat(database);
+                qCat.prepare("SELECT label FROM message_labels WHERE account_email=:acc AND message_id=:mid AND lower(label) LIKE '%/categories/%'"_L1);
+                qCat.bindValue(":acc"_L1, acct);
+                qCat.bindValue(":mid"_L1, mid);
+                if (qCat.exec()) {
+                    while (qCat.next()) {
+                        if (!qCat.value(0).toString().toLower().contains("/categories/primary"_L1))
+                            return;
                     }
                 }
-            }
 
-            if (shouldNotify) {
                 QSqlQuery qMsg(database);
                 qMsg.prepare("SELECT sender, subject, snippet FROM messages WHERE id=:id LIMIT 1"_L1);
-                qMsg.bindValue(":id"_L1, messageId);
+                qMsg.bindValue(":id"_L1, mid);
                 if (qMsg.exec() && qMsg.next()) {
                     const QString rawSender = qMsg.value(0).toString().trimmed();
                     const QString se = ContactStore::extractFirstEmail(rawSender);
@@ -1993,12 +2003,12 @@ MessageStore::insertFolderEdge(const QString &accountEmail, const qint64 message
                     info["senderRaw"_L1]     = rawSender;
                     info["subject"_L1]       = qMsg.value(1).toString();
                     info["snippet"_L1]       = qMsg.value(2).toString();
-                    info["accountEmail"_L1]  = accountEmail;
-                    info["folder"_L1]        = folder;
-                    info["uid"_L1]           = uid;
-                    m_callbacks.onNewMail(info);
+                    info["accountEmail"_L1]  = acct;
+                    info["folder"_L1]        = fld;
+                    info["uid"_L1]           = uidCopy;
+                    callbacks.onNewMail(info);
                 }
-            }
+            }, Qt::QueuedConnection);
         }
     }
     removeOrphanMessages(database);
