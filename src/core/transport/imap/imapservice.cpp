@@ -135,8 +135,7 @@ ImapService::ImapService(const QVariantMap &accountConfig, DataStore *store, Tok
         const QString credential = (m_authMethod == Imap::AuthMethod::Login && m_vault)
             ? m_vault->loadPassword(m_email)
             : QString{};
-        m_pool->initialize(m_email, m_host, m_port, m_authMethod, credential,
-                           /*operationalSlots=*/2, /*hydrateSlots=*/1);
+        m_pool->initialize(m_email, m_host, m_port, m_authMethod, credential, 3);
     }
     m_expectedPoolSize = m_pool->expectedConnections();
 
@@ -1753,21 +1752,8 @@ ImapService::executeHydration(const QVariantMap &account, const QString &email,
             QThread::msleep(kHydrateRetryDelayMs);
 
         auto *pool = poolForEmail(email);
-        std::shared_ptr<Imap::Connection> pooled;
-        bool usedDedicated = false;
-        if (userInitiated) {
-            pooled = pool->acquireHydrate(email);
-            if (pooled) {
-                usedDedicated = true;
-            } else {
-                qint8 poolAttempts = 0;
-                pooled = pool->acquire("hydrate-user"_L1, email);
-                while (!pooled && poolAttempts++ < 10)
-                    pooled = pool->acquire("hydrate-user-fallback"_L1, email);
-            }
-        } else {
-            pooled = pool->acquire("bg-hydrate"_L1, email);
-        }
+        const auto owner = userInitiated ? "hydrate-user"_L1 : "bg-hydrate"_L1;
+        auto pooled = pool->acquire(owner, email);
 
         const qint64 acquireMs = hydrateTimer.elapsed() - mapMs;
 
@@ -1790,7 +1776,7 @@ ImapService::executeHydration(const QVariantMap &account, const QString &email,
         const qint64 executeMs = totalMs - mapMs - acquireMs;
         qWarning().noquote() << "[perf-hydrate]"
                              << "uid=" << uid
-                             << "source=" << (userInitiated ? (usedDedicated ? "user-dedicated" : "user-pool") : "bg")
+                             << "source=" << (userInitiated ? "user" : "bg")
                              << "attempt=" << (attempt + 1)
                              << "mapMs=" << mapMs
                              << "acquireMs=" << acquireMs

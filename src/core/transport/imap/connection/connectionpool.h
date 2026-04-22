@@ -17,9 +17,12 @@ namespace Imap {
  * Thread-safe pool of IMAP connections for a single account.
  *
  * Each account owns its own ConnectionPool. The pool pre-creates a fixed
- * number of connections (operational + hydration) and hands them out via
- * acquire()/acquireHydrate(). Connections are returned automatically when
- * the shared_ptr's custom deleter runs.
+ * number of connections and hands them out via acquire(). Connections are
+ * returned automatically when the shared_ptr's custom deleter runs.
+ *
+ * Background callers (owner starting with "bg-") are subject to a
+ * reservation rule: when only one slot is free, it's held for foreground
+ * operations (hydration, user-triggered sync, etc.).
  */
 class ConnectionPool
 {
@@ -48,20 +51,17 @@ public:
     /// Pre-create connections for the given account.
     void initialize(const QString &email, const QString &host, int port,
                     AuthMethod method, const QString &credential,
-                    int operationalSlots = 3, int hydrateSlots = 1);
+                    int slotCount = 3);
 
     /// Add connections for a newly-added account (call when pool is already initialized).
     void addAccount(const QString &email, const QString &host, int port,
                     AuthMethod method, const QString &credential,
-                    int operationalSlots = 3, int hydrateSlots = 1);
+                    int slotCount = 3);
 
-    /// Acquire an operational connection (blocks up to timeout).
+    /// Acquire a connection (blocks up to timeout).
     [[nodiscard]] std::shared_ptr<Connection> acquire(const QString &owner = {},
                                                        const QString &email = {},
                                                        int timeoutMs = 3500);
-
-    /// Acquire a dedicated hydration connection (non-blocking).
-    [[nodiscard]] std::shared_ptr<Connection> acquireHydrate(const QString &email = {});
 
     /// Background hydration semaphore (limits concurrent background hydrations to 1).
     bool tryAcquireBgHydrate(int timeoutMs = 60000);
@@ -79,18 +79,15 @@ public:
 private:
     static bool isBackgroundOwner(const QString &owner);
 
-    /// Create `count` connections and push them into the hydrate or operational pool.
+    /// Ping + reconnect a slot's connection. Returns false if reconnect fails.
+    bool ensureConnected(Slot &slot);
+
     void addSlots(const QString &email, const QString &host, int port,
-                  AuthMethod method, const QString &credential,
-                  bool isHydrate, int count);
+                  AuthMethod method, const QString &credential, int count);
 
     mutable QMutex m_poolMutex;
     QWaitCondition m_poolWait;
     std::vector<Slot> m_poolSlots;
-
-    mutable QMutex m_hydrateMutex;
-    QWaitCondition m_hydrateWait;
-    std::vector<Slot> m_hydrateSlots;
 
     QSemaphore m_bgHydrateSem{1};
     QSemaphore m_bgFolderSyncSem{1};

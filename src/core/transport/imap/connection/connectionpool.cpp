@@ -17,19 +17,16 @@ ConnectionPool::setTokenRefresher(TokenRefresher refresher) {
 void
 ConnectionPool::initialize(const QString &email, const QString &host, const int port,
                             const AuthMethod method, const QString &credential,
-                            const int operationalSlots, const int hydrateSlots) {
+                            const int slotCount) {
     if (m_initialized.exchange(true)) return;
-
-    m_expectedPoolSize.store(operationalSlots + hydrateSlots);
-    addSlots(email, host, port, method, credential, true,  hydrateSlots);
-    addSlots(email, host, port, method, credential, false, operationalSlots);
+    m_expectedPoolSize.store(slotCount);
+    addSlots(email, host, port, method, credential, slotCount);
 }
 
 void
 ConnectionPool::addAccount(const QString &email, const QString &host, const int port,
                             const AuthMethod method, const QString &credential,
-                            const int operationalSlots, const int hydrateSlots) {
-    // Check if this email already has slots.
+                            const int slotCount) {
     {
         QMutexLocker lock(&m_poolMutex);
         for (const auto &s : m_poolSlots) {
@@ -38,29 +35,46 @@ ConnectionPool::addAccount(const QString &email, const QString &host, const int 
         }
     }
 
-    m_expectedPoolSize.fetch_add(operationalSlots + hydrateSlots);
-    addSlots(email, host, port, method, credential, true,  hydrateSlots);
-    addSlots(email, host, port, method, credential, false, operationalSlots);
+    m_expectedPoolSize.fetch_add(slotCount);
+    addSlots(email, host, port, method, credential, slotCount);
 }
 
 void
 ConnectionPool::addSlots(const QString &email, const QString &host, const int port,
                           const AuthMethod method, const QString &credential,
-                          const bool isHydrate, const int count) {
-    auto &slotVec = isHydrate ? m_hydrateSlots : m_poolSlots;
-    QMutex *mtx = isHydrate ? &m_hydrateMutex : &m_poolMutex;
-    QWaitCondition *cond = isHydrate ? &m_hydrateWait : &m_poolWait;
-
+                          const int count) {
     for (int i = 0; i < count; ++i) {
         auto conn = std::make_unique<Connection>();
         conn->connectAndAuth(host, port, email, credential, method);
         Slot s;
         s.email = email; s.host = host; s.port = port; s.method = method;
         s.conn = std::move(conn); s.busy = false;
-        QMutexLocker lock(mtx);
-        slotVec.push_back(std::move(s));
-        cond->wakeOne();
+        QMutexLocker lock(&m_poolMutex);
+        m_poolSlots.push_back(std::move(s));
+        m_poolWait.wakeOne();
     }
+}
+
+bool
+ConnectionPool::ensureConnected(Slot &slot) {
+    Connection *raw = slot.conn.get();
+
+    // Fast liveness check: ping detects silently dropped connections
+    // in ~3s instead of waiting 12s for the next command to time out.
+    if (raw->isConnected() && !raw->ping())
+        raw->disconnect();
+
+    if (!raw->isConnected()) {
+        TokenRefresher refresher;
+        {
+            QMutexLocker rl(&m_poolMutex);
+            refresher = m_tokenRefresher;
+        }
+        raw->setTokenRefresher(refresher);
+        const QString token = refresher ? refresher(slot.email) : QString{};
+        return raw->connectAndAuth(slot.host, slot.port, slot.email, token, slot.method).success;
+    }
+    return true;
 }
 
 std::shared_ptr<Connection>
@@ -103,36 +117,17 @@ ConnectionPool::acquire(const QString &owner, const QString &email, const int ti
         m_poolWait.wait(&m_poolMutex, remaining);
     }
 
-    Connection *raw = m_poolSlots[slotIndex].conn.get();
-    raw->setLogOwner(owner);
-    const QString slotEmail = m_poolSlots[slotIndex].email;
-    const QString slotHost  = m_poolSlots[slotIndex].host;
-    const int     slotPort  = m_poolSlots[slotIndex].port;
-    const auto    slotMethod = m_poolSlots[slotIndex].method;
+    m_poolSlots[slotIndex].conn->setLogOwner(owner);
     lock.unlock();
 
-    // Fast liveness check: if the socket reports connected but the server
-    // has silently dropped the connection, ping detects it in 3s instead of
-    // waiting 12s for the next command to time out.
-    if (raw->isConnected() && !raw->ping())
-        raw->disconnect();
-
-    if (!raw->isConnected()) {
-        TokenRefresher refresher;
-        {
-            QMutexLocker rl(&m_poolMutex);
-            refresher = m_tokenRefresher;
-        }
-        raw->setTokenRefresher(refresher);
-        const QString token = refresher ? refresher(slotEmail) : QString{};
-        if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token, slotMethod).success) {
-            QMutexLocker rl(&m_poolMutex);
-            m_poolSlots[slotIndex].busy = false;
-            m_poolWait.wakeOne();
-            return {};
-        }
+    if (!ensureConnected(m_poolSlots[slotIndex])) {
+        QMutexLocker rl(&m_poolMutex);
+        m_poolSlots[slotIndex].busy = false;
+        m_poolWait.wakeOne();
+        return {};
     }
 
+    Connection *raw = m_poolSlots[slotIndex].conn.get();
     return {raw, [this, slotIndex](Connection *) {
         QMutexLocker rel(&m_poolMutex);
         if (slotIndex >= 0 && slotIndex < static_cast<qint32>(m_poolSlots.size())) {
@@ -140,59 +135,6 @@ ConnectionPool::acquire(const QString &owner, const QString &email, const int ti
             m_poolSlots[slotIndex].owner.clear();
             m_poolSlots[slotIndex].leasedAtMs = 0;
             m_poolWait.wakeOne();
-        }
-    }};
-}
-
-std::shared_ptr<Connection>
-ConnectionPool::acquireHydrate(const QString &email) {
-    qint32 slotIndex = -1;
-    {
-        QMutexLocker lock(&m_hydrateMutex);
-        for (qsizetype i = 0; i < static_cast<qsizetype>(m_hydrateSlots.size()); ++i) {
-            if (!email.isEmpty() && m_hydrateSlots[i].email.compare(email, Qt::CaseInsensitive) != 0)
-                continue;
-            if (!m_hydrateSlots[i].busy) {
-                m_hydrateSlots[i].busy = true;
-                m_hydrateSlots[i].owner = "hydrate-dedicated"_L1;
-                m_hydrateSlots[i].leasedAtMs = QDateTime::currentMSecsSinceEpoch();
-                slotIndex = i;
-                break;
-            }
-        }
-    }
-    if (slotIndex < 0) return {};
-
-    Connection *raw = m_hydrateSlots[slotIndex].conn.get();
-    raw->setLogOwner("hydrate-dedicated"_L1);
-    const QString slotEmail  = m_hydrateSlots[slotIndex].email;
-    const QString slotHost   = m_hydrateSlots[slotIndex].host;
-    const int     slotPort   = m_hydrateSlots[slotIndex].port;
-    const auto    slotMethod = m_hydrateSlots[slotIndex].method;
-
-    if (!raw->isConnected()) {
-        TokenRefresher refresher;
-        {
-            QMutexLocker rl(&m_poolMutex);
-            refresher = m_tokenRefresher;
-        }
-        raw->setTokenRefresher(refresher);
-        const QString token = refresher ? refresher(slotEmail) : QString{};
-        if (!raw->connectAndAuth(slotHost, slotPort, slotEmail, token, slotMethod).success) {
-            QMutexLocker lock(&m_hydrateMutex);
-            m_hydrateSlots[slotIndex].busy = false;
-            m_hydrateWait.wakeOne();
-            return {};
-        }
-    }
-
-    return {raw, [this, slotIndex](Connection *) {
-        QMutexLocker rel(&m_hydrateMutex);
-        if (slotIndex >= 0 && slotIndex < static_cast<qint32>(m_hydrateSlots.size())) {
-            m_hydrateSlots[slotIndex].busy = false;
-            m_hydrateSlots[slotIndex].owner.clear();
-            m_hydrateSlots[slotIndex].leasedAtMs = 0;
-            m_hydrateWait.wakeOne();
         }
     }};
 }
@@ -207,38 +149,20 @@ ConnectionPool::expectedConnections() const { return m_expectedPoolSize.load(); 
 
 qint32
 ConnectionPool::readyConnections() const {
-    qint32 count = 0;
-    {
-        QMutexLocker lock(&m_hydrateMutex);
-        count += static_cast<qint32>(m_hydrateSlots.size());
-    }
-    {
-        QMutexLocker lock(&m_poolMutex);
-        count += static_cast<qint32>(m_poolSlots.size());
-    }
-    return count;
+    QMutexLocker lock(&m_poolMutex);
+    return static_cast<qint32>(m_poolSlots.size());
 }
 
 void
 ConnectionPool::shutdown() {
     m_destroying.store(true);
-    {
-        QMutexLocker lock(&m_poolMutex);
-        m_tokenRefresher = nullptr;
-        for (auto &s : m_poolSlots) {
-            if (s.conn) s.conn->disconnect();
-        }
-        m_poolSlots.clear();
-        m_poolWait.wakeAll();
+    QMutexLocker lock(&m_poolMutex);
+    m_tokenRefresher = nullptr;
+    for (auto &s : m_poolSlots) {
+        if (s.conn) s.conn->disconnect();
     }
-    {
-        QMutexLocker lock(&m_hydrateMutex);
-        for (auto &s : m_hydrateSlots) {
-            if (s.conn) s.conn->disconnect();
-        }
-        m_hydrateSlots.clear();
-        m_hydrateWait.wakeAll();
-    }
+    m_poolSlots.clear();
+    m_poolWait.wakeAll();
 }
 
 bool

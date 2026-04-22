@@ -189,6 +189,7 @@ Item {
             settings.errorPageEnabled: true
             settings.localContentCanAccessFileUrls: true
             settings.localContentCanAccessRemoteUrls: true
+            settings.allowRunningInsecureContent: true
             visible: root.hasUsableBodyHtml
 
             Component.onCompleted: htmlContainer.onHtmlUpdate()

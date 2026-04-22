@@ -24,6 +24,7 @@
 #include <QFontInfo>
 #include <QPainter>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
+#include <QWebEngineProfile>
 
 #include "ui/splashscreen.h"
 #include "ui/calendarlayouthelper.h"
@@ -107,6 +108,12 @@ int main(int argc, char *argv[])
 {
     QtWebEngineQuick::initialize();
     QApplication app(argc, argv);
+
+    // Set a standard browser User-Agent so servers that check UA (e.g. CSpire)
+    // don't redirect image requests to "unsupported browser" pages.
+    QWebEngineProfile::defaultProfile()->setHttpUserAgent(
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"_L1);
     app.setApplicationName("kestrel-mail"_L1);
     app.setOrganizationDomain("github.com"_L1);
     app.setOrganizationName("lenonk"_L1);

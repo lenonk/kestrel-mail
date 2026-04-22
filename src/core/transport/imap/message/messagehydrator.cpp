@@ -77,22 +77,11 @@ QString MessageHydrator::execute(const Request &req) {
         }
 
         step.restart();
-        // First try a bounded full-message window (includes headers + initial body)
-        // so mail parser still has RFC822 header context.
-        auto raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[]<0.131072>)"_L1.arg(uid));
+        auto raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
         qint64 fetchMs = step.elapsed();
 
         auto hasFetchData = raw.contains(" FETCH (") || raw.contains(" fetch (");
         auto hasLiteral = raw.contains('{');
-
-        if (!hasFetchData || !hasLiteral) {
-            // Fallback for servers/messages where BODY[TEXT] window misses usable literal.
-            step.restart();
-            raw = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
-            fetchMs += step.elapsed();
-            hasFetchData = raw.toLower().contains(" fetch (");
-            hasLiteral = raw.contains('{');
-        }
 
         if (!hasFetchData || !hasLiteral) {
             qWarning().noquote() << "[perf-hydrate-exec]"
@@ -111,28 +100,14 @@ QString MessageHydrator::execute(const Request &req) {
         QString html = extractBodyHtmlFromFetch(raw).trimmed();
         qint64 parseMs = step.elapsed();
 
-        // If bounded window produced suspiciously tiny HTML, only a plain-text
-        // fallback, or unresolved CID image refs, the 128 KB window likely missed
-        // related MIME parts. Retry with the full body so mailio can inline CIDs.
-        const bool isPlainTextFallback = html.contains("white-space:normal"_L1);
-        const bool hasUnresolvedCidSrc = QRegularExpression("\\bsrc\\s*=\\s*[\"']\\s*cid:"_L1,
-                                                            QRegularExpression::CaseInsensitiveOption)
-                                             .match(html).hasMatch();
-        // Also retry if the bounded fetch was truncated: server returned exactly 131072 bytes,
-        // meaning the message is larger than the window and the HTML was cut mid-content.
-        const bool wasBoundedTruncated = raw.contains(QByteArrayLiteral("{131072}\r\n"));
-
-        if (!html.isEmpty() && (html.size() < 512 || isPlainTextFallback || hasUnresolvedCidSrc || wasBoundedTruncated)) {
-            step.restart();
-            const auto rawFull = req.cxn->executeRaw("UID FETCH %1 (BODY.PEEK[])"_L1.arg(uid));
-            fetchMs += step.elapsed();
-            step.restart();
-            const auto htmlFull = extractBodyHtmlFromFetch(rawFull).trimmed();
-            parseMs += step.elapsed();
-            if (!htmlFull.isEmpty()) {
-                raw = rawFull;
-                html = htmlFull;
-            }
+        if (!html.isEmpty()) {
+            const bool isPlainTextFallback = html.contains("white-space:normal"_L1);
+            const bool hasUnresolvedCidSrc = QRegularExpression("\\bsrc\\s*=\\s*[\"']\\s*cid:"_L1,
+                                                                QRegularExpression::CaseInsensitiveOption)
+                                                 .match(html).hasMatch();
+            if (isPlainTextFallback || hasUnresolvedCidSrc)
+                qWarning().noquote() << "[hydrate] plain-text-fallback or unresolved CID"
+                                     << "uid=" << uid << "htmlLen=" << html.size();
         }
 
         qWarning().noquote() << "[perf-hydrate-exec]"
